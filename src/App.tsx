@@ -1,0 +1,39 @@
+import { useState } from "react";
+import "./App.css";
+import { NetworkEditor } from "./components/NetworkEditor";
+import { NodeInfoPanel } from "./components/NodeInfoPanel";
+import { VisualNode } from "./components/types";
+
+function App() {
+  const [selectedNode, setSelectedNode] = useState<VisualNode | null>(null);
+
+  return (
+    <div style={{
+      display: 'flex',
+      width: '100vw',
+      height: '100vh',
+      overflow: 'hidden'
+    }}>
+      <div style={{
+        flex: 1,
+        position: 'relative',
+        height: '100%'
+      }}>
+        <NetworkEditor onNodeSelect={setSelectedNode} />
+      </div>
+      
+      <div style={{
+        width: '400px',
+        height: '100%',
+        padding: '20px',
+        background: '#fafafa',
+        borderLeft: '1px solid #ddd',
+        overflow: 'auto'
+      }}>
+        <NodeInfoPanel selectedNode={selectedNode} />
+      </div>
+    </div>
+  );
+}
+
+export default App;
