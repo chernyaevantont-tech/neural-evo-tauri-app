@@ -14,6 +14,7 @@ const getNodeColor = (type: NodeType): string => {
         case 'Dense': return '#2196F3';
         case 'Conv2D': return '#FF9800';
         case 'Pooling': return '#9C27B0';
+        case "Flatten": return '#43672e'
         case 'Add': return '#F44336';
         case 'Concat2D': return '#E91E63';
         default: return '#757575';

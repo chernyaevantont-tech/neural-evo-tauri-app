@@ -12,11 +12,17 @@ export type VisualNode = {
     position: Position;
     type: NodeType;
     genomeId: string | null;
+    isOutput: boolean;
 };
 
 export type VisualGenome = {
     id: string;
     genome: Genome;
+}
+
+export type NewNodeDto = {
+    node: BaseNode;
+    isOutput: boolean;
 }
 
 export type Connection = {

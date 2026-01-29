@@ -144,6 +144,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     position: pos,
                     type: configNodeType!,
                     genomeId: null,
+                    isOutput: false,
                 };
 
                 return new Map(prev).set(id, visualNode);
