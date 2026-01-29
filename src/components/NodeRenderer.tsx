@@ -17,6 +17,7 @@ const getNodeColor = (type: NodeType): string => {
         case "Flatten": return '#43672e'
         case 'Add': return '#F44336';
         case 'Concat2D': return '#E91E63';
+        case 'Output': return '#ff0000'
         default: return '#757575';
     }
 };

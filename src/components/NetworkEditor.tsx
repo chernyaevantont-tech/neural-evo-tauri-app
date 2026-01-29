@@ -144,7 +144,6 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     position: pos,
                     type: configNodeType!,
                     genomeId: null,
-                    isOutput: false,
                 };
 
                 return new Map(prev).set(id, visualNode);
@@ -415,6 +414,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     <button onClick={() => addNode("Flatten")} style={buttonStyle}>+ Flatten</button>
                     <button onClick={() => addNode('Add')} style={buttonStyle}>+ Add</button>
                     <button onClick={() => addNode('Concat2D')} style={buttonStyle}>+ Concat</button>
+                    <button onClick={() => addNode('Output')} style={buttonStyle}>+ Output</button>
                 </div>
                 <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #ccc' }}>
                     <button 

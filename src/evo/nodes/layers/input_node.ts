@@ -2,14 +2,9 @@ import { BaseNode, ResourceCriteria } from "../base_node";
 
 export class InputNode extends BaseNode{
     
-    constructor (d1: number, d2?: number, d3?: number) {
+    constructor (outputShape: number[]) {
         super()
-        if (!(Number.isInteger(d1) && (Number.isInteger(d2) || d2 == undefined) && (Number.isInteger(d3)  || d2 == undefined))) {
-            throw new Error("Input shape values must be integers")
-        }
-        this.outputShape = [d1]
-        if (d2) this.outputShape.push(d2);
-        if (d3) this.outputShape.push(d3);
+        this.outputShape = outputShape
     }
 
     protected CalculateOutputShape(): void {}

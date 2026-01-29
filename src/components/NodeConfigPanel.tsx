@@ -8,6 +8,7 @@ import { AddNode } from '../evo/nodes/merge/add_node';
 import { Concat2DNode } from '../evo/nodes/merge/concatinate_2d_node';
 import { ActivationFunction, KernelSize, PoolType } from '../evo/nodes/types';
 import { FlattenNode } from '../evo/nodes/layers/flatten_node';
+import { OutputNode } from '../evo/nodes/layers/output_node';
 
 interface NodeConfigPanelProps {
   nodeType: string;
@@ -23,9 +24,8 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   onCancel,
 }) => {
   // InputNode parameters
-  const [d1, setD1] = useState<number>(28);
-  const [d2, setD2] = useState<number | undefined>(28);
-  const [d3, setD3] = useState<number | undefined>(undefined);
+  const [inputShapeLength, setInputShapeLength] = useState<number>(1);
+  const [inputShape, setInputShape] = useState<number[]>([1]);
 
   // DenseNode parameters
   const [units, setUnits] = useState<number>(128);
@@ -48,6 +48,10 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   const [poolStride, setPoolStride] = useState<number>(2);
   const [poolPadding, setPoolPadding] = useState<number>(0);
 
+  //OutputNode parameters
+  const [outputShapeLength, setOutputShapeLength] = useState<number>(1);
+  const [outputShape, setOutputShape] = useState<number[]>([1]);
+
   useEffect(() => {
     if (existingNode) {
       loadNodeParameters(existingNode);
@@ -60,9 +64,8 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
     if (node instanceof InputNode) {
       const shape = params.output_shape;
-      setD1(shape[0]);
-      setD2(shape[1]);
-      setD3(shape[2]);
+      setInputShapeLength(shape.length);
+      setInputShape(shape);
     } else if (node instanceof DenseNode) {
       setUnits(params.units);
       setActivation(params.activation);
@@ -90,7 +93,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
       switch (nodeType) {
         case 'Input':
-          newNode = new InputNode(d1, d2, d3);
+          newNode = new InputNode(inputShape);
           break;
         case 'Dense':
           newNode = new DenseNode(units, activation, useBias);
@@ -112,6 +115,9 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         case 'Concat2D':
           newNode = new Concat2DNode();
           break;
+        case 'Output':
+          newNode = new OutputNode(outputShape);
+          break;
         default:
           throw new Error(`Unknown node type: ${nodeType}`);
       }
@@ -124,38 +130,86 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
 
   const renderInputNodeConfig = () => (
     <div className="config-section">
+      <h4>Input Shape Length</h4>
+      <div className='config-row'>
+        <input
+          type="number"
+          value={inputShapeLength}
+          onChange={(e) => {
+            const newInputShapeLength = parseInt(e.target.value) || 0
+            setInputShapeLength(newInputShapeLength);
+            const minShapeLength = Math.min(newInputShapeLength, inputShape.length);
+            const newInputShape = new Array(newInputShapeLength).fill(1, minShapeLength);
+            for (let i = 0; i < minShapeLength; i++) {
+              newInputShape[i] = inputShape[i];
+            }
+            setInputShape(newInputShape);
+          }
+          }
+          min="1"
+        />
+      </div>
       <h4>Input Shape</h4>
-      <div className="config-row">
-        <label>Dimension 1 (required):</label>
-        <input
-          type="number"
-          value={d1}
-          onChange={(e) => setD1(parseInt(e.target.value) || 0)}
-          min="1"
-        />
-      </div>
-      <div className="config-row">
-        <label>Dimension 2 (optional):</label>
-        <input
-          type="number"
-          value={d2 || ''}
-          onChange={(e) => setD2(e.target.value ? parseInt(e.target.value) : undefined)}
-          min="1"
-          placeholder="Optional"
-        />
-      </div>
-      <div className="config-row">
-        <label>Dimension 3 (optional):</label>
-        <input
-          type="number"
-          value={d3 || ''}
-          onChange={(e) => setD3(e.target.value ? parseInt(e.target.value) : undefined)}
-          min="1"
-          placeholder="Optional"
-        />
-      </div>
+      {inputShape.map((d, i) => {
+        return (
+          <div className="config-row">
+            <label>Dimension {i + 1}</label>
+            <input
+              type="number"
+              value={d}
+              onChange={(e) => {
+                const newInputShape = [...inputShape];
+                newInputShape.splice(i, 1, parseInt(e.target.value) || 1);
+                setInputShape(newInputShape)
+              }}
+              min="1"
+            />
+          </div>)
+      })}
     </div>
   );
+
+  const renderOutputNodeConfig = () => (
+    <div className='config-selection'>
+      <h4>Output Shape Length</h4>
+      <div className='config-row'>
+        <input
+          type="number"
+          value={outputShapeLength}
+          onChange={(e) => {
+            const newOutputShapeLength = parseInt(e.target.value) || 0
+            setOutputShapeLength(newOutputShapeLength);
+            const minShapeLength = Math.min(newOutputShapeLength, outputShape.length);
+            const newOutputShape = new Array(newOutputShapeLength).fill(1, minShapeLength);
+            for (let i = 0; i < minShapeLength; i++) {
+              newOutputShape[i] = outputShape[i];
+            }
+            console.log(newOutputShape);
+            setOutputShape(newOutputShape);
+          }
+          }
+          min="1"
+        />
+      </div>
+      <h4>Output Shape</h4>
+      {outputShape.map((d, i) => {
+        return (
+          <div className="config-row">
+            <label>Dimension {i + 1}</label>
+            <input
+              type="number"
+              value={d}
+              onChange={(e) => {
+                const newOutputShape = [...outputShape];
+                newOutputShape.splice(i, 1, parseInt(e.target.value) || 1);
+                setOutputShape(newOutputShape)
+              }}
+              min="1"
+            />
+          </div>)
+      })}
+    </div>
+  )
 
   const renderDenseNodeConfig = () => (
     <div className="config-section">
@@ -322,13 +376,14 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   return (
     <div className="config-panel">
       <h3>{existingNode ? 'Edit Node' : 'Add Node'} - {nodeType}</h3>
-      
+
       {nodeType === 'Input' && renderInputNodeConfig()}
       {nodeType === 'Dense' && renderDenseNodeConfig()}
       {nodeType === 'Conv2D' && renderConv2DNodeConfig()}
       {nodeType === 'Pooling' && renderPoolingNodeConfig()}
       {(nodeType === 'Add' || nodeType === 'Concat2D') && renderMergeNodeConfig()}
       {nodeType === 'Flatten' && renderFlattenNodeConfig()}
+      {nodeType === 'Output' && renderOutputNodeConfig()}
 
       <div className="config-buttons">
         <button onClick={handleSave} className="btn-save">

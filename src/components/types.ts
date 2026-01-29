@@ -12,7 +12,6 @@ export type VisualNode = {
     position: Position;
     type: NodeType;
     genomeId: string | null;
-    isOutput: boolean;
 };
 
 export type VisualGenome = {
@@ -22,7 +21,6 @@ export type VisualGenome = {
 
 export type NewNodeDto = {
     node: BaseNode;
-    isOutput: boolean;
 }
 
 export type Connection = {
@@ -38,7 +36,8 @@ export type NodeType =
     | "Pooling"
     | "Flatten"
     | "Add"
-    | "Concat2D";
+    | "Concat2D"
+    | "Output";
 
 export type NodeConfig = {
     type: NodeType;
