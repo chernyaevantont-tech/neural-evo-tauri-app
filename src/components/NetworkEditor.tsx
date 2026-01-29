@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { VisualNode, Connection, Position, NodeType } from './types';
+import { VisualNode, Connection, Position, NodeType, VisualGenome } from './types';
 import { NodeRenderer } from './NodeRenderer';
 import { ConnectionRenderer } from './ConnectionRenderer';
 import { NodeConfigPanel } from './NodeConfigPanel';
@@ -9,12 +9,15 @@ import './NetworkEditor.css';
 
 interface NetworkEditorProps {
     onNodeSelect?: (node: VisualNode | null) => void;
+    onGenomeSelect?: (genome: VisualGenome | null) => void;
 }
 
-export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect }) => {
+export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGenomeSelect }) => {
     const [nodes, setNodes] = useState<Map<string, VisualNode>>(new Map());
+    const [genomes, setGenomes] = useState<Map<string, VisualGenome>>(new Map());
     const [connections, setConnections] = useState<Map<string, Connection>>(new Map());
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+    const [selectedGenomeId, setSelectedGenomeId] = useState<string | null>(null); 
     const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
     const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
     const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 });
@@ -22,7 +25,6 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect }) =>
     const [configNodeType, setConfigNodeType] = useState<NodeType | null>(null);
     const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
     
-    // Canvas transform state
     const [scale, setScale] = useState<number>(1);
     const [translate, setTranslate] = useState<Position>({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState<boolean>(false);
@@ -30,9 +32,9 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect }) =>
     
     const svgRef = useRef<SVGSVGElement>(null);
     const nodesRef = useRef<Map<string, VisualNode>>(nodes);
+    const genomesRef = useRef<Map<string, VisualGenome>>(genomes);
     const connectionsRef = useRef<Map<string, Connection>>(connections);
 
-    // Keep refs in sync with state
     React.useEffect(() => {
         nodesRef.current = nodes;
     }, [nodes]);
@@ -140,7 +142,8 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect }) =>
                     id,
                     node: newNode,
                     position: pos,
-                    type: configNodeType!
+                    type: configNodeType!,
+                    genomeId: null,
                 };
 
                 return new Map(prev).set(id, visualNode);
@@ -170,7 +173,6 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect }) =>
         const svg = svgRef.current;
         const rect = svg.getBoundingClientRect();
         
-        // Convert screen coordinates to world coordinates
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
         const worldX = (mouseX - translate.x) / scale;
@@ -266,8 +268,9 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect }) =>
     const handleNodeSelect = useCallback((nodeId: string) => {
         setSelectedNodeId(nodeId);
         const node = nodesRef.current.get(nodeId);
-        if (onNodeSelect) {
-            onNodeSelect(node || null);
+        if (node && onNodeSelect) {
+            setSelectedGenomeId(node.genomeId)
+            onNodeSelect(node);
         }
     }, [onNodeSelect]);
 
@@ -353,6 +356,10 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect }) =>
         openConfigPanel(node.type, selectedNodeId);
     }, [selectedNodeId, openConfigPanel]);
 
+    // const getRandomSubgraph = useCallback(() => {
+         //TODO
+    // }, [selectedGraphId])
+
     return (
         <div style={{ width: '100%', height: '100%', position: 'relative' }}>
 
@@ -404,6 +411,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect }) =>
                     <button onClick={() => addNode('Dense')} style={buttonStyle}>+ Dense</button>
                     <button onClick={() => addNode('Conv2D')} style={buttonStyle}>+ Conv2D</button>
                     <button onClick={() => addNode('Pooling')} style={buttonStyle}>+ Pooling</button>
+                    <button onClick={() => addNode("Flatten")} style={buttonStyle}>+ Flatten</button>
                     <button onClick={() => addNode('Add')} style={buttonStyle}>+ Add</button>
                     <button onClick={() => addNode('Concat2D')} style={buttonStyle}>+ Concat</button>
                 </div>
@@ -422,17 +430,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect }) =>
                     >
                         Delete Node
                     </button>
-                </div>
-                <div style={{ marginTop: '10px', fontSize: '12px', color: '#666' }}>
-                    <p style={{ margin: '5px 0' }}>
-                        {connectingFrom ? '🔗 Select target node' : 'Shift+Click to connect'}
-                    </p>
-                    <p style={{ margin: '5px 0' }}>
-                        RMB drag to pan, scroll to zoom
-                    </p>
-                    <p style={{ margin: '5px 0', fontSize: '11px' }}>
-                        Zoom: {Math.round(scale * 100)}%
-                    </p>
+
                 </div>
             </div>
 

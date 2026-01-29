@@ -2,10 +2,12 @@ import { useState } from "react";
 import "./App.css";
 import { NetworkEditor } from "./components/NetworkEditor";
 import { NodeInfoPanel } from "./components/NodeInfoPanel";
-import { VisualNode } from "./components/types";
+import { VisualGenome, VisualNode } from "./components/types";
+import { GenomeInfoPanel } from "./components/GenomeInfoPanel";
 
 function App() {
   const [selectedNode, setSelectedNode] = useState<VisualNode | null>(null);
+  const [selectedGenome, setSelectedGenome] = useState<VisualGenome | null>(null);
 
   return (
     <div style={{
@@ -19,7 +21,7 @@ function App() {
         position: 'relative',
         height: '100%'
       }}>
-        <NetworkEditor onNodeSelect={setSelectedNode} />
+        <NetworkEditor onNodeSelect={setSelectedNode} onGenomeSelect={setSelectedGenome} />
       </div>
       
       <div style={{
@@ -28,9 +30,13 @@ function App() {
         padding: '20px',
         background: '#fafafa',
         borderLeft: '1px solid #ddd',
-        overflow: 'auto'
+        overflow: 'auto',
+        display: "flex",
+        flexDirection: "column",
+        gap: "20px",
       }}>
         <NodeInfoPanel selectedNode={selectedNode} />
+        <GenomeInfoPanel selectedGenome={selectedGenome}/>
       </div>
     </div>
   );

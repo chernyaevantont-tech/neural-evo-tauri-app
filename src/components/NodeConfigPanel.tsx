@@ -7,6 +7,7 @@ import { PoolingNode } from '../evo/nodes/layers/pooling_node';
 import { AddNode } from '../evo/nodes/merge/add_node';
 import { Concat2DNode } from '../evo/nodes/merge/concatinate_2d_node';
 import { ActivationFunction, KernelSize, PoolType } from '../evo/nodes/types';
+import { FlattenNode } from '../evo/nodes/layers/flatten_node';
 
 interface NodeConfigPanelProps {
   nodeType: string;
@@ -101,6 +102,9 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
         case 'Pooling':
           const poolKernelSize: KernelSize = { h: poolKernelH, w: poolKernelW };
           newNode = new PoolingNode(poolType, poolKernelSize, poolStride, poolPadding);
+          break;
+        case 'Flatten':
+          newNode = new FlattenNode();
           break;
         case 'Add':
           newNode = new AddNode();
@@ -308,8 +312,15 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
     </div>
   );
 
+  const renderFlattenNodeConfig = () => (
+    <div className="config-section">
+      <h4>{nodeType} Flatten</h4>
+      <p>This node has no configurable parameters.</p>
+    </div>
+  );
+
   return (
-    <div className="node-config-panel">
+    <div className="config-panel">
       <h3>{existingNode ? 'Edit Node' : 'Add Node'} - {nodeType}</h3>
       
       {nodeType === 'Input' && renderInputNodeConfig()}
@@ -317,6 +328,7 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
       {nodeType === 'Conv2D' && renderConv2DNodeConfig()}
       {nodeType === 'Pooling' && renderPoolingNodeConfig()}
       {(nodeType === 'Add' || nodeType === 'Concat2D') && renderMergeNodeConfig()}
+      {nodeType === 'Flatten' && renderFlattenNodeConfig()}
 
       <div className="config-buttons">
         <button onClick={handleSave} className="btn-save">

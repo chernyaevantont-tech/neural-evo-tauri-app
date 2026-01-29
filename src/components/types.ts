@@ -1,3 +1,4 @@
+import { Genome } from "../evo/genome";
 import { BaseNode } from "../evo/nodes/base_node";
 
 export type Position = {
@@ -10,7 +11,13 @@ export type VisualNode = {
     node: BaseNode;
     position: Position;
     type: NodeType;
+    genomeId: string | null;
 };
+
+export type VisualGenome = {
+    id: string;
+    genome: Genome;
+}
 
 export type Connection = {
     id: string;
@@ -23,6 +30,7 @@ export type NodeType =
     | "Dense" 
     | "Conv2D" 
     | "Pooling"
+    | "Flatten"
     | "Add"
     | "Concat2D";
 

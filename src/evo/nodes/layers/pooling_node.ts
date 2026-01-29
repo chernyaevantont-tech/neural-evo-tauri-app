@@ -64,7 +64,7 @@ export class PoolingNode extends BaseNode {
     }
 
     CheckCompability(node: BaseNode): Boolean {
-        return node.GetOutputShape().length == this.inputShape.length
+        return node.GetOutputShape().length == 3
     }
     
 }
