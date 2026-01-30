@@ -39,5 +39,4 @@ export abstract class BaseNode {
         this.next.push(node)
         node.AddPrev(this)
     }
-
 }

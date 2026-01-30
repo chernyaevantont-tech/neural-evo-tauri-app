@@ -138,6 +138,8 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 const pos = { x: 100 + prev.size * 20, y: 100 + prev.size * 20 };
                 const id = newNode.id as string;
 
+                const newGenome = {uu)}
+
                 const visualNode: VisualNode = {
                     id,
                     node: newNode,
