@@ -8,6 +8,7 @@ import { GenomeInfoPanel } from "./components/GenomeInfoPanel";
 function App() {
   const [selectedNode, setSelectedNode] = useState<VisualNode | null>(null);
   const [selectedGenome, setSelectedGenome] = useState<VisualGenome | null>(null);
+  const [genomes, setGenomes] = useState<Map<string, VisualGenome>>(new Map());
 
   return (
     <div style={{
@@ -21,7 +22,7 @@ function App() {
         position: 'relative',
         height: '100%'
       }}>
-        <NetworkEditor onNodeSelect={setSelectedNode} onGenomeSelect={setSelectedGenome} />
+        <NetworkEditor onNodeSelect={setSelectedNode} onGenomeSelect={setSelectedGenome} genomes={genomes} setGenomes={setGenomes}/>
       </div>
       
       <div style={{

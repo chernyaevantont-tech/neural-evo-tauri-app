@@ -9,19 +9,16 @@ export const GenomeInfoPanel: React.FC<GenomeInfoPanelProps> = ({selectedGenome}
     if (!selectedGenome) {
         return (
             <div style={panelStyle}>
-                <h3 style={headerStyle}>Genome Information</h3>
-                <p style={emptyStyle}>Select a genome node to view its information</p>
+                <h3 style={headerStyle}>Genomes Information</h3>
+                <p style={emptyStyle}>Genomes not found</p>
             </div>
         );
     }
 
     return (
         <div style={panelStyle}>
-            <h3 style={headerStyle}>Genome Information</h3>
+            <h3 style={headerStyle}>Genomes Information</h3>
             
-            
-            
-
         </div>
     )
 }

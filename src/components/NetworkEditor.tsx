@@ -5,31 +5,35 @@ import { NodeRenderer } from './NodeRenderer';
 import { ConnectionRenderer } from './ConnectionRenderer';
 import { NodeConfigPanel } from './NodeConfigPanel';
 import { BaseNode } from '../evo/nodes/base_node';
+import { v4 } from "uuid"
+
 import './NetworkEditor.css';
+import { Genome } from '../evo/genome';
 
 interface NetworkEditorProps {
-    onNodeSelect?: (node: VisualNode | null) => void;
-    onGenomeSelect?: (genome: VisualGenome | null) => void;
+    onNodeSelect: (node: VisualNode | null) => void;
+    onGenomeSelect: (genome: VisualGenome | null) => void;
+    genomes: Map<string, VisualGenome>;
+    setGenomes: React.Dispatch<React.SetStateAction<Map<string, VisualGenome>>>;
 }
 
-export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGenomeSelect }) => {
+export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGenomeSelect, genomes, setGenomes}) => {
     const [nodes, setNodes] = useState<Map<string, VisualNode>>(new Map());
-    const [genomes, setGenomes] = useState<Map<string, VisualGenome>>(new Map());
     const [connections, setConnections] = useState<Map<string, Connection>>(new Map());
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-    const [selectedGenomeId, setSelectedGenomeId] = useState<string | null>(null); 
+    const [selectedGenomeId, setSelectedGenomeId] = useState<string | null>(null);
     const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
     const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
     const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 });
     const [configPanelOpen, setConfigPanelOpen] = useState<boolean>(false);
     const [configNodeType, setConfigNodeType] = useState<NodeType | null>(null);
     const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
-    
+
     const [scale, setScale] = useState<number>(1);
     const [translate, setTranslate] = useState<Position>({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState<boolean>(false);
     const [panStart, setPanStart] = useState<Position>({ x: 0, y: 0 });
-    
+
     const svgRef = useRef<SVGSVGElement>(null);
     const nodesRef = useRef<Map<string, VisualNode>>(nodes);
     const genomesRef = useRef<Map<string, VisualGenome>>(genomes);
@@ -84,7 +88,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             // Restore connections
             setConnections(prev => {
                 const newConns = new Map<string, Connection>();
-                
+
                 // Re-add connections with the new node
                 incomingConnections.forEach(fromId => {
                     const fromNode = nodesRef.current.get(fromId);
@@ -133,23 +137,27 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 onNodeSelect(updatedVisualNode);
             }
         } else {
+            const newGenome: VisualGenome = {
+                    id: v4(), 
+                    genome: new Genome([newNode], [newNode])}
+
             // Creating new node
             setNodes(prev => {
                 const pos = { x: 100 + prev.size * 20, y: 100 + prev.size * 20 };
                 const id = newNode.id as string;
-
-                const newGenome = {uu)}
 
                 const visualNode: VisualNode = {
                     id,
                     node: newNode,
                     position: pos,
                     type: configNodeType!,
-                    genomeId: null,
+                    genomeId: newGenome.id,
                 };
 
                 return new Map(prev).set(id, visualNode);
             });
+
+            setGenomes(prev => new Map(prev).set(newGenome.id, newGenome))
         }
 
         setConfigPanelOpen(false);
@@ -174,7 +182,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
         const svg = svgRef.current;
         const rect = svg.getBoundingClientRect();
-        
+
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
         const worldX = (mouseX - translate.x) / scale;
@@ -201,7 +209,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             // Handle node dragging
             const svg = svgRef.current;
             const rect = svg.getBoundingClientRect();
-            
+
             // Convert screen coordinates to world coordinates
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
@@ -246,23 +254,23 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
         const svg = svgRef.current;
         const rect = svg.getBoundingClientRect();
-        
+
         // Get mouse position relative to SVG
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
-        
+
         // Calculate mouse position in world coordinates (before zoom)
         const worldX = (mouseX - translate.x) / scale;
         const worldY = (mouseY - translate.y) / scale;
-        
+
         // Calculate new scale
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
         const newScale = Math.max(0.1, Math.min(5, scale * delta));
-        
+
         // Calculate new translate to keep the point under mouse cursor
         const newTranslateX = mouseX - worldX * newScale;
         const newTranslateY = mouseY - worldY * newScale;
-        
+
         setScale(newScale);
         setTranslate({ x: newTranslateX, y: newTranslateY });
     }, [scale, translate]);
@@ -287,7 +295,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 // Check compatibility
                 if (toNode.node.CheckCompability(fromNode.node)) {
                     fromNode.node.AddNext(toNode.node);
-                    
+
                     const connectionId = uuidv4();
                     const connection: Connection = {
                         id: connectionId,
@@ -359,7 +367,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
     }, [selectedNodeId, openConfigPanel]);
 
     // const getRandomSubgraph = useCallback(() => {
-         //TODO
+    //TODO
     // }, [selectedGraphId])
 
     return (
@@ -419,15 +427,15 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     <button onClick={() => addNode('Output')} style={buttonStyle}>+ Output</button>
                 </div>
                 <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #ccc' }}>
-                    <button 
-                        onClick={editSelectedNode} 
+                    <button
+                        onClick={editSelectedNode}
                         disabled={!selectedNodeId}
                         style={{ ...buttonStyle, backgroundColor: '#FF9800', width: '100%', marginBottom: '5px' }}
                     >
                         Edit Node
                     </button>
-                    <button 
-                        onClick={deleteSelectedNode} 
+                    <button
+                        onClick={deleteSelectedNode}
                         disabled={!selectedNodeId}
                         style={{ ...buttonStyle, backgroundColor: '#f44336', width: '100%' }}
                     >
@@ -456,32 +464,32 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 }}
             >
                 <g transform={`translate(${translate.x}, ${translate.y}) scale(${scale})`}>
-                {Array.from(connections.values()).map(conn => (
-                    <ConnectionRenderer
-                        key={conn.id}
-                        connection={conn}
-                        nodes={nodes}
-                    />
-                ))}
-
-                {Array.from(nodes.values()).map(node => (
-                    <g
-                        key={node.id}
-                        onClickCapture={(e) => {
-                            if (e.shiftKey) {
-                                e.stopPropagation();
-                                handleConnect(node.id);
-                            }
-                        }}
-                    >
-                        <NodeRenderer
-                            node={node}
-                            isSelected={selectedNodeId === node.id}
-                            onSelect={handleNodeSelect}
-                            onDragStart={handleNodeDragStart}
+                    {Array.from(connections.values()).map(conn => (
+                        <ConnectionRenderer
+                            key={conn.id}
+                            connection={conn}
+                            nodes={nodes}
                         />
-                    </g>
-                ))}
+                    ))}
+
+                    {Array.from(nodes.values()).map(node => (
+                        <g
+                            key={node.id}
+                            onClickCapture={(e) => {
+                                if (e.shiftKey) {
+                                    e.stopPropagation();
+                                    handleConnect(node.id);
+                                }
+                            }}
+                        >
+                            <NodeRenderer
+                                node={node}
+                                isSelected={selectedNodeId === node.id}
+                                onSelect={handleNodeSelect}
+                                onDragStart={handleNodeDragStart}
+                            />
+                        </g>
+                    ))}
                 </g>
             </svg>
         </div>
