@@ -37,7 +37,7 @@ function App() {
         gap: "20px",
       }}>
         <NodeInfoPanel selectedNode={selectedNode} />
-        <GenomeInfoPanel selectedGenome={selectedGenome}/>
+        <GenomeInfoPanel genomes={Array.from(genomes.values())}/>
       </div>
     </div>
   );

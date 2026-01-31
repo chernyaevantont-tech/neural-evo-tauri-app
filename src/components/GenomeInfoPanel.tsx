@@ -2,11 +2,11 @@ import React from "react";
 import { VisualGenome } from "./types";
 
 interface GenomeInfoPanelProps {
-    selectedGenome: VisualGenome | null
+    genomes: VisualGenome[];
 };
 
-export const GenomeInfoPanel: React.FC<GenomeInfoPanelProps> = ({selectedGenome}) => {
-    if (!selectedGenome) {
+export const GenomeInfoPanel: React.FC<GenomeInfoPanelProps> = ({genomes}) => {
+    if (genomes.length == 0) {
         return (
             <div style={panelStyle}>
                 <h3 style={headerStyle}>Genomes Information</h3>
@@ -18,7 +18,13 @@ export const GenomeInfoPanel: React.FC<GenomeInfoPanelProps> = ({selectedGenome}
     return (
         <div style={panelStyle}>
             <h3 style={headerStyle}>Genomes Information</h3>
-            
+            {
+                genomes.map(genome => (
+                    <div style={{color: genome.isValid ? 'green' : 'red'}}>
+                        {genome.id}
+                    </div>
+                ))
+            }
         </div>
     )
 }
@@ -48,9 +54,4 @@ const emptyStyle: React.CSSProperties = {
     fontStyle: 'italic',
     textAlign: 'center',
     padding: '20px'
-};
-
-
-const sectionStyle: React.CSSProperties = {
-    marginBottom: '15px'
 };

@@ -9,6 +9,8 @@ import { v4 } from "uuid"
 
 import './NetworkEditor.css';
 import { Genome } from '../evo/genome';
+import { InputNode } from '../evo/nodes/layers/input_node';
+import { OutputNode } from '../evo/nodes/layers/output_node';
 
 interface NetworkEditorProps {
     onNodeSelect: (node: VisualNode | null) => void;
@@ -17,8 +19,9 @@ interface NetworkEditorProps {
     setGenomes: React.Dispatch<React.SetStateAction<Map<string, VisualGenome>>>;
 }
 
-export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGenomeSelect, genomes, setGenomes}) => {
+export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGenomeSelect, genomes, setGenomes }) => {
     const [nodes, setNodes] = useState<Map<string, VisualNode>>(new Map());
+    const [genomeNode, setGenomeNode] = useState<Map<string, VisualNode[]>>(new Map);
     const [connections, setConnections] = useState<Map<string, Connection>>(new Map());
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
     const [selectedGenomeId, setSelectedGenomeId] = useState<string | null>(null);
@@ -85,6 +88,14 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 return newNodes;
             });
 
+            const oldNode = nodes.get(editingNodeId);
+
+            setGenomeNode(prev => {
+                const newGenomeNode = new Map(prev);
+                newGenomeNode.set(selectedGenomeId!, [...prev.get(selectedGenomeId!)!.filter(n => n != oldNode), updatedVisualNode]);
+                return newGenomeNode;
+            });
+
             // Restore connections
             setConnections(prev => {
                 const newConns = new Map<string, Connection>();
@@ -138,26 +149,26 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             }
         } else {
             const newGenome: VisualGenome = {
-                    id: v4(), 
-                    genome: new Genome([newNode], [newNode])}
+                id: v4(),
+                genome: new Genome([newNode], [newNode]),
+                isValid: false,
+            }
 
-            // Creating new node
-            setNodes(prev => {
-                const pos = { x: 100 + prev.size * 20, y: 100 + prev.size * 20 };
-                const id = newNode.id as string;
+            const pos = { x: 100 + nodes.size * 20, y: 100 + nodes.size * 20 };
+            const id = v4();
 
-                const visualNode: VisualNode = {
-                    id,
-                    node: newNode,
-                    position: pos,
-                    type: configNodeType!,
-                    genomeId: newGenome.id,
-                };
+            const visualNode: VisualNode = {
+                id: id,
+                node: newNode,
+                position: pos,
+                type: configNodeType!,
+                genomeId: newGenome.id,
+            };
 
-                return new Map(prev).set(id, visualNode);
-            });
+            setNodes(prev => new Map(prev).set(id, visualNode));
 
             setGenomes(prev => new Map(prev).set(newGenome.id, newGenome))
+            setGenomeNode(prev => new Map(prev).set(newGenome.id, [visualNode]))
         }
 
         setConfigPanelOpen(false);
@@ -249,7 +260,6 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
     }, []);
 
     const handleWheel = useCallback((e: React.WheelEvent) => {
-        e.preventDefault();
         if (!svgRef.current) return;
 
         const svg = svgRef.current;
@@ -305,9 +315,12 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
                     setConnections(prev => new Map(prev).set(connectionId, connection));
 
+                    const fromGenomeId = fromNode.genomeId;
+                    const toGenomeId = toNode.genomeId;
+
                     // Create new VisualNode objects to force React update
                     const updatedFromNode: VisualNode = { ...fromNode };
-                    const updatedToNode: VisualNode = { ...toNode };
+                    const updatedToNode: VisualNode = { ...toNode, genomeId: fromGenomeId };
 
                     // Update nodes map with new objects
                     setNodes(prev => {
@@ -316,6 +329,40 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                         newNodes.set(nodeId, updatedToNode);
                         return newNodes;
                     });
+
+                    nodes.get(connectingFrom)!.node.AddNext(nodes.get(selectedNodeId!)!.node);
+
+                    const fromGenomeNode = genomeNode.get(fromGenomeId)!;
+                    const fromGenome = genomes.get(fromGenomeId)!;
+
+                    if (fromGenomeId != toGenomeId) {
+                        const toGenomeNodes = genomeNode.get(toGenomeId)!;
+                        toGenomeNodes.forEach(n => n.genomeId = fromGenomeId);
+
+                        fromGenomeNode.push(...toGenomeNodes)
+
+                        genomeNode.delete(toGenomeId);
+                        genomes.delete(toGenomeId);
+                    }
+
+                    let isValidFlag = true;
+                    const inputNodes: BaseNode[] = [];
+                    const outputNodes: BaseNode[] = [];
+                    for (let node of fromGenomeNode) {
+                        if (node.node.previous.length == 0) {
+                            inputNodes.push(node.node);
+                            if (!(node.node instanceof (InputNode))) isValidFlag = false;
+                        }
+                        if (node.node.next.length == 0) {
+                            outputNodes.push(node.node);
+                            if (!(node.node instanceof (OutputNode))) isValidFlag = false;
+                        }
+                    }
+
+                    fromGenome.genome = new Genome(inputNodes, outputNodes);
+                    fromGenome.isValid = isValidFlag;
+
+                    setGenomes(prev => new Map(prev).set(fromGenomeId, fromGenome));
 
                     // Update selected node info if one of the connected nodes is selected
                     if (selectedNodeId === connectingFrom && onNodeSelect) {
@@ -345,6 +392,8 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             return newConns;
         });
 
+
+
         // Remove node
         setNodes(prev => {
             const newNodes = new Map(prev);
@@ -352,7 +401,31 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             return newNodes;
         });
 
+        if (genomeNode.get(selectedGenomeId!)!.length > 1) {
+            setGenomeNode(prev => {
+                const newGenomeNode = new Map(prev);
+                const newGenomeNodeList = newGenomeNode.get(selectedGenomeId!)!.filter(n => n.id != selectedNodeId);
+                newGenomeNode.set(selectedGenomeId!, newGenomeNodeList);
+                return newGenomeNode;
+            })
+        } else {
+            setGenomeNode(prev => {
+                const newGenomeNode = new Map(prev);
+                newGenomeNode.delete(selectedGenomeId!);
+                genomes.delete(selectedGenomeId!);
+                return newGenomeNode;
+            });
+            setGenomes(prev => {
+                const newGenomes = new Map(prev);
+                newGenomes.delete(selectedGenomeId!);
+                return newGenomes;
+            });
+        }
+
+        nodes.get(selectedNodeId!)!.node.ClearAllConnections();
+
         setSelectedNodeId(null);
+        setSelectedGenomeId(null);
         if (onNodeSelect) {
             onNodeSelect(null);
         }
