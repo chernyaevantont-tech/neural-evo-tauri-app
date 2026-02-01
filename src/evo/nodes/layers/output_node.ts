@@ -24,7 +24,7 @@ export class OutputNode extends BaseNode {
     protected Mutate(mutation_options: Map<string, number>): void {}
 
     CheckCompability(node: BaseNode): Boolean {
-        return node.GetOutputShape().every((val, index) => val == this.inputShape[index]);
+        return this.previous.length == 0 ? true : node.GetOutputShape().every((val, index) => val == this.inputShape[index]);
     }
 
     protected AddPrev(node: BaseNode): void {

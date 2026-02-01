@@ -58,7 +58,7 @@ export const NodeInfoPanel: React.FC<NodeInfoPanelProps> = ({ selectedNode }) =>
             <div style={sectionStyle}>
                 <div style={labelStyle}>Node ID:</div>
                 <div style={{ ...valueStyle, fontSize: '10px', color: '#666' }}>
-                    {selectedNode.id}
+                    {selectedNode.node.id}
                 </div>
             </div>
 

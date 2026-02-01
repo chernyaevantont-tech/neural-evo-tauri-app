@@ -7,7 +7,6 @@ export type Position = {
 };
 
 export type VisualNode = {
-    id: string;
     node: BaseNode;
     position: Position;
     type: NodeType;

@@ -22,7 +22,7 @@ export class AddNode extends BaseNode {
     protected Mutate(mutation_options: Map<string, number>): void {}
     
     CheckCompability(node: BaseNode): Boolean {
-        return this.inputShape.length == 0 ? true: this.inputShape == node.GetOutputShape()
+        return this.inputShape.length == 0 ? true: node.GetOutputShape().every((val, index) => val == this.inputShape[index])
     }
 
 }

@@ -1,3 +1,5 @@
+import { v4 } from "uuid"
+
 export type ResourceCriteria = {
     flash: number
     ram: number
@@ -9,14 +11,15 @@ export abstract class BaseNode {
     public next: BaseNode[] = []
     protected inputShape: number[] = []
     protected outputShape: number[] = []
+    public id: string = v4();
 
     protected abstract CalculateOutputShape(): void
     abstract GetInfo(): String
     abstract GetResources(dtype: number): ResourceCriteria
     protected abstract Mutate(mutation_options: Map<string, number>): void
     abstract CheckCompability(node: BaseNode): Boolean
-    
-    private SetInputShape(newShape: number[]){
+
+    private SetInputShape(newShape: number[]) {
         this.inputShape = newShape
     }
 
@@ -47,9 +50,7 @@ export abstract class BaseNode {
     }
 
     public ClearAllConnections() {
-        this.next.forEach(n => n.RemovePrev(this));
+        this.next.forEach(n => this.RemoveNext(n));
         this.previous.forEach(n => n.RemoveNext(this));
-        this.next = [];
-        this.previous = [];
     }
 }

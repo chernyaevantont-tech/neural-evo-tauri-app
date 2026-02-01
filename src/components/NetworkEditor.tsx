@@ -39,7 +39,6 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
     const svgRef = useRef<SVGSVGElement>(null);
     const nodesRef = useRef<Map<string, VisualNode>>(nodes);
-    const genomesRef = useRef<Map<string, VisualGenome>>(genomes);
     const connectionsRef = useRef<Map<string, Connection>>(connections);
 
     React.useEffect(() => {
@@ -107,6 +106,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                         // Check compatibility with new node
                         if (newNode.CheckCompability(fromNode.node)) {
                             fromNode.node.AddNext(newNode);
+
                             const connId = uuidv4();
                             newConns.set(connId, {
                                 id: connId,
@@ -155,17 +155,15 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             }
 
             const pos = { x: 100 + nodes.size * 20, y: 100 + nodes.size * 20 };
-            const id = v4();
 
             const visualNode: VisualNode = {
-                id: id,
                 node: newNode,
                 position: pos,
                 type: configNodeType!,
                 genomeId: newGenome.id,
             };
 
-            setNodes(prev => new Map(prev).set(id, visualNode));
+            setNodes(prev => new Map(prev).set(newNode.id, visualNode));
 
             setGenomes(prev => new Map(prev).set(newGenome.id, newGenome))
             setGenomeNode(prev => new Map(prev).set(newGenome.id, [visualNode]))
@@ -189,6 +187,9 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
     const handleNodeDragStart = useCallback((nodeId: string, e: React.MouseEvent) => {
         e.preventDefault();
         const node = nodesRef.current.get(nodeId);
+
+        console.log("node drag start", nodeId);
+
         if (!node || !svgRef.current) return;
 
         const svg = svgRef.current;
@@ -217,6 +218,8 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             }));
             setPanStart({ x: e.clientX, y: e.clientY });
         } else if (draggingNodeId && svgRef.current) {
+            console.log("dragging", draggingNodeId);
+
             // Handle node dragging
             const svg = svgRef.current;
             const rect = svg.getBoundingClientRect();
@@ -322,15 +325,24 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     const updatedFromNode: VisualNode = { ...fromNode };
                     const updatedToNode: VisualNode = { ...toNode, genomeId: fromGenomeId };
 
-                    // Update nodes map with new objects
-                    setNodes(prev => {
-                        const newNodes = new Map(prev);
-                        newNodes.set(connectingFrom, updatedFromNode);
-                        newNodes.set(nodeId, updatedToNode);
-                        return newNodes;
-                    });
+                    const newNodes = new Map(nodes);
+                    newNodes.set(connectingFrom, updatedFromNode);
+                    newNodes.set(nodeId, updatedToNode);
 
-                    nodes.get(connectingFrom)!.node.AddNext(nodes.get(selectedNodeId!)!.node);
+                    const connectedNodesMap: Map<BaseNode, boolean> = new Map();
+                    const nodesToCheck: BaseNode[] = [toNode.node];
+
+                    while (nodesToCheck.length > 0) {
+                        const currentNode = nodesToCheck.shift()!;
+                        if (!connectedNodesMap.get(currentNode)) {
+                            connectedNodesMap.set(currentNode, true);
+                            const oldNode = newNodes.get(currentNode.id)!;
+                            newNodes.set(currentNode.id, { ...oldNode, genomeId: fromGenomeId });
+                            nodesToCheck.push(...currentNode.previous, ...currentNode.next);
+                        }
+                    }
+
+                    setNodes(newNodes);
 
                     const fromGenomeNode = genomeNode.get(fromGenomeId)!;
                     const fromGenome = genomes.get(fromGenomeId)!;
@@ -345,24 +357,33 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                         genomes.delete(toGenomeId);
                     }
 
+                    genomes.set(fromGenomeId, fromGenome);
+
                     let isValidFlag = true;
                     const inputNodes: BaseNode[] = [];
                     const outputNodes: BaseNode[] = [];
                     for (let node of fromGenomeNode) {
                         if (node.node.previous.length == 0) {
                             inputNodes.push(node.node);
-                            if (!(node.node instanceof (InputNode))) isValidFlag = false;
+                            if (!(node.node instanceof InputNode)) {
+                                console.log("input node is not valid");
+                                isValidFlag = false;
+                            }
                         }
                         if (node.node.next.length == 0) {
                             outputNodes.push(node.node);
-                            if (!(node.node instanceof (OutputNode))) isValidFlag = false;
+                            if (!(node.node instanceof OutputNode)) {
+                                console.log("output node is not valid");
+                                isValidFlag = false;
+                            }
                         }
                     }
 
                     fromGenome.genome = new Genome(inputNodes, outputNodes);
                     fromGenome.isValid = isValidFlag;
 
-                    setGenomes(prev => new Map(prev).set(fromGenomeId, fromGenome));
+                    setGenomes(genomes);
+
 
                     // Update selected node info if one of the connected nodes is selected
                     if (selectedNodeId === connectingFrom && onNodeSelect) {
@@ -381,6 +402,8 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
     const deleteSelectedNode = useCallback(() => {
         if (!selectedNodeId) return;
 
+        const deletingNode = nodes.get(selectedNodeId!)!;
+
         // Remove connections
         setConnections(prev => {
             const newConns = new Map(prev);
@@ -392,27 +415,95 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             return newConns;
         });
 
+        console.log("selected node id", selectedNodeId);
 
+        const newNodes = new Map(nodes);
+        newNodes.delete(selectedNodeId);
 
-        // Remove node
-        setNodes(prev => {
-            const newNodes = new Map(prev);
-            newNodes.delete(selectedNodeId);
-            return newNodes;
-        });
-
+        console.log("genomeNode", genomeNode);
+        console.log("selectedGenomeId", selectedGenomeId);
         if (genomeNode.get(selectedGenomeId!)!.length > 1) {
-            setGenomeNode(prev => {
-                const newGenomeNode = new Map(prev);
-                const newGenomeNodeList = newGenomeNode.get(selectedGenomeId!)!.filter(n => n.id != selectedNodeId);
-                newGenomeNode.set(selectedGenomeId!, newGenomeNodeList);
-                return newGenomeNode;
-            })
+
+            const newGenomes = new Map(genomes);
+            const newGenomeNode = new Map(genomeNode);
+
+            const connectedNodes = [...deletingNode.node.previous, ...deletingNode.node.next];
+            const checkedNodes = new Map<BaseNode, boolean>(connectedNodes.map(n => [n, false]));
+
+            deletingNode.node.ClearAllConnections();
+
+
+            for (let node of connectedNodes) {
+                if (checkedNodes.get(node)) continue;
+                checkedNodes.set(node, true);
+
+                const newGenomeId = v4();
+
+                const connectedNodes: VisualNode[] = [];
+                const connectedNodesMap: Map<BaseNode, boolean> = new Map();
+                const nodesToCheck: BaseNode[] = [node];
+
+                const inputNodes: BaseNode[] = [];
+                const outputNodes: BaseNode[] = [];
+
+                let isValidFlag = true;
+
+
+                while (nodesToCheck.length > 0) {
+
+                    const currentNode = nodesToCheck.shift()!;
+                    // if (checkedNodes.get(currentNode) != undefined) {
+                    //     checkedNodes.set(currentNode, true);
+                    // }
+                    if (deletingNode.node.id == currentNode.id) {
+                        console.log("Howdy!");
+                    }
+
+                    if (!connectedNodesMap.get(currentNode)) {
+                        console.log("node info", currentNode.GetInfo());
+                        if (currentNode.previous.length == 0) {
+                            inputNodes.push(currentNode);
+                            console.log("previous length = 0");
+                            if (!(currentNode instanceof InputNode)) {
+                                console.log("input node is not valid");
+                                isValidFlag = false;
+                            }
+                        }
+                        if (currentNode.next.length == 0) {
+                            outputNodes.push(currentNode);
+                            console.log("next length = 0");
+                            if (!(currentNode instanceof OutputNode)) {
+                                console.log("output node is not valid");
+                                isValidFlag = false;
+                            }
+                        }
+                        const currentNodeId = currentNode.id;
+                        const currentVisualNode = nodes.get(currentNodeId)!;
+                        connectedNodesMap.set(currentNode, true);
+                        connectedNodes.push({ ...nodes.get(currentNodeId)!, genomeId: newGenomeId });
+                        newNodes.set(currentNodeId, { ...currentVisualNode, genomeId: newGenomeId })
+                        nodesToCheck.push(...currentNode.previous, ...currentNode.next);
+                    }
+                }
+
+                if (connectedNodes.length == 0) continue;
+
+                const newGenome = new Genome(inputNodes, outputNodes);
+
+                newGenomeNode.set(newGenomeId, connectedNodes);
+
+                newGenomes.set(newGenomeId, { id: newGenomeId, isValid: isValidFlag, genome: newGenome });
+            }
+
+            newGenomes.delete(selectedGenomeId!);
+            newGenomeNode.delete(selectedGenomeId!);
+
+            setGenomeNode(newGenomeNode);
+            setGenomes(newGenomes);
         } else {
             setGenomeNode(prev => {
                 const newGenomeNode = new Map(prev);
                 newGenomeNode.delete(selectedGenomeId!);
-                genomes.delete(selectedGenomeId!);
                 return newGenomeNode;
             });
             setGenomes(prev => {
@@ -422,7 +513,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             });
         }
 
-        nodes.get(selectedNodeId!)!.node.ClearAllConnections();
+        setNodes(newNodes);
 
         setSelectedNodeId(null);
         setSelectedGenomeId(null);
@@ -547,17 +638,19 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
                     {Array.from(nodes.values()).map(node => (
                         <g
-                            key={node.id}
+                            key={node.node.id}
                             onClickCapture={(e) => {
                                 if (e.shiftKey) {
                                     e.stopPropagation();
-                                    handleConnect(node.id);
+                                    handleConnect(node.node.id);
+                                } else if (connectingFrom !== null) {
+                                    setConnectingFrom(null);
                                 }
                             }}
                         >
                             <NodeRenderer
                                 node={node}
-                                isSelected={selectedNodeId === node.id}
+                                isSelected={selectedNodeId === node.node.id}
                                 onSelect={handleNodeSelect}
                                 onDragStart={handleNodeDragStart}
                             />

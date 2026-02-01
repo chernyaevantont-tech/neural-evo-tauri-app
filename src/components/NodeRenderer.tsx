@@ -45,8 +45,8 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
             transform={`translate(${node.position.x}, ${node.position.y})`}
             onMouseDown={(e) => {
                 e.stopPropagation();
-                onDragStart(node.id, e);
-                onSelect(node.id);
+                onDragStart(node.node.id, e);
+                onSelect(node.node.id);
             }}
             style={{ cursor: 'move' }}
         >
