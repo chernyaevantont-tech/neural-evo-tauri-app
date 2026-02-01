@@ -4,11 +4,15 @@ import { Connection, VisualNode } from './types';
 interface ConnectionRendererProps {
     connection: Connection;
     nodes: Map<string, VisualNode>;
+    isSelected: boolean;
+    onSelect: (connectionId: string) => void;
 }
 
 export const ConnectionRenderer: React.FC<ConnectionRendererProps> = ({
     connection,
-    nodes
+    nodes,
+    isSelected,
+    onSelect,
 }) => {
     const fromNode = nodes.get(connection.fromNodeId);
     const toNode = nodes.get(connection.toNodeId);
@@ -51,18 +55,18 @@ export const ConnectionRenderer: React.FC<ConnectionRendererProps> = ({
     };
 
     return (
-        <g>
+        <g onClick={() => onSelect(connection.id)}>
             <line
                 x1={adjustedStartX}
                 y1={adjustedStartY}
                 x2={adjustedEndX}
                 y2={adjustedEndY}
-                stroke="#666"
+                stroke={isSelected ? '#FFD700' : '#333'}
                 strokeWidth={3}
             />
             <polygon
                 points={`${arrowTip.x},${arrowTip.y} ${arrowBase1.x},${arrowBase1.y} ${arrowBase2.x},${arrowBase2.y}`}
-                fill="#666"
+                fill={isSelected ? '#FFD700' : '#333'}
             />
         </g>
     );

@@ -6,6 +6,7 @@ interface NodeRendererProps {
     isSelected: boolean;
     onSelect: (id: string) => void;
     onDragStart: (id: string, e: React.MouseEvent) => void;
+    onContextMenu: (id: string, e: React.MouseEvent) => void;
 }
 
 const getNodeColor = (type: NodeType): string => {
@@ -34,7 +35,8 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
     node,
     isSelected,
     onSelect,
-    onDragStart
+    onDragStart,
+    onContextMenu
 }) => {
     const radius = 50;
     const color = getNodeColor(node.type);
@@ -47,6 +49,10 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
                 e.stopPropagation();
                 onDragStart(node.node.id, e);
                 onSelect(node.node.id);
+            }}
+            onContextMenu={(e) => {
+                e.stopPropagation();
+                onContextMenu(node.node.id, e);
             }}
             style={{ cursor: 'move' }}
         >

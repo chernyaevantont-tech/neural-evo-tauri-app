@@ -25,12 +25,15 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
     const [connections, setConnections] = useState<Map<string, Connection>>(new Map());
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
     const [selectedGenomeId, setSelectedGenomeId] = useState<string | null>(null);
+    const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
     const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
     const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
     const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 });
     const [configPanelOpen, setConfigPanelOpen] = useState<boolean>(false);
     const [configNodeType, setConfigNodeType] = useState<NodeType | null>(null);
     const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+    const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
+    const [connectionContextMenu, setConnectionContextMenu] = useState<{x: number, y: number, connectionId: string} | null>(null);
 
     const [scale, setScale] = useState<number>(1);
     const [translate, setTranslate] = useState<Position>({ x: 0, y: 0 });
@@ -192,6 +195,10 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
         if (!node || !svgRef.current) return;
 
+        // Close context menu when starting to drag
+        setNodeContextMenu(null);
+        setConnectionContextMenu(null);
+
         const svg = svgRef.current;
         const rect = svg.getBoundingClientRect();
 
@@ -210,6 +217,8 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
         if (isPanning) {
             // Handle panning - adjust speed based on scale
+            setNodeContextMenu(null);
+            setConnectionContextMenu(null);
             const dx = e.clientX - panStart.x;
             const dy = e.clientY - panStart.y;
             setTranslate(prev => ({
@@ -290,12 +299,19 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
     const handleNodeSelect = useCallback((nodeId: string) => {
         setSelectedNodeId(nodeId);
+        setSelectedConnectionId(null);
         const node = nodesRef.current.get(nodeId);
         if (node && onNodeSelect) {
             setSelectedGenomeId(node.genomeId)
             onNodeSelect(node);
         }
     }, [onNodeSelect]);
+
+    const handleConnectionSelect = (connectionId: string) => {
+        setSelectedConnectionId(connectionId);
+        setSelectedNodeId(null);
+        setSelectedGenomeId(null);
+    }
 
     const handleConnect = useCallback((nodeId: string) => {
         if (connectingFrom === null) {
@@ -399,31 +415,51 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         }
     }, [connectingFrom, selectedNodeId, onNodeSelect]);
 
-    const deleteSelectedNode = useCallback(() => {
-        if (!selectedNodeId) return;
 
-        const deletingNode = nodes.get(selectedNodeId!)!;
+    const handleNodeContextMenu = useCallback((nodeId: string, e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setConnectionContextMenu(null);
+        setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeId });
+    }, []);
+
+    const handleNodeContextMenuEdit = useCallback(() => {
+        if (!nodeContextMenu) return;
+        const node = nodesRef.current.get(nodeContextMenu.nodeId);
+        if (!node) return;
+
+        setSelectedNodeId(nodeContextMenu.nodeId);
+        openConfigPanel(node.type, nodeContextMenu.nodeId);
+        setNodeContextMenu(null);
+    }, [nodeContextMenu, openConfigPanel]);
+
+    const handleNodeContextMenuDelete = useCallback(() => {
+        if (!nodeContextMenu) return;
+        
+        const nodeIdToDelete = nodeContextMenu.nodeId;
+        const nodeToDelete = nodesRef.current.get(nodeIdToDelete);
+        if (!nodeToDelete) return;
+
+        const deletingNode = nodeToDelete;
+        setNodeContextMenu(null);
 
         // Remove connections
         setConnections(prev => {
             const newConns = new Map(prev);
             for (const [id, conn] of newConns) {
-                if (conn.fromNodeId === selectedNodeId || conn.toNodeId === selectedNodeId) {
+                if (conn.fromNodeId === nodeIdToDelete || conn.toNodeId === nodeIdToDelete) {
                     newConns.delete(id);
                 }
             }
             return newConns;
         });
 
-        console.log("selected node id", selectedNodeId);
+        const newNodes = new Map(nodesRef.current);
+        newNodes.delete(nodeIdToDelete);
 
-        const newNodes = new Map(nodes);
-        newNodes.delete(selectedNodeId);
-
-        console.log("genomeNode", genomeNode);
-        console.log("selectedGenomeId", selectedGenomeId);
-        if (genomeNode.get(selectedGenomeId!)!.length > 1) {
-
+        const nodeGenomeId = deletingNode.genomeId;
+        
+        if (genomeNode.get(nodeGenomeId)!.length > 1) {
             const newGenomes = new Map(genomes);
             const newGenomeNode = new Map(genomeNode);
 
@@ -432,103 +468,106 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
             deletingNode.node.ClearAllConnections();
 
-
             for (let node of connectedNodes) {
                 if (checkedNodes.get(node)) continue;
                 checkedNodes.set(node, true);
 
                 const newGenomeId = v4();
-
-                const connectedNodes: VisualNode[] = [];
+                const connectedVisualNodes: VisualNode[] = [];
                 const connectedNodesMap: Map<BaseNode, boolean> = new Map();
                 const nodesToCheck: BaseNode[] = [node];
-
                 const inputNodes: BaseNode[] = [];
                 const outputNodes: BaseNode[] = [];
-
                 let isValidFlag = true;
 
-
                 while (nodesToCheck.length > 0) {
-
                     const currentNode = nodesToCheck.shift()!;
-                    // if (checkedNodes.get(currentNode) != undefined) {
-                    //     checkedNodes.set(currentNode, true);
-                    // }
-                    if (deletingNode.node.id == currentNode.id) {
-                        console.log("Howdy!");
-                    }
 
                     if (!connectedNodesMap.get(currentNode)) {
-                        console.log("node info", currentNode.GetInfo());
                         if (currentNode.previous.length == 0) {
                             inputNodes.push(currentNode);
-                            console.log("previous length = 0");
                             if (!(currentNode instanceof InputNode)) {
-                                console.log("input node is not valid");
                                 isValidFlag = false;
                             }
                         }
                         if (currentNode.next.length == 0) {
                             outputNodes.push(currentNode);
-                            console.log("next length = 0");
                             if (!(currentNode instanceof OutputNode)) {
-                                console.log("output node is not valid");
                                 isValidFlag = false;
                             }
                         }
                         const currentNodeId = currentNode.id;
-                        const currentVisualNode = nodes.get(currentNodeId)!;
+                        const currentVisualNode = nodesRef.current.get(currentNodeId)!;
                         connectedNodesMap.set(currentNode, true);
-                        connectedNodes.push({ ...nodes.get(currentNodeId)!, genomeId: newGenomeId });
-                        newNodes.set(currentNodeId, { ...currentVisualNode, genomeId: newGenomeId })
+                        connectedVisualNodes.push({ ...nodesRef.current.get(currentNodeId)!, genomeId: newGenomeId });
+                        newNodes.set(currentNodeId, { ...currentVisualNode, genomeId: newGenomeId });
                         nodesToCheck.push(...currentNode.previous, ...currentNode.next);
                     }
                 }
 
-                if (connectedNodes.length == 0) continue;
+                if (connectedVisualNodes.length == 0) continue;
 
                 const newGenome = new Genome(inputNodes, outputNodes);
-
-                newGenomeNode.set(newGenomeId, connectedNodes);
-
+                newGenomeNode.set(newGenomeId, connectedVisualNodes);
                 newGenomes.set(newGenomeId, { id: newGenomeId, isValid: isValidFlag, genome: newGenome });
             }
 
-            newGenomes.delete(selectedGenomeId!);
-            newGenomeNode.delete(selectedGenomeId!);
-
+            newGenomes.delete(nodeGenomeId);
+            newGenomeNode.delete(nodeGenomeId);
             setGenomeNode(newGenomeNode);
             setGenomes(newGenomes);
         } else {
             setGenomeNode(prev => {
                 const newGenomeNode = new Map(prev);
-                newGenomeNode.delete(selectedGenomeId!);
+                newGenomeNode.delete(nodeGenomeId);
                 return newGenomeNode;
             });
             setGenomes(prev => {
                 const newGenomes = new Map(prev);
-                newGenomes.delete(selectedGenomeId!);
+                newGenomes.delete(nodeGenomeId);
                 return newGenomes;
             });
         }
 
         setNodes(newNodes);
-
         setSelectedNodeId(null);
+        setSelectedConnectionId(null);
         setSelectedGenomeId(null);
         if (onNodeSelect) {
             onNodeSelect(null);
         }
-    }, [selectedNodeId, onNodeSelect]);
+    }, [nodeContextMenu, genomeNode, genomes, onNodeSelect]);
 
-    const editSelectedNode = useCallback(() => {
-        if (!selectedNodeId) return;
-        const node = nodesRef.current.get(selectedNodeId);
-        if (!node) return;
+    const handleConnectionContextMenuDelete = useCallback(() => {
+        if (!connectionContextMenu) return;
 
-        openConfigPanel(node.type, selectedNodeId);
-    }, [selectedNodeId, openConfigPanel]);
+        const connectionId = connectionContextMenu.connectionId;
+        const connectionToDelete = connectionsRef.current.get(connectionId);
+        if (!connectionToDelete) return;
+
+        setConnectionContextMenu(null);
+
+        setConnections(prev => {
+            const newConnections = new Map(prev);
+            newConnections.delete(connectionId);
+            return newConnections;
+        })
+
+        const newNodes = new Map(nodesRef.current);
+        const fromNode = newNodes.get(connectionToDelete.fromNodeId)!;
+        const toNode = newNodes.get(connectionToDelete.toNodeId)!;
+
+        fromNode.node.RemoveNext(toNode.node);
+
+        
+        if (fromNode.genomeId == toNode.genomeId) {
+            setNodes(newNodes);
+            return;
+        }
+
+        
+
+    }, [connectionContextMenu, genomeNode, genomes]);
 
     // const getRandomSubgraph = useCallback(() => {
     //TODO
@@ -590,24 +629,66 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     <button onClick={() => addNode('Concat2D')} style={buttonStyle}>+ Concat</button>
                     <button onClick={() => addNode('Output')} style={buttonStyle}>+ Output</button>
                 </div>
-                <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #ccc' }}>
-                    <button
-                        onClick={editSelectedNode}
-                        disabled={!selectedNodeId}
-                        style={{ ...buttonStyle, backgroundColor: '#FF9800', width: '100%', marginBottom: '5px' }}
-                    >
-                        Edit Node
-                    </button>
-                    <button
-                        onClick={deleteSelectedNode}
-                        disabled={!selectedNodeId}
-                        style={{ ...buttonStyle, backgroundColor: '#f44336', width: '100%' }}
-                    >
-                        Delete Node
-                    </button>
-
-                </div>
             </div>
+
+            {/* Context Menu */}
+            {nodeContextMenu && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        left: nodeContextMenu.x,
+                        top: nodeContextMenu.y,
+                        backgroundColor: 'white',
+                        border: '1px solid #ccc',
+                        zIndex: 2000,
+                        minWidth: '120px',
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                >
+                    <button
+                        onClick={handleNodeContextMenuEdit}
+                        style={{
+                            ...nodeContextMenuItemStyle,
+                            borderBottom: '1px solid #eee'
+                        }}
+                    >
+                        ✏️ Edit Node
+                    </button>
+                    <button
+                        onClick={handleNodeContextMenuDelete}
+                        style={{
+                            ...nodeContextMenuItemStyle,
+                            color: '#f44336'
+                        }}
+                    >
+                        🗑️ Delete Node
+                    </button>
+                </div>
+            )}
+            {connectionContextMenu && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        left: connectionContextMenu.x,
+                        top: connectionContextMenu.y,
+                        backgroundColor: 'white',
+                        border: '1px solid #ccc',
+                        zIndex: 2000,
+                        minWidth: '120px',
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                >
+                    <button
+                        onClick={handleConnectionContextMenuDelete}
+                        style={{
+                            ...nodeContextMenuItemStyle,
+                            color: '#f44336'
+                        }}
+                    >
+                        🗑️ Delete Connection
+                    </button>
+                </div>
+            )}
 
             <svg
                 ref={svgRef}
@@ -623,7 +704,10 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     if (e.target === svgRef.current) {
                         setSelectedNodeId(null);
                         setConnectingFrom(null);
+                        setNodeContextMenu(null);
                         if (onNodeSelect) onNodeSelect(null);
+                    } else {
+                        setNodeContextMenu(null);
                     }
                 }}
             >
@@ -633,6 +717,8 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                             key={conn.id}
                             connection={conn}
                             nodes={nodes}
+                            isSelected={selectedConnectionId == conn.id}
+                            onSelect={handleConnectionSelect}
                         />
                     ))}
 
@@ -653,6 +739,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                                 isSelected={selectedNodeId === node.node.id}
                                 onSelect={handleNodeSelect}
                                 onDragStart={handleNodeDragStart}
+                                onContextMenu={handleNodeContextMenu}
                             />
                         </g>
                     ))}
@@ -671,4 +758,17 @@ const buttonStyle: React.CSSProperties = {
     backgroundColor: '#2196F3',
     color: 'white',
     whiteSpace: 'nowrap'
+};
+
+const nodeContextMenuItemStyle: React.CSSProperties = {
+    display: 'block',
+    width: '100%',
+    padding: '8px 12px',
+    fontSize: '13px',
+    textAlign: 'left',
+    border: 'none',
+    borderRadius: '0',
+    background: 'white',
+    cursor: 'pointer',
+    color: '#333'
 };
