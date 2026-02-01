@@ -6,6 +6,7 @@ interface ConnectionRendererProps {
     nodes: Map<string, VisualNode>;
     isSelected: boolean;
     onSelect: (connectionId: string) => void;
+    onContextMenu: (id: string, e: React.MouseEvent) => void;
 }
 
 export const ConnectionRenderer: React.FC<ConnectionRendererProps> = ({
@@ -13,6 +14,7 @@ export const ConnectionRenderer: React.FC<ConnectionRendererProps> = ({
     nodes,
     isSelected,
     onSelect,
+    onContextMenu,
 }) => {
     const fromNode = nodes.get(connection.fromNodeId);
     const toNode = nodes.get(connection.toNodeId);
@@ -55,7 +57,15 @@ export const ConnectionRenderer: React.FC<ConnectionRendererProps> = ({
     };
 
     return (
-        <g onClick={() => onSelect(connection.id)}>
+        <g onMouseDown={(e) => {
+            e.stopPropagation();
+            onSelect(connection.id);
+        }}
+            onContextMenu={(e) => {
+                e.stopPropagation();
+                onContextMenu(connection.id, e);
+            }}
+        >
             <line
                 x1={adjustedStartX}
                 y1={adjustedStartY}

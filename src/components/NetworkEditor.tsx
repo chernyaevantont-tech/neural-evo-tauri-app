@@ -33,7 +33,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
     const [configNodeType, setConfigNodeType] = useState<NodeType | null>(null);
     const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
     const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
-    const [connectionContextMenu, setConnectionContextMenu] = useState<{x: number, y: number, connectionId: string} | null>(null);
+    const [connectionContextMenu, setConnectionContextMenu] = useState<{ x: number, y: number, connectionId: string } | null>(null);
 
     const [scale, setScale] = useState<number>(1);
     const [translate, setTranslate] = useState<Position>({ x: 0, y: 0 });
@@ -435,7 +435,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
     const handleNodeContextMenuDelete = useCallback(() => {
         if (!nodeContextMenu) return;
-        
+
         const nodeIdToDelete = nodeContextMenu.nodeId;
         const nodeToDelete = nodesRef.current.get(nodeIdToDelete);
         if (!nodeToDelete) return;
@@ -458,7 +458,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         newNodes.delete(nodeIdToDelete);
 
         const nodeGenomeId = deletingNode.genomeId;
-        
+
         if (genomeNode.get(nodeGenomeId)!.length > 1) {
             const newGenomes = new Map(genomes);
             const newGenomeNode = new Map(genomeNode);
@@ -538,6 +538,13 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         }
     }, [nodeContextMenu, genomeNode, genomes, onNodeSelect]);
 
+    const handleConnectionContextMenu = useCallback((connectionId: string, e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setNodeContextMenu(null);
+        setConnectionContextMenu({ x: e.clientX, y: e.clientY, connectionId: connectionId});
+    }, []);
+
     const handleConnectionContextMenuDelete = useCallback(() => {
         if (!connectionContextMenu) return;
 
@@ -554,19 +561,100 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         })
 
         const newNodes = new Map(nodesRef.current);
+        const newGenomes = new Map(genomes);
+        const newGenomeNode = new Map(genomeNode);
+
         const fromNode = newNodes.get(connectionToDelete.fromNodeId)!;
         const toNode = newNodes.get(connectionToDelete.toNodeId)!;
 
+        const genomeId = toNode.genomeId;
+
         fromNode.node.RemoveNext(toNode.node);
 
-        
-        if (fromNode.genomeId == toNode.genomeId) {
-            setNodes(newNodes);
-            return;
+        const toNodeConnectedNodes: VisualNode[] = [];
+        const toConnectedNodesMap: Map<BaseNode, boolean> = new Map();
+        const toNodesToCheck: BaseNode[] = [toNode.node];
+
+        const toGenomeId = v4();
+        let toGenomeValidFlag = true;
+        const toInputNodes: BaseNode[] = [];
+        const toOutputNodes: BaseNode[] = [];
+
+        let sameGenomeFlag = false;
+
+        while (toNodesToCheck.length > 0) {
+            const currentNode = toNodesToCheck.shift()!;
+            if (!toConnectedNodesMap.get(currentNode)) {
+                if (currentNode.id == fromNode.node.id && currentNode.id == toNode.node.id ) {
+                    sameGenomeFlag = true;
+                    break;
+                }
+                if (currentNode.previous.length == 0) {
+                    toInputNodes.push(currentNode);
+                    if (!(currentNode instanceof InputNode)) {
+                        toGenomeValidFlag = false;
+                    }
+                }
+                 if (currentNode.next.length == 0) {
+                    toOutputNodes.push(currentNode);
+                    if (!(currentNode instanceof OutputNode)) {
+                        toGenomeValidFlag = false;
+                    }
+                }
+                toConnectedNodesMap.set(currentNode, true);
+                toNodesToCheck.push(...currentNode.previous, ...currentNode.next);
+                toNodeConnectedNodes.push({...nodes.get(currentNode.id)!, node: currentNode});
+                newNodes.set(currentNode.id, {...nodes.get(currentNode.id)!, genomeId: toGenomeId});
+            }
         }
 
-        
+        if (!sameGenomeFlag) {
+            const fromNodeConnectedNodes: VisualNode[] = [];
+            const fromConnectedNodesMap: Map<BaseNode, boolean> = new Map();
+            const fromNodesToCheck: BaseNode[] = [fromNode.node];
 
+            const fromGenomeId = v4();
+            let fromGenomeValidFlag = true;
+            const fromInputNodes: BaseNode[] = [];
+            const fromOutputNodes: BaseNode[] = [];
+
+            while (fromNodesToCheck.length > 0) {
+                const currentNode = fromNodesToCheck.shift()!;
+                if (!fromConnectedNodesMap.get(currentNode)) {
+                    if (currentNode.previous.length == 0) {
+                        fromInputNodes.push(currentNode);
+                        if (!(currentNode instanceof InputNode)) {
+                            fromGenomeValidFlag = false;
+                        }
+                    }
+                    if (currentNode.next.length == 0) {
+                        fromOutputNodes.push(currentNode);
+                        if (!(currentNode instanceof OutputNode)) {
+                            fromGenomeValidFlag = false;
+                        }
+                    }
+                    fromConnectedNodesMap.set(currentNode, true);
+                    fromNodesToCheck.push(...currentNode.previous, ...currentNode.next);
+                    fromNodeConnectedNodes.push({...nodes.get(currentNode.id)!, node: currentNode});
+                    newNodes.set(currentNode.id, {...nodes.get(currentNode.id)!, genomeId: fromGenomeId});
+                }
+            }
+
+            const toGenome = new Genome(toInputNodes, toOutputNodes);
+            const fromGenome = new Genome(fromInputNodes, fromOutputNodes);
+            
+            newGenomes.delete(genomeId);
+            newGenomes.set(toGenomeId, {genome: toGenome, isValid: toGenomeValidFlag, id: toGenomeId});
+            newGenomes.set(fromGenomeId, {genome:fromGenome, isValid: fromGenomeValidFlag, id: fromGenomeId});
+            setGenomes(newGenomes);
+
+            newGenomeNode.delete(genomeId);
+            newGenomeNode.set(toGenomeId, toNodeConnectedNodes);
+            newGenomeNode.set(fromGenomeId, fromNodeConnectedNodes);
+            setGenomeNode(newGenomeNode);
+            
+            setNodes(newNodes);
+        }
     }, [connectionContextMenu, genomeNode, genomes]);
 
     // const getRandomSubgraph = useCallback(() => {
@@ -703,11 +791,16 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 onClick={(e) => {
                     if (e.target === svgRef.current) {
                         setSelectedNodeId(null);
+                        setSelectedConnectionId(null);
                         setConnectingFrom(null);
                         setNodeContextMenu(null);
+                        setConnectionContextMenu(null);
+                        setConnectionContextMenu(null);
                         if (onNodeSelect) onNodeSelect(null);
+                        if (onGenomeSelect) onGenomeSelect(null);
                     } else {
                         setNodeContextMenu(null);
+                        setConnectionContextMenu(null);
                     }
                 }}
             >
@@ -719,6 +812,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                             nodes={nodes}
                             isSelected={selectedConnectionId == conn.id}
                             onSelect={handleConnectionSelect}
+                            onContextMenu={handleConnectionContextMenu}
                         />
                     ))}
 
