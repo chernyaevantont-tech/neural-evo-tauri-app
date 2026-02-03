@@ -16,7 +16,7 @@ export class FlattenNode extends BaseNode {
     protected Mutate(mutation_options: Map<string, number>): void {}
 
     CheckCompability(node: BaseNode): Boolean {
-        return node.GetOutputShape().length == 3
+        return this.previous.length == 0 && node.GetOutputShape().length == 3
     }
 
     public GetNodeType = (): string => "Flatten";
