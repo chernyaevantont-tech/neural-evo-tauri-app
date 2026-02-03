@@ -940,7 +940,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
         setNodes(newNodes);
         setGenomes(newGenomes);
-        setGenomeNode(genomeNode);
+        setGenomeNode(newGenomeNode);
         setConnections(newConnections);
     }
 
