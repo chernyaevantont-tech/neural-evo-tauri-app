@@ -28,7 +28,7 @@ export const loadGenome = (genomeStr: String): {
 
         switch (obj.node) {
             case "Input":
-                const outputShape = obj.params.outputShape;
+                const outputShape = obj.params.output_shape;
                 nodes.push(new InputNode(outputShape));
                 break;
             case "Dense":
@@ -76,7 +76,7 @@ export const loadGenome = (genomeStr: String): {
                 }
             case "Output":
                 {
-                    const inputShape = obj.params.inputShape;
+                    const inputShape = obj.params.input_shape;
                     nodes.push(new OutputNode(inputShape));
                     break;
                 }
