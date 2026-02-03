@@ -22,12 +22,10 @@ export class DenseNode extends BaseNode {
     protected CalculateOutputShape(): void {
         this.outputShape = [this.units]
     }
-    GetInfo(): String {
+    GetInfo(): string {
         return JSON.stringify({
-            node: "Dense",
+            node: this.GetNodeType(),
             params: {
-                input_shape: this.inputShape,
-                output_shape: this.outputShape,
                 units: this.units,
                 activation: this.activation,
                 use_bias: this.useBias
@@ -60,4 +58,5 @@ export class DenseNode extends BaseNode {
         return node.GetOutputShape().length == 1
     }
 
+    public GetNodeType = (): string => "Dense";
 }

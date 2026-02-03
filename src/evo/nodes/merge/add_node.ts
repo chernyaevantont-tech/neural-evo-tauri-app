@@ -5,13 +5,10 @@ export class AddNode extends BaseNode {
         this.outputShape = this.inputShape
     }
 
-    GetInfo(): String {
+    GetInfo(): string {
         return JSON.stringify({
-            node: "Add",
-            params: {
-                input_shape: this.inputShape,
-                output_shape: this.outputShape
-            }
+            node: this.GetNodeType(),
+            params: {}
         })
     }
 
@@ -25,4 +22,5 @@ export class AddNode extends BaseNode {
         return this.inputShape.length == 0 ? true: node.GetOutputShape().every((val, index) => val == this.inputShape[index])
     }
 
+    public GetNodeType = (): string => "Add";
 }

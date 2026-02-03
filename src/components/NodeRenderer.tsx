@@ -1,5 +1,5 @@
 import React from 'react';
-import { VisualNode, NodeType } from './types';
+import { VisualNode } from './types';
 
 interface NodeRendererProps {
     node: VisualNode;
@@ -9,7 +9,7 @@ interface NodeRendererProps {
     onContextMenu: (id: string, e: React.MouseEvent) => void;
 }
 
-const getNodeColor = (type: NodeType): string => {
+const getNodeColor = (type: String): string => {
     switch (type) {
         case 'Input': return '#4CAF50';
         case 'Dense': return '#2196F3';
@@ -23,11 +23,11 @@ const getNodeColor = (type: NodeType): string => {
     }
 };
 
-const getNodeLabel = (type: NodeType): string => {
+const getNodeLabel = (type: String): string => {
     switch (type) {
         case 'Conv2D': return 'Conv2D';
         case 'Concat2D': return 'Concat';
-        default: return type;
+        default: return type.toString();
     }
 };
 
@@ -39,8 +39,8 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
     onContextMenu
 }) => {
     const radius = 50;
-    const color = getNodeColor(node.type);
-    const label = getNodeLabel(node.type);
+    const color = getNodeColor(node.node.GetNodeType());
+    const label = getNodeLabel(node.node.GetNodeType());
 
     return (
         <g

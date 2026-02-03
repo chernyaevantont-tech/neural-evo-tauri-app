@@ -1,8 +1,8 @@
 import { BaseNode } from "./nodes/base_node"
 
 export class Genome {
-    private inputNodes: BaseNode[]
-    private outputNodes: BaseNode[]
+    public inputNodes: BaseNode[]
+    public outputNodes: BaseNode[]
 
     constructor(
         inputNodes: BaseNode[],

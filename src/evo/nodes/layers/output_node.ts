@@ -8,9 +8,9 @@ export class OutputNode extends BaseNode {
 
     protected CalculateOutputShape(): void {}
 
-    GetInfo(): String {
+    GetInfo(): string {
         return JSON.stringify({
-            node: "Output",
+            node: this.GetNodeType(),
             params: {
                 input_shape: this.inputShape
             }
@@ -31,4 +31,5 @@ export class OutputNode extends BaseNode {
         this.previous.push(node)
     }
 
+    public GetNodeType = (): string => "Output";
 }

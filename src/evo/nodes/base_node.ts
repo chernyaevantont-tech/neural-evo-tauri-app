@@ -14,7 +14,7 @@ export abstract class BaseNode {
     public id: string = v4();
 
     protected abstract CalculateOutputShape(): void
-    abstract GetInfo(): String
+    abstract GetInfo(): string
     abstract GetResources(dtype: number): ResourceCriteria
     protected abstract Mutate(mutation_options: Map<string, number>): void
     abstract CheckCompability(node: BaseNode): Boolean
@@ -53,4 +53,6 @@ export abstract class BaseNode {
         this.next.forEach(n => this.RemoveNext(n));
         this.previous.forEach(n => n.RemoveNext(this));
     }
+
+    public abstract GetNodeType(): string; 
 }

@@ -29,12 +29,10 @@ export class PoolingNode extends BaseNode {
         this.outputShape = [hOut, wOut, this.inputShape[2]]
     }
 
-    GetInfo(): String {
+    GetInfo(): string {
         return JSON.stringify({
-            node: "Pooling",
+            node: this.GetNodeType(),
             params: {
-                input_shape: this.inputShape,
-                output_shape: this.outputShape,
                 pool_type: this.poolType,
                 kernel_size: this.kernelSize,
                 stride: this.stride,
@@ -67,4 +65,5 @@ export class PoolingNode extends BaseNode {
         return node.GetOutputShape().length == 3
     }
     
+    public GetNodeType = (): string => "Pooling";
 }

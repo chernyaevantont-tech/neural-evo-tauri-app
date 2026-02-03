@@ -9,7 +9,6 @@ export type Position = {
 export type VisualNode = {
     node: BaseNode;
     position: Position;
-    type: NodeType;
     genomeId: string;
 };
 
@@ -29,17 +28,6 @@ export type Connection = {
     toNodeId: string;
 };
 
-export type NodeType = 
-    | "Input"
-    | "Dense" 
-    | "Conv2D" 
-    | "Pooling"
-    | "Flatten"
-    | "Add"
-    | "Concat2D"
-    | "Output";
-
 export type NodeConfig = {
-    type: NodeType;
     params: any;
 };

@@ -36,12 +36,10 @@ export class Conv2DNode extends BaseNode {
         this.outputShape = [hOut, wOut, this.filters]
     }
 
-    GetInfo(): String {
+    GetInfo(): string {
         return JSON.stringify({
-            node: "Conv2D",
+            node: this.GetNodeType(),
             params: {
-                input_shape: this.inputShape,
-                output_shape: this.outputShape,
                 filters: this.filters,
                 kernel_size: this.kernelSize,
                 padding: this.padding,
@@ -95,4 +93,5 @@ export class Conv2DNode extends BaseNode {
         return node.GetOutputShape().length == 3
     }
     
+    public GetNodeType = (): string => "Conv2D";
 }

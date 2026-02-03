@@ -9,9 +9,9 @@ export class InputNode extends BaseNode{
 
     protected CalculateOutputShape(): void {}
 
-    GetInfo(): String {
+    GetInfo(): string {
         return JSON.stringify({
-            node: "Input",
+            node: this.GetNodeType(),
             params: {
                 output_shape: this.outputShape
             }
@@ -27,4 +27,5 @@ export class InputNode extends BaseNode{
         throw new Error("Method not implemented.");
     }
 
+    public GetNodeType = (): string => "Input";
 }

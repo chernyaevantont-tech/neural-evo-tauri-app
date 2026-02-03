@@ -1,5 +1,7 @@
 import React from "react";
 import { VisualGenome } from "./types";
+import { saveGenome } from "../saver/saveGenome";
+import { saveGenomeApi } from "../api/genome/saveGenome";
 
 interface GenomeInfoPanelProps {
     genomes: VisualGenome[];
@@ -21,7 +23,12 @@ export const GenomeInfoPanel: React.FC<GenomeInfoPanelProps> = ({genomes}) => {
             {
                 genomes.map(genome => (
                     <div style={{color: genome.isValid ? 'green' : 'red'}}>
-                        {genome.id}
+                        {genome.id} 
+                        <span onClick={() => {
+                            console.log("aboba");
+                            const genomeStr = saveGenome(genome.genome);
+                            saveGenomeApi(genomeStr, "D://aboba.txt", () => {});
+                        }}>💾</span>
                     </div>
                 ))
             }

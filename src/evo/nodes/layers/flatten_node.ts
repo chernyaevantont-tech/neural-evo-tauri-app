@@ -4,12 +4,10 @@ export class FlattenNode extends BaseNode {
     protected CalculateOutputShape(): void {
         this.outputShape = [this.inputShape[0] * this.inputShape[1] * this.inputShape[2]]
     }
-    GetInfo(): String {
+    GetInfo(): string {
         return JSON.stringify({
-            node: "Flatten",
-            params: {
-                output_shape : this.outputShape
-            }
+            node: this.GetNodeType(),
+            params: {}
         })
     }
     GetResources(dtype: number): ResourceCriteria {
@@ -21,4 +19,5 @@ export class FlattenNode extends BaseNode {
         return node.GetOutputShape().length == 3
     }
 
+    public GetNodeType = (): string => "Flatten";
 }

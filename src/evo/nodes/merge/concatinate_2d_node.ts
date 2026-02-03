@@ -13,13 +13,10 @@ export class Concat2DNode extends BaseNode {
         this.outputShape = [h, w, c]
     }
 
-    GetInfo(): String {
+    GetInfo(): string {
         return JSON.stringify({
-            node: "Concat",
-            params: {
-                input_shape: this.inputShape,
-                output_shape: this.outputShape
-            }
+            node: this.GetNodeType(),
+            params: {}
         })
     }
 
@@ -42,4 +39,6 @@ export class Concat2DNode extends BaseNode {
 
         this.previous.push(node)
     }
+
+    public GetNodeType = () => "Concat";
 } 

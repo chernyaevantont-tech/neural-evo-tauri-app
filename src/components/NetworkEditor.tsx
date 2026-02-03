@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { VisualNode, Connection, Position, NodeType, VisualGenome } from './types';
+import { VisualNode, Connection, Position, VisualGenome } from './types';
 import { NodeRenderer } from './NodeRenderer';
 import { ConnectionRenderer } from './ConnectionRenderer';
 import { NodeConfigPanel } from './NodeConfigPanel';
@@ -11,6 +11,8 @@ import './NetworkEditor.css';
 import { Genome } from '../evo/genome';
 import { InputNode } from '../evo/nodes/layers/input_node';
 import { OutputNode } from '../evo/nodes/layers/output_node';
+import { loadGenomeApi } from '../api/genome/loadGenome';
+import { ConnectionIndexes, loadGenome } from '../saver/loadGenome';
 
 interface NetworkEditorProps {
     onNodeSelect: (node: VisualNode | null) => void;
@@ -30,7 +32,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
     const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
     const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 });
     const [configPanelOpen, setConfigPanelOpen] = useState<boolean>(false);
-    const [configNodeType, setConfigNodeType] = useState<NodeType | null>(null);
+    const [configNodeType, setConfigNodeType] = useState<string | null>(null);
     const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
     const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
     const [connectionContextMenu, setConnectionContextMenu] = useState<{ x: number, y: number, connectionId: string } | null>(null);
@@ -52,7 +54,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         connectionsRef.current = connections;
     }, [connections]);
 
-    const openConfigPanel = useCallback((type: NodeType, nodeId?: string) => {
+    const openConfigPanel = useCallback((type: string, nodeId?: string) => {
         setConfigNodeType(type);
         setEditingNodeId(nodeId || null);
         setConfigPanelOpen(true);
@@ -162,7 +164,6 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             const visualNode: VisualNode = {
                 node: newNode,
                 position: pos,
-                type: configNodeType!,
                 genomeId: newGenome.id,
             };
 
@@ -183,15 +184,13 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         setEditingNodeId(null);
     }, []);
 
-    const addNode = useCallback((type: NodeType) => {
+    const addNode = useCallback((type: string) => {
         openConfigPanel(type);
     }, [openConfigPanel]);
 
     const handleNodeDragStart = useCallback((nodeId: string, e: React.MouseEvent) => {
         e.preventDefault();
         const node = nodesRef.current.get(nodeId);
-
-        console.log("node drag start", nodeId);
 
         if (!node || !svgRef.current) return;
 
@@ -227,8 +226,6 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             }));
             setPanStart({ x: e.clientX, y: e.clientY });
         } else if (draggingNodeId && svgRef.current) {
-            console.log("dragging", draggingNodeId);
-
             // Handle node dragging
             const svg = svgRef.current;
             const rect = svg.getBoundingClientRect();
@@ -382,14 +379,12 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                         if (node.node.previous.length == 0) {
                             inputNodes.push(node.node);
                             if (!(node.node instanceof InputNode)) {
-                                console.log("input node is not valid");
                                 isValidFlag = false;
                             }
                         }
                         if (node.node.next.length == 0) {
                             outputNodes.push(node.node);
                             if (!(node.node instanceof OutputNode)) {
-                                console.log("output node is not valid");
                                 isValidFlag = false;
                             }
                         }
@@ -429,7 +424,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         if (!node) return;
 
         setSelectedNodeId(nodeContextMenu.nodeId);
-        openConfigPanel(node.type, nodeContextMenu.nodeId);
+        openConfigPanel(node.node.GetNodeType(), nodeContextMenu.nodeId);
         setNodeContextMenu(null);
     }, [nodeContextMenu, openConfigPanel]);
 
@@ -542,7 +537,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         e.preventDefault();
         e.stopPropagation();
         setNodeContextMenu(null);
-        setConnectionContextMenu({ x: e.clientX, y: e.clientY, connectionId: connectionId});
+        setConnectionContextMenu({ x: e.clientX, y: e.clientY, connectionId: connectionId });
     }, []);
 
     const handleConnectionContextMenuDelete = useCallback(() => {
@@ -585,7 +580,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         while (toNodesToCheck.length > 0) {
             const currentNode = toNodesToCheck.shift()!;
             if (!toConnectedNodesMap.get(currentNode)) {
-                if (currentNode.id == fromNode.node.id && currentNode.id == toNode.node.id ) {
+                if (currentNode.id == fromNode.node.id && currentNode.id == toNode.node.id) {
                     sameGenomeFlag = true;
                     break;
                 }
@@ -595,7 +590,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                         toGenomeValidFlag = false;
                     }
                 }
-                 if (currentNode.next.length == 0) {
+                if (currentNode.next.length == 0) {
                     toOutputNodes.push(currentNode);
                     if (!(currentNode instanceof OutputNode)) {
                         toGenomeValidFlag = false;
@@ -603,8 +598,8 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 }
                 toConnectedNodesMap.set(currentNode, true);
                 toNodesToCheck.push(...currentNode.previous, ...currentNode.next);
-                toNodeConnectedNodes.push({...nodes.get(currentNode.id)!, node: currentNode});
-                newNodes.set(currentNode.id, {...nodes.get(currentNode.id)!, genomeId: toGenomeId});
+                toNodeConnectedNodes.push({ ...nodes.get(currentNode.id)!, node: currentNode });
+                newNodes.set(currentNode.id, { ...nodes.get(currentNode.id)!, genomeId: toGenomeId });
             }
         }
 
@@ -635,31 +630,319 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     }
                     fromConnectedNodesMap.set(currentNode, true);
                     fromNodesToCheck.push(...currentNode.previous, ...currentNode.next);
-                    fromNodeConnectedNodes.push({...nodes.get(currentNode.id)!, node: currentNode});
-                    newNodes.set(currentNode.id, {...nodes.get(currentNode.id)!, genomeId: fromGenomeId});
+                    fromNodeConnectedNodes.push({ ...nodes.get(currentNode.id)!, node: currentNode });
+                    newNodes.set(currentNode.id, { ...nodes.get(currentNode.id)!, genomeId: fromGenomeId });
                 }
             }
 
             const toGenome = new Genome(toInputNodes, toOutputNodes);
             const fromGenome = new Genome(fromInputNodes, fromOutputNodes);
-            
+
             newGenomes.delete(genomeId);
-            newGenomes.set(toGenomeId, {genome: toGenome, isValid: toGenomeValidFlag, id: toGenomeId});
-            newGenomes.set(fromGenomeId, {genome:fromGenome, isValid: fromGenomeValidFlag, id: fromGenomeId});
+            newGenomes.set(toGenomeId, { genome: toGenome, isValid: toGenomeValidFlag, id: toGenomeId });
+            newGenomes.set(fromGenomeId, { genome: fromGenome, isValid: fromGenomeValidFlag, id: fromGenomeId });
             setGenomes(newGenomes);
 
             newGenomeNode.delete(genomeId);
             newGenomeNode.set(toGenomeId, toNodeConnectedNodes);
             newGenomeNode.set(fromGenomeId, fromNodeConnectedNodes);
             setGenomeNode(newGenomeNode);
-            
+
             setNodes(newNodes);
         }
     }, [connectionContextMenu, genomeNode, genomes]);
 
-    // const getRandomSubgraph = useCallback(() => {
-    //TODO
-    // }, [selectedGraphId])
+    // Функция 1: Расчет позиций для нового загруженного графа с центрированием
+    const calculateLayoutForNewGraph = useCallback((
+        nodesToLayout: BaseNode[],
+        iterations: number = 300
+    ): Map<string, Position> => {
+        if (nodesToLayout.length === 0) return new Map();
+
+        // Параметры физической симуляции
+        const REPULSION_STRENGTH = 5000;
+        const ATTRACTION_STRENGTH = 0.01;
+        const DAMPING = 0.85;
+        const MIN_DISTANCE = 50;
+        const IDEAL_DISTANCE = 150;
+
+        // Инициализация случайных позиций для новых нод
+        const positions = new Map<string, Position>();
+        const velocities = new Map<string, Position>();
+
+        nodesToLayout.forEach((node, index) => {
+            // Размещаем в круге для начального распределения
+            const angle = (index / nodesToLayout.length) * Math.PI * 2;
+            const radius = 100;
+            positions.set(node.id, {
+                x: Math.cos(angle) * radius,
+                y: Math.sin(angle) * radius
+            });
+            velocities.set(node.id, { x: 0, y: 0 });
+        });
+
+        // Симуляция
+        for (let iter = 0; iter < iterations; iter++) {
+            const forces = new Map<string, Position>();
+
+            nodesToLayout.forEach(node => {
+                forces.set(node.id, { x: 0, y: 0 });
+            });
+
+            // Силы отталкивания между всеми парами
+            for (let i = 0; i < nodesToLayout.length; i++) {
+                for (let j = i + 1; j < nodesToLayout.length; j++) {
+                    const node1 = nodesToLayout[i];
+                    const node2 = nodesToLayout[j];
+                    const pos1 = positions.get(node1.id)!;
+                    const pos2 = positions.get(node2.id)!;
+
+                    const dx = pos2.x - pos1.x;
+                    const dy = pos2.y - pos1.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+
+                    if (distance < MIN_DISTANCE) continue;
+
+                    const repulsionForce = REPULSION_STRENGTH / (distance * distance);
+                    const fx = (dx / distance) * repulsionForce;
+                    const fy = (dy / distance) * repulsionForce;
+
+                    const force1 = forces.get(node1.id)!;
+                    const force2 = forces.get(node2.id)!;
+                    force1.x -= fx;
+                    force1.y -= fy;
+                    force2.x += fx;
+                    force2.y += fy;
+                }
+            }
+
+            // Силы притяжения для соединенных узлов
+            nodesToLayout.forEach(node => {
+                node.next.forEach(nextNode => {
+                    const pos1 = positions.get(node.id);
+                    const pos2 = positions.get(nextNode.id);
+
+                    if (!pos1 || !pos2) return;
+
+                    const dx = pos2.x - pos1.x;
+                    const dy = pos2.y - pos1.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+
+                    const attractionForce = ATTRACTION_STRENGTH * (distance - IDEAL_DISTANCE);
+                    const fx = (dx / distance) * attractionForce;
+                    const fy = (dy / distance) * attractionForce;
+
+                    const force1 = forces.get(node.id)!;
+                    const force2 = forces.get(nextNode.id)!;
+                    force1.x += fx;
+                    force1.y += fy;
+                    force2.x -= fx;
+                    force2.y -= fy;
+                });
+            });
+
+            // Применение сил
+            nodesToLayout.forEach(node => {
+                const velocity = velocities.get(node.id)!;
+                const force = forces.get(node.id)!;
+                const pos = positions.get(node.id)!;
+
+                velocity.x = (velocity.x + force.x) * DAMPING;
+                velocity.y = (velocity.y + force.y) * DAMPING;
+
+                pos.x += velocity.x;
+                pos.y += velocity.y;
+            });
+        }
+
+        // Вычисление центра графа
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+
+        positions.forEach(pos => {
+            minX = Math.min(minX, pos.x);
+            maxX = Math.max(maxX, pos.x);
+            minY = Math.min(minY, pos.y);
+            maxY = Math.max(maxY, pos.y);
+        });
+
+        const graphCenterX = (minX + maxX) / 2;
+        const graphCenterY = (minY + maxY) / 2;
+
+        // Центрирование относительно экрана
+        if (svgRef.current) {
+            const svg = svgRef.current;
+            const rect = svg.getBoundingClientRect();
+            const screenCenterX = rect.width / 2;
+            const screenCenterY = rect.height / 2;
+            const worldCenterX = (screenCenterX - translate.x) / scale;
+            const worldCenterY = (screenCenterY - translate.y) / scale;
+
+            const offsetX = worldCenterX - graphCenterX;
+            const offsetY = worldCenterY - graphCenterY;
+
+            // Применение смещения
+            const finalPositions = new Map<string, Position>();
+            positions.forEach((pos, id) => {
+                finalPositions.set(id, {
+                    x: Math.round(pos.x + offsetX),
+                    y: Math.round(pos.y + offsetY)
+                });
+            });
+
+            return finalPositions;
+        }
+
+        return positions;
+    }, [scale, translate]);
+
+    // Функция 2: Глобальная симуляция для всех существующих нод
+    const applyGlobalForceDirectedLayout = useCallback((iterations: number = 200) => {
+        if (nodes.size === 0) return;
+
+        // Параметры (более слабые для сохранения структуры)
+        const REPULSION_STRENGTH = 3000;
+        const ATTRACTION_STRENGTH = 0.015;
+        const DAMPING = 0.9;
+        const MIN_DISTANCE = 50;
+        const IDEAL_DISTANCE = 150;
+
+        // Используем текущие позиции как начальные
+        const positions = new Map<string, Position>();
+        const velocities = new Map<string, Position>();
+
+        nodes.forEach((node, id) => {
+            positions.set(id, { ...node.position });
+            velocities.set(id, { x: 0, y: 0 });
+        });
+
+        const nodeIds = Array.from(nodes.keys());
+
+        // Симуляция
+        for (let iter = 0; iter < iterations; iter++) {
+            const forces = new Map<string, Position>();
+
+            nodeIds.forEach(id => {
+                forces.set(id, { x: 0, y: 0 });
+            });
+
+            // Силы отталкивания между всеми парами
+            for (let i = 0; i < nodeIds.length; i++) {
+                for (let j = i + 1; j < nodeIds.length; j++) {
+                    const id1 = nodeIds[i];
+                    const id2 = nodeIds[j];
+                    const pos1 = positions.get(id1)!;
+                    const pos2 = positions.get(id2)!;
+
+                    const dx = pos2.x - pos1.x;
+                    const dy = pos2.y - pos1.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+
+                    if (distance < MIN_DISTANCE) continue;
+
+                    const repulsionForce = REPULSION_STRENGTH / (distance * distance);
+                    const fx = (dx / distance) * repulsionForce;
+                    const fy = (dy / distance) * repulsionForce;
+
+                    const force1 = forces.get(id1)!;
+                    const force2 = forces.get(id2)!;
+                    force1.x -= fx;
+                    force1.y -= fy;
+                    force2.x += fx;
+                    force2.y += fy;
+                }
+            }
+
+            // Силы притяжения для соединений
+            connections.forEach(conn => {
+                const pos1 = positions.get(conn.fromNodeId);
+                const pos2 = positions.get(conn.toNodeId);
+
+                if (!pos1 || !pos2) return;
+
+                const dx = pos2.x - pos1.x;
+                const dy = pos2.y - pos1.y;
+                const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+
+                const attractionForce = ATTRACTION_STRENGTH * (distance - IDEAL_DISTANCE);
+                const fx = (dx / distance) * attractionForce;
+                const fy = (dy / distance) * attractionForce;
+
+                const force1 = forces.get(conn.fromNodeId)!;
+                const force2 = forces.get(conn.toNodeId)!;
+                force1.x += fx;
+                force1.y += fy;
+                force2.x -= fx;
+                force2.y -= fy;
+            });
+
+            // Применение сил
+            nodeIds.forEach(id => {
+                const velocity = velocities.get(id)!;
+                const force = forces.get(id)!;
+                const pos = positions.get(id)!;
+
+                velocity.x = (velocity.x + force.x) * DAMPING;
+                velocity.y = (velocity.y + force.y) * DAMPING;
+
+                pos.x += velocity.x;
+                pos.y += velocity.y;
+            });
+        }
+
+        // Применение новых позиций (без центрирования)
+        setNodes(prev => {
+            const newNodes = new Map(prev);
+            positions.forEach((pos, id) => {
+                const node = newNodes.get(id);
+                if (node) {
+                    node.position = {
+                        x: Math.round(pos.x),
+                        y: Math.round(pos.y)
+                    };
+                    newNodes.set(id, { ...node });
+                }
+            });
+            return newNodes;
+        });
+    }, [nodes, connections]);
+
+    const handleGenomeLoad = (
+        loadedNodes: BaseNode[],
+        loadedGenome: Genome,
+        connectionIndexes: ConnectionIndexes,
+        isValid: boolean,
+    ) => {
+        const newNodes = new Map(nodes);
+        const newGenomes = new Map(genomes);
+        const newGenomeNode = new Map(genomeNode);
+        const newConnections = new Map(connections);
+
+        const newNodesPosition = calculateLayoutForNewGraph(loadedNodes);
+        const loadedGenomeId = v4();
+
+        const visualNodes: VisualNode[] = [];
+
+        for (let node of loadedNodes) {
+            const newVisualNode = { node: node, position: newNodesPosition.get(node.id)!, genomeId: loadedGenomeId };
+            newNodes.set(node.id, newVisualNode);
+            visualNodes.push(newVisualNode);
+        }
+        newGenomes.set(loadedGenomeId, { id: loadedGenomeId, genome: loadedGenome, isValid: isValid });
+        newGenomeNode.set(loadedGenomeId, visualNodes);
+
+        for (let connectionUnit of connectionIndexes) {
+            const newConnectionId = v4();
+            const fromNodeId = loadedNodes[connectionUnit.fromIndex].id;
+            const toNodeId = loadedNodes[connectionUnit.toIndex].id;
+            newConnections.set(newConnectionId, { id: newConnectionId, fromNodeId: fromNodeId, toNodeId: toNodeId });
+        }
+
+        setNodes(newNodes);
+        setGenomes(newGenomes);
+        setGenomeNode(genomeNode);
+        setConnections(newConnections);
+    }
 
     return (
         <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -706,7 +989,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 padding: '10px',
                 borderRadius: '8px',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
-            }}>
+            }}>D
                 <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', maxWidth: '200px' }}>
                     <button onClick={() => addNode('Input')} style={buttonStyle}>+ Input</button>
                     <button onClick={() => addNode('Dense')} style={buttonStyle}>+ Dense</button>
@@ -717,6 +1000,10 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     <button onClick={() => addNode('Concat2D')} style={buttonStyle}>+ Concat</button>
                     <button onClick={() => addNode('Output')} style={buttonStyle}>+ Output</button>
                 </div>
+                <button onClick={() => loadGenomeApi("D://aboba.txt", (genomeStr) => {
+                    const {nodes, genome, connectionIndexes, isValid} = loadGenome(genomeStr);
+                    handleGenomeLoad(nodes, genome, connectionIndexes, isValid);
+                })}>Load</button>
             </div>
 
             {/* Context Menu */}
