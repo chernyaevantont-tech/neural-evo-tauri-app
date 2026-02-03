@@ -59,4 +59,10 @@ export class DenseNode extends BaseNode {
     }
 
     public GetNodeType = (): string => "Dense";
+
+    public Clone = (): BaseNode  => new DenseNode(
+        this.units,
+        this.activation,
+        this.useBias
+    );
 }

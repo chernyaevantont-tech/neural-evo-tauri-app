@@ -10,6 +10,7 @@ export type VisualNode = {
     node: BaseNode;
     position: Position;
     genomeId: string;
+    highlighted: boolean;
 };
 
 export type VisualGenome = {

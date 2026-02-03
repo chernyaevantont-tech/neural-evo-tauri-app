@@ -4,7 +4,7 @@ export class InputNode extends BaseNode{
     
     constructor (outputShape: number[]) {
         super()
-        this.outputShape = outputShape
+        this.outputShape = [...outputShape]
     }
 
     protected CalculateOutputShape(): void {}
@@ -28,4 +28,8 @@ export class InputNode extends BaseNode{
     }
 
     public GetNodeType = (): string => "Input";
+
+    public Clone = (): BaseNode  => new InputNode(
+        [...this.outputShape]
+    );
 }

@@ -94,4 +94,13 @@ export class Conv2DNode extends BaseNode {
     }
     
     public GetNodeType = (): string => "Conv2D";
+
+    public Clone = (): BaseNode  => new Conv2DNode(
+        this.filters,
+        this.kernelSize,
+        this.stride,
+        this.padding,
+        this.dilation,
+        this.useBias
+    );
 }

@@ -23,4 +23,6 @@ export class AddNode extends BaseNode {
     }
 
     public GetNodeType = (): string => "Add";
+
+    public Clone = (): BaseNode  => new AddNode();
 }

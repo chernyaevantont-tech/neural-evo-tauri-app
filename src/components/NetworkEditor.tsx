@@ -13,6 +13,7 @@ import { InputNode } from '../evo/nodes/layers/input_node';
 import { OutputNode } from '../evo/nodes/layers/output_node';
 import { loadGenomeApi } from '../api/genome/loadGenome';
 import { ConnectionIndexes, loadGenome } from '../saver/loadGenome';
+import { Subgenome } from '../evo/types';
 
 interface NetworkEditorProps {
     onNodeSelect: (node: VisualNode | null) => void;
@@ -24,6 +25,7 @@ interface NetworkEditorProps {
 export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGenomeSelect, genomes, setGenomes }) => {
     const [nodes, setNodes] = useState<Map<string, VisualNode>>(new Map());
     const [genomeNode, setGenomeNode] = useState<Map<string, VisualNode[]>>(new Map);
+    const [genomeSubgenomes, setGenomeSubgenomes] = useState<Map<string, Subgenome>>(new Map);
     const [connections, setConnections] = useState<Map<string, Connection>>(new Map());
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
     const [selectedGenomeId, setSelectedGenomeId] = useState<string | null>(null);
@@ -165,6 +167,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 node: newNode,
                 position: pos,
                 genomeId: newGenome.id,
+                highlighted: false,
             };
 
             setNodes(prev => new Map(prev).set(newNode.id, visualNode));
@@ -924,10 +927,11 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         const visualNodes: VisualNode[] = [];
 
         for (let node of loadedNodes) {
-            const newVisualNode = { node: node, position: newNodesPosition.get(node.id)!, genomeId: loadedGenomeId };
+            const newVisualNode: VisualNode = { node: node, position: newNodesPosition.get(node.id)!, genomeId: loadedGenomeId, highlighted: false };
             newNodes.set(node.id, newVisualNode);
             visualNodes.push(newVisualNode);
         }
+
         newGenomes.set(loadedGenomeId, { id: loadedGenomeId, genome: loadedGenome, isValid: isValid });
         newGenomeNode.set(loadedGenomeId, visualNodes);
 
@@ -942,6 +946,24 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         setGenomes(newGenomes);
         setGenomeNode(newGenomeNode);
         setConnections(newConnections);
+    }
+
+    const handleGetRandomSubgraph = () => {
+        if (!selectedGenomeId) return;
+
+        const newNodes = new Map(nodes);
+        
+        const currentGenomeNodes = genomeNode.get(selectedGenomeId)!;
+        for (let node of currentGenomeNodes) {
+            node.highlighted = false;
+        }
+
+        const subGenomeNodeIds = genomes.get(selectedGenomeId)!.genome.GetRandomSubgenome();
+        for (let nodeId of subGenomeNodeIds) {
+            newNodes.get(nodeId)!.highlighted = true;
+        }
+
+        setNodes(newNodes);
     }
 
     return (
@@ -1000,10 +1022,17 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     <button onClick={() => addNode('Concat2D')} style={buttonStyle}>+ Concat</button>
                     <button onClick={() => addNode('Output')} style={buttonStyle}>+ Output</button>
                 </div>
-                <button onClick={() => loadGenomeApi((genomeStr) => {
-                    const {nodes, genome, connectionIndexes, isValid} = loadGenome(genomeStr);
-                    handleGenomeLoad(nodes, genome, connectionIndexes, isValid);
-                })}>Load</button>
+                <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', maxWidth: '200px' }}>
+                    <button style={buttonStyle}
+                        onClick={() => loadGenomeApi((genomeStr) => {
+                            const { nodes, genome, connectionIndexes, isValid } = loadGenome(genomeStr);
+                            handleGenomeLoad(nodes, genome, connectionIndexes, isValid);
+                        })}>Load</button>
+                </div>
+                <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', maxWidth: '200px' }}>
+                    <button style={buttonStyle}
+                    onClick={handleGetRandomSubgraph}>Get subgenome</button>
+                </div>
             </div>
 
             {/* Context Menu */}
@@ -1078,6 +1107,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 onClick={(e) => {
                     if (e.target === svgRef.current) {
                         setSelectedNodeId(null);
+                        setSelectedGenomeId(null);
                         setSelectedConnectionId(null);
                         setConnectingFrom(null);
                         setNodeContextMenu(null);

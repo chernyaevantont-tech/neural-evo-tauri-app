@@ -20,4 +20,6 @@ export class FlattenNode extends BaseNode {
     }
 
     public GetNodeType = (): string => "Flatten";
+
+    public Clone = (): BaseNode  => new FlattenNode();
 }

@@ -3,7 +3,7 @@ import { BaseNode, ResourceCriteria } from "../base_node";
 export class OutputNode extends BaseNode {
     constructor(inputShape: Array<number>) {
         super();
-        this.inputShape = inputShape;
+        this.inputShape = [...inputShape];
     }
 
     protected CalculateOutputShape(): void {}
@@ -32,4 +32,8 @@ export class OutputNode extends BaseNode {
     }
 
     public GetNodeType = (): string => "Output";
+
+    public Clone = (): BaseNode  => new OutputNode(
+        [...this.inputShape],
+    );
 }

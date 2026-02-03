@@ -41,4 +41,6 @@ export class Concat2DNode extends BaseNode {
     }
 
     public GetNodeType = () => "Concat";
+
+    public Clone = (): BaseNode  => new Concat2DNode();
 } 

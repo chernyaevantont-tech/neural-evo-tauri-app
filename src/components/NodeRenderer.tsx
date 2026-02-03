@@ -65,6 +65,14 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
                 strokeWidth={isSelected ? 4 : 2}
                 opacity={0.9}
             />
+            <circle
+                cx={radius}
+                cy={radius}
+                r={radius}
+                fill={node.highlighted ? 'rgb(119, 0, 255)' : 'transparent'}
+                opacity={0.7}
+                pointerEvents="none"
+            />
             <text
                 x={radius}
                 y={radius}

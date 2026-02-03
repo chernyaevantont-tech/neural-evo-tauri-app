@@ -55,4 +55,6 @@ export abstract class BaseNode {
     }
 
     public abstract GetNodeType(): string; 
+
+    public abstract Clone(): BaseNode;
 }

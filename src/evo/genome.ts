@@ -1,4 +1,5 @@
 import { BaseNode } from "./nodes/base_node"
+import { Subgenome } from "./types";
 
 export class Genome {
     public inputNodes: BaseNode[]
@@ -12,46 +13,39 @@ export class Genome {
         this.outputNodes = outputNodes;
     }
 
-    public GetRandomSubgraph(): Genome {
+    public GetRandomSubgenome(): string[] {
+        // Получаем все узлы после входных, которые имеют продолжение
         const startNodes = this.inputNodes.map(x => x.next).flat().filter(x => x.next.length > 0)
+        
+        if (startNodes.length === 0) {
+            throw new Error("No valid start nodes found")
+        }
 
-        let subgraphStartNode: BaseNode | null = null;
-        let subgraphEndNode: BaseNode | null = null;
+        // Выбираем случайный стартовый узел
+        let currentNode = startNodes[Math.floor(Math.random() * startNodes.length)]
+        const pathNodes: BaseNode[] = [currentNode]
 
-        let currentNodes: BaseNode[] = []
+        // Идём по случайному линейному пути, выбирая одного следующего на каждом шаге
+        while (currentNode.next.length > 0) {
+            // Выбираем случайного следующего узла
+            const nextNode = currentNode.next[Math.floor(Math.random() * currentNode.next.length)]
+            pathNodes.push(nextNode)
+            currentNode = nextNode
 
-        while (true) {
-            if (subgraphStartNode == null) {
-                currentNodes = [...startNodes]
-            } else {
-                currentNodes = subgraphStartNode.next.filter(x => x.next.length > 0)
-                if (currentNodes.length == 0) {
-                    subgraphEndNode = subgraphStartNode
-                    break
-                }
-            }
-            while (currentNodes.length != 0) {
-                currentNodes.concat(currentNodes[0].next.filter(x => x.next.length > 0))
-                if (Math.random() < 0.2) {
-                    if (subgraphStartNode == null) {
-                        subgraphStartNode = currentNodes[0]
-                        currentNodes = subgraphStartNode.next.filter(x => x.next.length > 0)
-                    }
-                    else {
-                        subgraphEndNode = currentNodes[0]
-                        break
-                    }
-                }
-                else {
-                    currentNodes.shift()
-                }
-            }
-            
-            if (subgraphEndNode != null) {
+            // С вероятностью 0.3 останавливаемся (чтобы не всегда брать весь путь до конца)
+            if (Math.random() < 0.3 && pathNodes.length >= 2) {
                 break
             }
         }
 
-        return new Genome([subgraphStartNode!], [subgraphEndNode!])
+        // Если путь слишком короткий, берём как минимум 2 узла
+        if (pathNodes.length < 2) {
+            // Если нет продолжения, возвращаем минимальный подграф из одного узла
+            return [pathNodes[0].id]
+            
+        }
+
+        return pathNodes.map(node => node.id);
+        
     }
 }

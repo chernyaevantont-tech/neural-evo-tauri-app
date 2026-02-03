@@ -18,7 +18,7 @@ export class PoolingNode extends BaseNode {
     ) {
         super()
         this.poolType = poolType
-        this.kernelSize = kernelSize
+        this.kernelSize = {...kernelSize}
         this.stride = stride
         this.padding = padding
     }
@@ -66,4 +66,11 @@ export class PoolingNode extends BaseNode {
     }
     
     public GetNodeType = (): string => "Pooling";
+
+    public Clone = (): BaseNode  => new PoolingNode(
+        this.poolType,
+        {...this.kernelSize},
+        this.stride,
+        this.padding,
+    );
 }
