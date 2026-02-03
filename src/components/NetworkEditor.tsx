@@ -437,12 +437,32 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         if (!node) return;
 
         const newNodes = new Map(nodes);
+        const newGenomes = new Map(genomes);
+        const newGenomeNode = new Map(genomeNode);
+
         const copyNode = node.node.Clone();
-        const newGenome
+        const newGenomeId = v4();
+        const newVisualNode: VisualNode = {
+            node: copyNode,
+            genomeId: newGenomeId,
+            position: {
+                x: node.position.x + 50,
+                y: node.position.y + 50,
+            },
+            highlighted: false,
+        };
 
-        newNodes.set(copyNode.id, {})
+        newNodes.set(copyNode.id, newVisualNode);
+        newGenomes.set(newGenomeId, {
+            id: newGenomeId,
+            isValid: false,
+            genome: new Genome([copyNode], [copyNode]),
+        });
+        newGenomeNode.set(copyNode.id, [newVisualNode]);
 
-        set
+        setNodes(newNodes);
+        setGenomes(newGenomes);
+        setGenomeNode(newGenomeNode);
         setNodeContextMenu(null);
     }, [nodeContextMenu, openConfigPanel]);
 
@@ -967,7 +987,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         if (!selectedGenomeId) return;
 
         const newNodes = new Map(nodes);
-        
+
         const currentGenomeNodes = genomeNode.get(selectedGenomeId)!;
         for (let node of currentGenomeNodes) {
             node.highlighted = false;
@@ -1046,7 +1066,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                 </div>
                 <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', maxWidth: '200px' }}>
                     <button style={buttonStyle}
-                    onClick={handleGetRandomSubgraph}>Get subgenome</button>
+                        onClick={handleGetRandomSubgraph}>Get subgenome</button>
                 </div>
             </div>
 
@@ -1072,6 +1092,15 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                         }}
                     >
                         ✏️ Edit Node
+                    </button>
+                    <button
+                        onClick={handleNodeContextMenuCopy}
+                        style={{
+                            ...nodeContextMenuItemStyle,
+                            borderBottom: '1px solid #eee'
+                        }}
+                    >
+                        📋 Copy Node
                     </button>
                     <button
                         onClick={handleNodeContextMenuDelete}
