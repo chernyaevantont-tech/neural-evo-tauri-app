@@ -431,6 +431,21 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
         setNodeContextMenu(null);
     }, [nodeContextMenu, openConfigPanel]);
 
+    const handleNodeContextMenuCopy = useCallback(() => {
+        if (!nodeContextMenu) return;
+        const node = nodesRef.current.get(nodeContextMenu.nodeId);
+        if (!node) return;
+
+        const newNodes = new Map(nodes);
+        const copyNode = node.node.Clone();
+        const newGenome
+
+        newNodes.set(copyNode.id, {})
+
+        set
+        setNodeContextMenu(null);
+    }, [nodeContextMenu, openConfigPanel]);
+
     const handleNodeContextMenuDelete = useCallback(() => {
         if (!nodeContextMenu) return;
 
