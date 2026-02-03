@@ -1,14 +1,39 @@
 use std::fs;
 
+use rfd::AsyncFileDialog;
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
-fn save_genome(genome_str: &str, path_str: &str) -> Result<(), String> {
-    fs::write(path_str, genome_str).or_else(|e| Err(e.to_string()))
+async fn save_genome(genome_str: &str) -> Result<(), String> {
+    let file = AsyncFileDialog::new()
+        .set_title("Save genome as...")
+        .add_filter("Genome", &["evog"])
+        .save_file()
+        .await;
+
+
+    if let Some(file_handle) = file {
+        fs::write(file_handle.path(), genome_str).or_else(|e| Err(e.to_string()))
+    }
+    else {
+        Ok(())
+    }
 }
 
 #[tauri::command]
-fn load_genome(path_str: &str) -> Result<String, String> {
-    fs::read_to_string(path_str).or_else(|e| Err(e.to_string()))
+async fn load_genome() -> Result<String, String> {
+    let file = AsyncFileDialog::new()
+        .set_title("Select genome file to upload")
+        .add_filter("Genome", &["evog"])
+        .pick_file()
+        .await;
+
+    if let Some(file_handle) = file {
+        fs::read_to_string(file_handle.path()).or_else(|e| Err(e.to_string()))
+    }
+    else {
+        Ok("".to_string())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -1000,7 +1000,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     <button onClick={() => addNode('Concat2D')} style={buttonStyle}>+ Concat</button>
                     <button onClick={() => addNode('Output')} style={buttonStyle}>+ Output</button>
                 </div>
-                <button onClick={() => loadGenomeApi("D://aboba.txt", (genomeStr) => {
+                <button onClick={() => loadGenomeApi((genomeStr) => {
                     const {nodes, genome, connectionIndexes, isValid} = loadGenome(genomeStr);
                     handleGenomeLoad(nodes, genome, connectionIndexes, isValid);
                 })}>Load</button>

@@ -27,7 +27,7 @@ export const GenomeInfoPanel: React.FC<GenomeInfoPanelProps> = ({genomes}) => {
                         <span onClick={() => {
                             console.log("aboba");
                             const genomeStr = saveGenome(genome.genome);
-                            saveGenomeApi(genomeStr, "D://aboba.txt", () => {});
+                            saveGenomeApi(genomeStr, () => {});
                         }}>💾</span>
                     </div>
                 ))
