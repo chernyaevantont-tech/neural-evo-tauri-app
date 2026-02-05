@@ -1,4 +1,8 @@
 import { BaseNode } from "./nodes/base_node"
+import { Conv2DNode } from "./nodes/layers/conv_node"
+import { DenseNode } from "./nodes/layers/dense_node"
+import { FlattenNode } from "./nodes/layers/flatten_node"
+import { PoolingNode } from "./nodes/layers/pooling_node"
 
 export class Genome {
     public inputNodes: BaseNode[]
@@ -91,5 +95,199 @@ export class Genome {
         return subchain.map(node => node.id);
     }
 
-    
+    public FindInsertionPoint(
+        subgenomeInputNode: BaseNode,
+        subgenomeOutputNode: BaseNode
+    ): {
+        cutFromNodeId: string;
+        cutToNodeId: string;
+        inputAdapterNodes: BaseNode[];
+        outputAdapterNodes: BaseNode[];
+    } | null {
+        // Собираем все пары последовательных нод в графе (потенциальные точки разреза)
+        const allEdges: { from: BaseNode; to: BaseNode }[] = [];
+        const visitedBFS = new Set<string>();
+        const queue: BaseNode[] = [...this.inputNodes];
+
+        this.inputNodes.forEach(node => visitedBFS.add(node.id));
+
+        while (queue.length > 0) {
+            const node = queue.shift()!;
+
+            node.next.forEach(nextNode => {
+                // Сохраняем ребро как потенциальную точку разреза
+                allEdges.push({ from: node, to: nextNode });
+
+                if (!visitedBFS.has(nextNode.id)) {
+                    visitedBFS.add(nextNode.id);
+                    queue.push(nextNode);
+                }
+            });
+        }
+
+        // Структура для хранения возможных точек вставки
+        const validInsertionPoints: {
+            cutFromNodeId: string;
+            cutToNodeId: string;
+            inputAdapterNodes: BaseNode[];
+            outputAdapterNodes: BaseNode[];
+        }[] = [];
+
+        // Проверяем каждое ребро как потенциальную точку вставки
+        for (const edge of allEdges) {
+            const fromNode = edge.from;
+            const toNode = edge.to;
+
+            // Проверяем совместимость: fromNode -> subgenomeInputNode
+            let inputAdapters: BaseNode[] = [];
+            const inputCompatible = subgenomeInputNode.CheckCompabilityDisconnected(fromNode);
+
+            if (!inputCompatible) {
+                // Пытаемся создать адаптер
+                const adapter = this.createAdapter(fromNode.GetOutputShape(), subgenomeInputNode.GetOutputShape());
+                if (adapter) {
+                    inputAdapters = adapter;
+                } else {
+                    continue; // Невозможно создать адаптер, пропускаем эту точку
+                }
+            }
+
+            // Проверяем совместимость: subgenomeOutputNode -> toNode
+            let outputAdapters: BaseNode[] = [];
+            const outputCompatible = toNode.CheckCompabilityDisconnected(subgenomeOutputNode);
+
+            if (!outputCompatible) {
+                // Пытаемся создать адаптер
+                const adapter = this.createAdapter(subgenomeOutputNode.GetOutputShape(), toNode.GetOutputShape());
+                if (adapter) {
+                    outputAdapters = adapter;
+                } else {
+                    continue; // Невозможно создать адаптер, пропускаем эту точку
+                }
+            }
+
+            // Если оба соединения возможны, добавляем эту точку в список
+            validInsertionPoints.push({
+                cutFromNodeId: fromNode.id,
+                cutToNodeId: toNode.id,
+                inputAdapterNodes: inputAdapters,
+                outputAdapterNodes: outputAdapters
+            });
+        }
+
+        // Если нет возможных точек вставки, возвращаем null
+        if (validInsertionPoints.length === 0) {
+            return null;
+        }
+
+        // Случайно выбираем одну из возможных точек вставки
+        const selectedPoint = validInsertionPoints[Math.floor(Math.random() * validInsertionPoints.length)];
+
+        return selectedPoint;
+    }
+
+    // Вспомогательная функция для создания адаптеров между несовместимыми формами
+    private createAdapter(fromShape: number[], toShape: number[]): BaseNode[] | null {
+        const adapters: BaseNode[] = [];
+
+        // Случай 1: 3D -> 3D (различные пространственные размеры или каналы)
+        if (fromShape.length === 3 && toShape.length === 3) {
+            const [fromH, fromW, fromC] = fromShape;
+            const [toH, toW, toC] = toShape;
+
+            // Если нужно изменить пространственные размеры
+            if (fromH !== toH || fromW !== toW) {
+                // Определяем, нужно уменьшать или увеличивать
+                const needDownsample = fromH > toH || fromW > toW;
+
+                if (needDownsample) {
+                    // Используем pooling для уменьшения
+                    const hRatio = fromH / toH;
+                    const wRatio = fromW / toW;
+                    
+                    // Выбираем stride чтобы приблизиться к целевому размеру
+                    const stride = Math.max(2, Math.floor(Math.min(hRatio, wRatio)));
+                    const kernelSize = { h: stride, w: stride };
+                    
+                    adapters.push(new PoolingNode('max', kernelSize, stride, 0));
+                    
+                    // После pooling пересчитываем размер
+                    const newH = Math.floor((fromH - kernelSize.h) / stride + 1);
+                    const newW = Math.floor((fromW - kernelSize.w) / stride + 1);
+                    
+                    // Если всё ещё не совпадает, пробуем conv2d с подходящим stride
+                    if (newH !== toH || newW !== toW) {
+                        const remainingHRatio = newH / toH;
+                        const remainingWRatio = newW / toW;
+                        const convStride = Math.max(1, Math.floor(Math.min(remainingHRatio, remainingWRatio)));
+                        
+                        adapters.push(new Conv2DNode(
+                            fromC,
+                            { h: 3, w: 3 },
+                            convStride,
+                            1,
+                            1,
+                            true
+                        ));
+                    }
+                } else {
+                    // Для upsampling используем conv2d с padding
+                    // (в реальности нужна транспонированная свёртка, но упростим)
+                    return null; // Upsampling пока не поддерживается
+                }
+            }
+
+            // Если нужно изменить количество каналов
+            if (fromC !== toC) {
+                // Используем Conv2D 1x1 для изменения количества каналов
+                adapters.push(new Conv2DNode(
+                    toC,
+                    { h: 1, w: 1 },
+                    1,
+                    0,
+                    1,
+                    true
+                ));
+            }
+
+            return adapters.length > 0 ? adapters : null;
+        }
+
+        // Случай 2: 3D -> 1D (нужен Flatten + возможно Dense)
+        if (fromShape.length === 3 && toShape.length === 1) {
+            adapters.push(new FlattenNode());
+            
+            // Вычисляем размер после flatten
+            const flattenedSize = fromShape[0] * fromShape[1] * fromShape[2];
+            
+            // Если размеры не совпадают, добавляем Dense слой
+            if (flattenedSize !== toShape[0]) {
+                adapters.push(new DenseNode(toShape[0], 'relu', true));
+            }
+
+            return adapters;
+        }
+
+        // Случай 3: 1D -> 1D (различное количество нейронов)
+        if (fromShape.length === 1 && toShape.length === 1) {
+            const [fromUnits] = fromShape;
+            const [toUnits] = toShape;
+
+            if (fromUnits !== toUnits) {
+                adapters.push(new DenseNode(toUnits, 'relu', true));
+                return adapters;
+            }
+
+            return null; // Формы совпадают
+        }
+
+        // Случай 4: 1D -> 3D (очень сложно, не поддерживается)
+        if (fromShape.length === 1 && toShape.length === 3) {
+            return null; // Reshape из 1D в 3D пока не поддерживается
+        }
+
+        // Неизвестный случай
+        return null;
+    }
+
 }
