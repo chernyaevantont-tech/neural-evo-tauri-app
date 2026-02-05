@@ -1,43 +1,65 @@
 import { useState } from "react";
 import "./App.css";
-import { NetworkEditor } from "./components/NetworkEditor";
-import { NodeInfoPanel } from "./components/NodeInfoPanel";
-import { VisualGenome, VisualNode } from "./components/types";
-import { GenomeInfoPanel } from "./components/GenomeInfoPanel";
+import { TitleBar } from "./widgets/title-bar";
+import { NetworkCanvas } from "./widgets";
+import { SidePanel } from "./widgets";
+import { theme } from "./shared/lib";
+import type { VisualNode, VisualGenome } from "./shared/types";
 
 function App() {
   const [selectedNode, setSelectedNode] = useState<VisualNode | null>(null);
   const [selectedGenome, setSelectedGenome] = useState<VisualGenome | null>(null);
   const [genomes, setGenomes] = useState<Map<string, VisualGenome>>(new Map());
 
+  console.log('=== APP RENDERING ===');
+  console.log('App component is rendering with TitleBar');
+
   return (
     <div style={{
       display: 'flex',
+      flexDirection: 'column',
       width: '100vw',
       height: '100vh',
-      overflow: 'hidden'
+      overflow: 'hidden',
+      backgroundColor: theme.colors.background.primary,
+      margin: 0,
+      padding: 0,
     }}>
+      {/* DEBUG: Simple title bar */}
       <div style={{
-        flex: 1,
-        position: 'relative',
-        height: '100%'
+        height: '32px',
+        minHeight: '32px',
+        backgroundColor: '#ff0000',
+        color: '#ffffff',
+        display: 'flex',
+        alignItems: 'center',
+        paddingLeft: '12px',
+        flexShrink: 0,
       }}>
-        <NetworkEditor onNodeSelect={setSelectedNode} onGenomeSelect={setSelectedGenome} genomes={genomes} setGenomes={setGenomes}/>
+        DEBUG: Title Bar Here
       </div>
-      
       <div style={{
-        width: '400px',
-        height: '100%',
-        padding: '20px',
-        background: '#fafafa',
-        borderLeft: '1px solid #ddd',
-        overflow: 'auto',
-        display: "flex",
-        flexDirection: "column",
-        gap: "20px",
+        display: 'flex',
+        flex: 1,
+        overflow: 'hidden',
+        minHeight: 0,
       }}>
-        <NodeInfoPanel selectedNode={selectedNode} />
-        <GenomeInfoPanel genomes={Array.from(genomes.values())}/>
+        <div style={{
+          flex: 1,
+          position: 'relative',
+          height: '100%'
+        }}>
+          <NetworkCanvas 
+            onNodeSelect={setSelectedNode} 
+            onGenomeSelect={setSelectedGenome} 
+            genomesState={[genomes, setGenomes]}
+          />
+        </div>
+        
+        <SidePanel 
+          selectedNode={selectedNode} 
+          genomes={Array.from(genomes.values())} 
+        />
       </div>
     </div>
   );

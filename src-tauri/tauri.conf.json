@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "neural-evo-tauri-app",
-        "width": 800,
-        "height": 600
+        "title": "Neural Evolution Designer",
+        "width": 1280,
+        "height": 800,
+        "decorations": false,
+        "transparent": false
       }
     ],
     "security": {
