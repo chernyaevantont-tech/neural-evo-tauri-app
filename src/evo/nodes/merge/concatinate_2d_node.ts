@@ -20,11 +20,11 @@ export class Concat2DNode extends BaseNode {
         })
     }
 
-    GetResources(dtype: number): ResourceCriteria {
+    GetResources(_dtype: number): ResourceCriteria {
         return { flash: 0, ram: 0, macs: 0 }
     }
 
-    protected Mutate(mutation_options: Map<string, number>): void { }
+    protected Mutate(_mutation_options: Map<string, number>): void { }
 
     CheckCompability(node: BaseNode): Boolean {
         return this.inputShape.length == 0 ? true :

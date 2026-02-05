@@ -18,16 +18,16 @@ export class InputNode extends BaseNode{
         });
     }
 
-    GetResources(dtype: Number): ResourceCriteria {
+    GetResources(_dtype: Number): ResourceCriteria {
         return {flash: 0, ram: 0, macs: 0}
     }
-    protected Mutate(mutation_options: Map<string, number>): void {}
+    protected Mutate(_mutation_options: Map<string, number>): void {}
 
-    CheckCompability(node: BaseNode): Boolean {
+    CheckCompability(_node: BaseNode): Boolean {
         return false;
     }
 
-    CheckCompabilityDisconnected(node: BaseNode): Boolean {
+    CheckCompabilityDisconnected(_node: BaseNode): Boolean {
         return false;
     }
 

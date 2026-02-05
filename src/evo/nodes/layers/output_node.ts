@@ -17,11 +17,11 @@ export class OutputNode extends BaseNode {
         })
     }
     
-    GetResources(dtype: number): ResourceCriteria {
+    GetResources(_dtype: number): ResourceCriteria {
         return {flash: 0, ram: 0, macs: 0}
     }
 
-    protected Mutate(mutation_options: Map<string, number>): void {}
+    protected Mutate(_mutation_options: Map<string, number>): void {}
 
     CheckCompability(node: BaseNode): Boolean {
         return this.previous.length == 0 && node.GetOutputShape().every((val, index) => val == this.inputShape[index]);
