@@ -55,7 +55,12 @@ export class DenseNode extends BaseNode {
         }
     }
     CheckCompability(node: BaseNode): Boolean {
-        return this.previous.length == 0 && node.GetOutputShape().length == 1
+        return this.previous.length == 0 && 
+        node.GetOutputShape().length == 1 &&
+        this.isAcyclic();
+    }
+    CheckCompabilityDisconnected(node: BaseNode): Boolean {
+        return node.GetOutputShape().length == 1;
     }
 
     public GetNodeType = (): string => "Dense";

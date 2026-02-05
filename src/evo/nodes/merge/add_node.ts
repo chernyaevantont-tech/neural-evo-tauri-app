@@ -13,16 +13,22 @@ export class AddNode extends BaseNode {
     }
 
     GetResources(dtype: number): ResourceCriteria {
-        return {flash: 0, ram: 0, macs: 0}
+        return { flash: 0, ram: 0, macs: 0 }
     }
 
-    protected Mutate(mutation_options: Map<string, number>): void {}
-    
+    protected Mutate(mutation_options: Map<string, number>): void { }
+
     CheckCompability(node: BaseNode): Boolean {
-        return this.inputShape.length == 0 ? true: node.GetOutputShape().every((val, index) => val == this.inputShape[index])
+        return this.inputShape.length == 0 ? true :
+            node.GetOutputShape().every((val, index) => val == this.inputShape[index])
+            && this.isAcyclic();
+    }
+
+    CheckCompabilityDisconnected(node: BaseNode): Boolean {
+        return this.previous.length == 1 ? true : node.GetOutputShape().every((val, index) => val == this.inputShape[index])
     }
 
     public GetNodeType = (): string => "Add";
 
-    public Clone = (): BaseNode  => new AddNode();
+    public Clone = (): BaseNode => new AddNode();
 }

@@ -27,6 +27,10 @@ export class OutputNode extends BaseNode {
         return this.previous.length == 0 && node.GetOutputShape().every((val, index) => val == this.inputShape[index]);
     }
 
+    CheckCompabilityDisconnected(node: BaseNode): Boolean {
+        return node.GetOutputShape().every((val, index) => val == this.inputShape[index]);
+    }
+
     protected AddPrev(node: BaseNode): void {
         this.previous.push(node)
     }

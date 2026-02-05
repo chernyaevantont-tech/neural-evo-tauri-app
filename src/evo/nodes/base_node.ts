@@ -18,6 +18,7 @@ export abstract class BaseNode {
     abstract GetResources(dtype: number): ResourceCriteria
     protected abstract Mutate(mutation_options: Map<string, number>): void
     abstract CheckCompability(node: BaseNode): Boolean
+    abstract CheckCompabilityDisconnected(node: BaseNode): Boolean
 
     private SetInputShape(newShape: number[]) {
         this.inputShape = newShape
@@ -52,6 +53,35 @@ export abstract class BaseNode {
     public ClearAllConnections() {
         this.next.forEach(n => this.RemoveNext(n));
         this.previous.forEach(n => n.RemoveNext(this));
+    }
+
+    public isAcyclic(): boolean {
+        const visited = new Set<string>();
+        const recursionStack = new Set<string>();
+
+        const dfs = (node: BaseNode): boolean => {
+            if (recursionStack.has(node.id)) {
+                return false; // Цикл обнаружен
+            }
+
+            if (visited.has(node.id)) {
+                return true; // Узел уже проверен
+            }
+
+            visited.add(node.id);
+            recursionStack.add(node.id);
+
+            for (const nextNode of node.next) {
+                if (!dfs(nextNode)) {
+                    return false;
+                }
+            }
+
+            recursionStack.delete(node.id);
+            return true;
+        };
+
+        return dfs(this);
     }
 
     public abstract GetNodeType(): string; 

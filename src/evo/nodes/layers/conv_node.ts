@@ -4,7 +4,7 @@ import { KernelSize } from "../types";
 
 export class Conv2DNode extends BaseNode {
     private static dilationOptions = [1, 2, 4, 8]
-    
+
     private filters: number
     private kernelSize: KernelSize
     private stride: number
@@ -50,24 +50,24 @@ export class Conv2DNode extends BaseNode {
     }
 
     GetResources(dtype: number): ResourceCriteria {
-        const flash = this.outputShape[2] * (this.kernelSize.h * this.kernelSize.w * this.inputShape[2] 
-            + (this.useBias ? 1 : 0) ) * dtype
-        const ram = (this.inputShape[0] * this.inputShape[1] * this.inputShape[2] 
+        const flash = this.outputShape[2] * (this.kernelSize.h * this.kernelSize.w * this.inputShape[2]
+            + (this.useBias ? 1 : 0)) * dtype
+        const ram = (this.inputShape[0] * this.inputShape[1] * this.inputShape[2]
             + this.outputShape[0] * this.outputShape[1] * this.outputShape[2]) * dtype
-        const macs = (this.outputShape[0] * this.outputShape[1] * this.outputShape[2]) 
+        const macs = (this.outputShape[0] * this.outputShape[1] * this.outputShape[2])
             * this.kernelSize.h * this.kernelSize.w * this.inputShape[2]
-        
-        return {flash: flash, ram: ram, macs: macs}
+
+        return { flash: flash, ram: ram, macs: macs }
     }
 
     protected Mutate(mutation_options: Map<string, number>): void {
-        if (Math.random() <= (mutation_options.get("conv2d_filters") || -1)){
+        if (Math.random() <= (mutation_options.get("conv2d_filters") || -1)) {
             this.filters = 4 * RandomizeInteger(4, 16)
         }
 
         if (Math.random() <= (mutation_options.get("conv2d_kernel_size") || -1)) {
             const kernelSize = 1 + 2 * RandomizeInteger(0, 3)
-            this.kernelSize = {h: kernelSize, w: kernelSize}
+            this.kernelSize = { h: kernelSize, w: kernelSize }
         }
 
         if (Math.random() <= (mutation_options.get("conv2d_stride_size") || -1)) {
@@ -90,12 +90,18 @@ export class Conv2DNode extends BaseNode {
     }
 
     CheckCompability(node: BaseNode): Boolean {
-        return this.previous.length == 0 && node.GetOutputShape().length == 3
+        return this.previous.length == 0 &&
+            node.GetOutputShape().length == 3 &&
+            this.isAcyclic();
     }
-    
+
+    CheckCompabilityDisconnected(node: BaseNode): Boolean {
+        return node.GetOutputShape().length == 3;
+    }
+
     public GetNodeType = (): string => "Conv2D";
 
-    public Clone = (): BaseNode  => new Conv2DNode(
+    public Clone = (): BaseNode => new Conv2DNode(
         this.filters,
         this.kernelSize,
         this.stride,

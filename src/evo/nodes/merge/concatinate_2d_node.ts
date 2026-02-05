@@ -21,17 +21,24 @@ export class Concat2DNode extends BaseNode {
     }
 
     GetResources(dtype: number): ResourceCriteria {
-        return {flash: 0, ram: 0, macs: 0}
+        return { flash: 0, ram: 0, macs: 0 }
     }
 
-    protected Mutate(mutation_options: Map<string, number>): void {}
+    protected Mutate(mutation_options: Map<string, number>): void { }
 
     CheckCompability(node: BaseNode): Boolean {
-        return this.inputShape.length == 0 ? true : 
+        return this.inputShape.length == 0 ? true :
+            this.inputShape[0] == node.GetOutputShape()[0] &&
+            this.inputShape[1] == node.GetOutputShape()[1] &&
+            this.isAcyclic();
+    }
+
+    CheckCompabilityDisconnected(node: BaseNode): Boolean {
+        return this.previous.length == 1 ? true :
             this.inputShape[0] == node.GetOutputShape()[0] &&
             this.inputShape[1] == node.GetOutputShape()[1]
     }
-    
+
     protected AddPrev(node: BaseNode): void {
         if (this.previous.length == 0) {
             this.inputShape = [node.GetOutputShape()[0], node.GetOutputShape()[1], 0]
@@ -42,5 +49,5 @@ export class Concat2DNode extends BaseNode {
 
     public GetNodeType = () => "Concat";
 
-    public Clone = (): BaseNode  => new Concat2DNode();
+    public Clone = (): BaseNode => new Concat2DNode();
 } 

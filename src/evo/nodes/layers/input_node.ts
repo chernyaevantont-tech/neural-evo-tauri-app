@@ -24,7 +24,11 @@ export class InputNode extends BaseNode{
     protected Mutate(mutation_options: Map<string, number>): void {}
 
     CheckCompability(node: BaseNode): Boolean {
-        throw new Error("Method not implemented.");
+        return false;
+    }
+
+    CheckCompabilityDisconnected(node: BaseNode): Boolean {
+        return false;
     }
 
     public GetNodeType = (): string => "Input";

@@ -122,6 +122,14 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
           throw new Error(`Unknown node type: ${nodeType}`);
       }
 
+      if (existingNode &&
+        !existingNode.next.every(
+          (val) => val.CheckCompabilityDisconnected(newNode)
+        )) {
+          alert("Edited node is incompatible");
+          return;
+      }
+
       onSave(newNode);
     } catch (error) {
       alert(`Error creating node: ${error}`);

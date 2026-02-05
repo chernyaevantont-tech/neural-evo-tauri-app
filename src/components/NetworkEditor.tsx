@@ -54,6 +54,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
 
     React.useEffect(() => {
         connectionsRef.current = connections;
+        console.log(connections);
     }, [connections]);
 
     const openConfigPanel = useCallback((type: string, nodeId?: string) => {
@@ -63,7 +64,9 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
     }, []);
 
     const handleConfigSave = useCallback((newNode: BaseNode) => {
+        console.log("handleConfigSave")
         if (editingNodeId) {
+            console.log(editingNodeId);
             // Editing existing node - recreate with new parameters
             const oldVisualNode = nodesRef.current.get(editingNodeId);
             if (!oldVisualNode) return;
@@ -75,9 +78,11 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             connectionsRef.current.forEach((conn) => {
                 if (conn.toNodeId === editingNodeId) {
                     incomingConnections.push(conn.fromNodeId);
+                    nodes.get(conn.fromNodeId)!.node.RemoveNext(oldVisualNode.node);
                 }
                 if (conn.fromNodeId === editingNodeId) {
                     outgoingConnections.push(conn.toNodeId);
+                    oldVisualNode.node.RemoveNext(nodes.get(conn.toNodeId)!.node);
                 }
             });
 
@@ -90,15 +95,15 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             // Replace the node ID in the map
             setNodes(prev => {
                 const newNodes = new Map(prev);
-                newNodes.set(editingNodeId, updatedVisualNode);
+                newNodes.set(newNode.id, updatedVisualNode);
+                newNodes.delete(editingNodeId);
+                nodesRef.current.set(newNode.id, updatedVisualNode);
                 return newNodes;
             });
 
-            const oldNode = nodes.get(editingNodeId);
-
             setGenomeNode(prev => {
                 const newGenomeNode = new Map(prev);
-                newGenomeNode.set(selectedGenomeId!, [...prev.get(selectedGenomeId!)!.filter(n => n != oldNode), updatedVisualNode]);
+                newGenomeNode.set(selectedGenomeId!, [...prev.get(selectedGenomeId!)!.filter(n => n.node.id != editingNodeId), updatedVisualNode]);
                 return newGenomeNode;
             });
 
@@ -112,13 +117,13 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     if (fromNode) {
                         // Check compatibility with new node
                         if (newNode.CheckCompability(fromNode.node)) {
+                            console.log("aboba");
                             fromNode.node.AddNext(newNode);
-
                             const connId = uuidv4();
                             newConns.set(connId, {
                                 id: connId,
                                 fromNodeId: fromId,
-                                toNodeId: editingNodeId
+                                toNodeId: newNode.id
                             });
                         }
                     }
@@ -129,11 +134,12 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     if (toNode) {
                         // Check compatibility with new node
                         if (toNode.node.CheckCompability(newNode)) {
+                            console.log("bebebe");
                             newNode.AddNext(toNode.node);
                             const connId = uuidv4();
                             newConns.set(connId, {
                                 id: connId,
-                                fromNodeId: editingNodeId,
+                                fromNodeId: newNode.id,
                                 toNodeId: toId
                             });
                         }
@@ -147,6 +153,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
                     }
                 });
 
+                console.log("New Conns", newConns);
                 return newConns;
             });
 
