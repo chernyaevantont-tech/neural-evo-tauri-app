@@ -102,6 +102,7 @@ export const loadGenome = (genomeStr: String): {
         
         connectionIndexes.push({fromIndex: fromNodeIndex, toIndex: toNodeIndex});
         nodes[fromNodeIndex].AddNext(nodes[toNodeIndex]);
+        console.log(`from: ${nodes[fromNodeIndex].GetNodeType()}, to: ${nodes[toNodeIndex].GetNodeType()}`)
     }
 
     const inputNodes: BaseNode[] = [];

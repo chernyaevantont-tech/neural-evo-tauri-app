@@ -31,6 +31,7 @@ export class Conv2DNode extends BaseNode {
     }
 
     protected CalculateOutputShape(): void {
+        console.log("input shape", this.inputShape);
         const hOut = Math.floor((this.inputShape[0] + 2 * this.padding - this.dilation * (this.kernelSize.h - 1) - 1) / this.stride + 1)
         const wOut = Math.floor((this.inputShape[1] + 2 * this.padding - this.dilation * (this.kernelSize.w - 1) - 1) / this.stride + 1)
         this.outputShape = [hOut, wOut, this.filters]
@@ -42,8 +43,9 @@ export class Conv2DNode extends BaseNode {
             params: {
                 filters: this.filters,
                 kernel_size: this.kernelSize,
+                stride: this.stride,
                 padding: this.padding,
-                delation: this.dilation,
+                dilation: this.dilation,
                 use_bias: this.useBias
             }
         })

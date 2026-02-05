@@ -21,6 +21,7 @@ export abstract class BaseNode {
     abstract CheckCompabilityDisconnected(node: BaseNode): Boolean
 
     private SetInputShape(newShape: number[]) {
+        console.log("Set input shape",  newShape)
         this.inputShape = newShape
     }
 
@@ -29,7 +30,9 @@ export abstract class BaseNode {
     protected AddPrev(node: BaseNode) {
         this.previous.push(node)
         this.SetInputShape(node.outputShape)
+        console.log(this.outputShape);
         this.CalculateOutputShape()
+        console.log(this.outputShape);
         this.next.forEach(n => {
             n.SetInputShape(this.outputShape)
             n.CalculateOutputShape()
