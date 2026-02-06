@@ -143,7 +143,7 @@ src/
 │   └── types/           # Shared TypeScript types
 │       └── index.ts
 │
-├── evo/                 # Evolution logic (not modified)
+├── evo/                 # Evolution logic
 │   ├── genome.ts
 │   ├── types.ts
 │   └── nodes/           # Node implementations
@@ -242,21 +242,3 @@ npm run build
 - **Mouse Wheel**: Zoom in/out (cursor-centered)
 - **Right Drag**: Pan the canvas
 - **Left Click**: Select nodes or connections
-
-## 🤝 Contributing
-
-The architecture is designed to be extensible. To add new features:
-
-1. **New Node Type**: Add implementation in `src/evo/nodes/`
-2. **New Feature**: Create in `src/features/` following FSD principles
-3. **New UI Component**: Add to `src/shared/ui/` if reusable, or in relevant feature/widget
-
-## 📄 License
-
-This project is part of a neural architecture search research system.
-
----
-
-Built with ❤️ using modern web technologies and evolutionary algorithms.
-- [v] Зум и панорамирование холста
-- [ ] Автоматическая компоновка графа

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { VisualNode, VisualGenome } from '../shared/types';
 import { NetworkCanvas, SidePanel } from '../widgets';
-import { TitleBar } from '../widgets/title-bar';
+import { TitleBar } from '../widgets';
 import { theme } from '../shared/lib';
 
 function App() {
