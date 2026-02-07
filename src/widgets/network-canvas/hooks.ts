@@ -1,37 +1,10 @@
 import { useCallback, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { Connection, Position, VisualGenome, VisualNode } from '../../shared/types';
+import { Position, VisualGenome, VisualNode } from '../../shared/types';
 import { BaseNode } from '../../evo/nodes/base_node';
 import { Genome } from '../../evo/genome';
 import { InputNode } from '../../evo/nodes/layers/input_node';
 import { OutputNode } from '../../evo/nodes/layers/output_node';
-
-export const useNetworkState = () => {
-  const [nodes, setNodes] = useState<Map<string, VisualNode>>(new Map());
-  const [genomeNode, setGenomeNode] = useState<Map<string, VisualNode[]>>(new Map());
-  const [connections, setConnections] = useState<Map<string, Connection>>(new Map());
-  const [genomes, setGenomes] = useState<Map<string, VisualGenome>>(new Map());
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedGenomeId, setSelectedGenomeId] = useState<string | null>(null);
-  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
-
-  return {
-    nodes,
-    setNodes,
-    genomeNode,
-    setGenomeNode,
-    connections,
-    setConnections,
-    genomes,
-    setGenomes,
-    selectedNodeId,
-    setSelectedNodeId,
-    selectedGenomeId,
-    setSelectedGenomeId,
-    selectedConnectionId,
-    setSelectedConnectionId,
-  };
-};
 
 export const useCanvasInteraction = () => {
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);

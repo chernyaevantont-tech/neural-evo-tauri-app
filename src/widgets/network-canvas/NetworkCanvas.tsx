@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, CSSProperties, useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4, v4 } from 'uuid';
 import { VisualNode, Connection, VisualGenome, Position } from '../../shared/types';
 import { NodeCard } from '../../entities/node/ui';
 import { ConnectionLine } from '../../entities/connection/ui';
@@ -9,24 +9,40 @@ import { InputNode } from '../../evo/nodes/layers/input_node';
 import { OutputNode } from '../../evo/nodes/layers/output_node';
 import { theme } from '../../shared/lib';
 import { loadGenomeFromFile } from '../../shared/api';
-import { useNetworkState, useCanvasInteraction, createNewGenomeWithNode, updateGenomeValidity } from './hooks';
+import { useCanvasInteraction, createNewGenomeWithNode, updateGenomeValidity } from './hooks';
 import { NodeConfigForm, NodeToolbar } from '../../features/node-toolbar';
 import { ContextMenu } from '../../features/genome-operations';
+import { NetworkStateType } from '../../pages/network-editor-page/hooks';
 
 interface NetworkCanvasProps {
   onNodeSelect: (node: VisualNode | null) => void;
   onGenomeSelect: (genome: VisualGenome | null) => void;
   genomesState: [Map<string, VisualGenome>, React.Dispatch<React.SetStateAction<Map<string, VisualGenome>>>];
+  networkState: NetworkStateType;
+  configPanelOpen: boolean;
+  setConfigPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  configNodeType: string | null;
+  setConfigNodeType: React.Dispatch<React.SetStateAction<string | null>>;
+  editingNodeId: string | null;
+  setEditingNodeId: React.Dispatch<React.SetStateAction<string | null>>;
+  openConfigPanel: (type: string, nodeId?: string) => void;
 }
 
 export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   onNodeSelect,
   onGenomeSelect,
   genomesState,
+  networkState,
+  configPanelOpen,
+  setConfigPanelOpen,
+  configNodeType,
+  setConfigNodeType,
+  editingNodeId,
+  setEditingNodeId,
+  openConfigPanel
 }) => {
   const [genomes, setGenomes] = genomesState;
-  
-  const networkState = useNetworkState();
+
   const {
     nodes,
     setNodes,
@@ -60,49 +76,29 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     handleWheel,
   } = canvasState;
 
-  const [configPanelOpen, setConfigPanelOpen] = useState<boolean>(false);
-  const [configNodeType, setConfigNodeType] = useState<string | null>(null);
-  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   const [connectionContextMenu, setConnectionContextMenu] = useState<{ x: number; y: number; connectionId: string } | null>(null);
 
   const svgRef = useRef<SVGSVGElement>(null);
-  const nodesRef = useRef<Map<string, VisualNode>>(nodes);
-  const connectionsRef = useRef<Map<string, Connection>>(connections);
   const panningRef = useRef<boolean>(false);
   const lastMousePosRef = useRef<Position>({ x: 0, y: 0 });
 
-  React.useEffect(() => {
-    nodesRef.current = nodes;
-  }, [nodes]);
-
-  React.useEffect(() => {
-    connectionsRef.current = connections;
-  }, [connections]);
-
-  const openConfigPanel = useCallback((type: string, nodeId?: string) => {
-    setConfigNodeType(type);
-    setEditingNodeId(nodeId || null);
-    setConfigPanelOpen(true);
-  }, []);
-
   const handleConfigSave = useCallback((newNode: BaseNode) => {
     if (editingNodeId) {
-      // Edit existing node logic (preserving connections)
-      const oldVisualNode = nodesRef.current.get(editingNodeId);
+      const oldVisualNode = nodes.get(editingNodeId);
       if (!oldVisualNode) return;
 
       const incomingConnections: string[] = [];
       const outgoingConnections: string[] = [];
 
-      connectionsRef.current.forEach((conn) => {
+      connections.forEach((conn) => {
         if (conn.toNodeId === editingNodeId) {
           incomingConnections.push(conn.fromNodeId);
-          nodesRef.current.get(conn.fromNodeId)!.node.RemoveNext(oldVisualNode.node);
+          nodes.get(conn.fromNodeId)!.node.RemoveNext(oldVisualNode.node);
         }
         if (conn.fromNodeId === editingNodeId) {
           outgoingConnections.push(conn.toNodeId);
-          oldVisualNode.node.RemoveNext(nodesRef.current.get(conn.toNodeId)!.node);
+          oldVisualNode.node.RemoveNext(nodes.get(conn.toNodeId)!.node);
         }
       });
 
@@ -115,7 +111,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         const newNodes = new Map(prev);
         newNodes.set(newNode.id, updatedVisualNode);
         newNodes.delete(editingNodeId);
-        nodesRef.current.set(newNode.id, updatedVisualNode);
+        nodes.set(newNode.id, updatedVisualNode);
         return newNodes;
       });
 
@@ -133,19 +129,19 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         const newConns = new Map<string, Connection>();
 
         incomingConnections.forEach((fromId) => {
-          const fromNode = nodesRef.current.get(fromId);
+          const fromNode = nodes.get(fromId);
           if (fromNode && newNode.CheckCompability(fromNode.node)) {
             fromNode.node.AddNext(newNode);
-            const connId = uuidv4();
+            const connId = v4();
             newConns.set(connId, { id: connId, fromNodeId: fromId, toNodeId: newNode.id });
           }
         });
 
         outgoingConnections.forEach((toId) => {
-          const toNode = nodesRef.current.get(toId);
+          const toNode = nodes.get(toId);
           if (toNode && toNode.node.CheckCompability(newNode)) {
             newNode.AddNext(toNode.node);
-            const connId = uuidv4();
+            const connId = v4();
             newConns.set(connId, { id: connId, fromNodeId: newNode.id, toNodeId: toId });
           }
         });
@@ -159,11 +155,14 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         return newConns;
       });
 
-      if (selectedNodeId === editingNodeId && onNodeSelect) {
+      if (selectedNodeId === editingNodeId) {
         onNodeSelect(updatedVisualNode);
       }
-    } else {
-      // Create new node
+    }
+
+    else {
+      console.log("aboba");
+
       const newGenome = createNewGenomeWithNode(newNode);
       const pos = { x: 100 + nodes.size * 20, y: 100 + nodes.size * 20 };
 
@@ -193,7 +192,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   const handleNodeDragStart = useCallback(
     (nodeId: string, e: React.MouseEvent) => {
       e.preventDefault();
-      const node = nodesRef.current.get(nodeId);
+      const node = nodes.get(nodeId);
       if (!node || !svgRef.current) return;
 
       setNodeContextMenu(null);
@@ -220,16 +219,16 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         // Вычисляем дельту движения курсора
         const dx = e.clientX - lastMousePosRef.current.x;
         const dy = e.clientY - lastMousePosRef.current.y;
-        
+
         // Обновляем позицию холста
         setTranslate((prev) => ({
           x: prev.x + dx,
           y: prev.y + dy,
         }));
-        
+
         // Сохраняем текущую позицию курсора для следующего кадра
         lastMousePosRef.current = { x: e.clientX, y: e.clientY };
-        
+
         // Закрываем контекстные меню
         setNodeContextMenu(null);
         setConnectionContextMenu(null);
@@ -287,7 +286,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     (nodeId: string) => {
       setSelectedNodeId(nodeId);
       setSelectedConnectionId(null);
-      const node = nodesRef.current.get(nodeId);
+      const node = nodes.get(nodeId);
       if (node && onNodeSelect) {
         setSelectedGenomeId(node.genomeId);
         onNodeSelect(node);
@@ -307,8 +306,8 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
       if (connectingFrom === null) {
         setConnectingFrom(nodeId);
       } else if (connectingFrom !== nodeId) {
-        const fromNode = nodesRef.current.get(connectingFrom);
-        const toNode = nodesRef.current.get(nodeId);
+        const fromNode = nodes.get(connectingFrom);
+        const toNode = nodes.get(nodeId);
 
         if (fromNode && toNode) {
           if (toNode.node.CheckCompability(fromNode.node)) {
@@ -620,7 +619,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
   const handleNodeEdit = () => {
     if (!nodeContextMenu) return;
-    const node = nodesRef.current.get(nodeContextMenu.nodeId);
+    const node = nodes.get(nodeContextMenu.nodeId);
     if (!node) return;
 
     setSelectedNodeId(nodeContextMenu.nodeId);
@@ -630,7 +629,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
   const handleNodeCopy = () => {
     if (!nodeContextMenu) return;
-    const node = nodesRef.current.get(nodeContextMenu.nodeId);
+    const node = nodes.get(nodeContextMenu.nodeId);
     if (!node) return;
 
     const newNodes = new Map(nodes);
@@ -667,7 +666,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     if (!nodeContextMenu) return;
 
     const nodeIdToDelete = nodeContextMenu.nodeId;
-    const nodeToDelete = nodesRef.current.get(nodeIdToDelete);
+    const nodeToDelete = nodes.get(nodeIdToDelete);
     if (!nodeToDelete) return;
 
     const deletingNode = nodeToDelete;
@@ -684,7 +683,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
       return newConns;
     });
 
-    const newNodes = new Map(nodesRef.current);
+    const newNodes = new Map(nodes);
     newNodes.delete(nodeIdToDelete);
 
     const nodeGenomeId = deletingNode.genomeId;
@@ -727,9 +726,9 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
               }
             }
             const currentNodeId = currentNode.id;
-            const currentVisualNode = nodesRef.current.get(currentNodeId)!;
+            const currentVisualNode = nodes.get(currentNodeId)!;
             connectedNodesMap.set(currentNode, true);
-            connectedVisualNodes.push({ ...nodesRef.current.get(currentNodeId)!, genomeId: newGenomeId });
+            connectedVisualNodes.push({ ...nodes.get(currentNodeId)!, genomeId: newGenomeId });
             newNodes.set(currentNodeId, { ...currentVisualNode, genomeId: newGenomeId });
             nodesToCheck.push(...currentNode.previous, ...currentNode.next);
           }
@@ -772,7 +771,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     if (!connectionContextMenu) return;
 
     const connectionId = connectionContextMenu.connectionId;
-    const connectionToDelete = connectionsRef.current.get(connectionId);
+    const connectionToDelete = connections.get(connectionId);
     if (!connectionToDelete) return;
 
     setConnectionContextMenu(null);
@@ -783,7 +782,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
       return newConnections;
     });
 
-    const newNodes = new Map(nodesRef.current);
+    const newNodes = new Map(nodes);
     const newGenomes = new Map(genomes);
     const newGenomeNode = new Map(genomeNode);
 

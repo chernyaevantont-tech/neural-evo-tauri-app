@@ -1,12 +1,16 @@
 import { BsLayers } from "react-icons/bs";
 import styles from './SideMenu.module.css'
 import { useState } from "react";
-import { FcBiotech } from "react-icons/fc";
 import { NodeToolbar } from "../../features/node-toolbar";
+import { PiGraph } from "react-icons/pi";
 
 type MenuType = "Layers" | "Genomes";
 
-export const SideMenu: React.FC = () => {
+interface SideMenuProps {
+    handleAddNode: (nodeType: string) => void;
+}
+
+export const SideMenu: React.FC<SideMenuProps> = ({handleAddNode}) => {
     const [selectedPanelMenu, setSelectedPanelMenu] = useState<MenuType | null>(null);
 
     return (
@@ -22,12 +26,12 @@ export const SideMenu: React.FC = () => {
                     className={`${styles.iconContainer} ${selectedPanelMenu == "Genomes" && styles.selectedIcon}`}
                     onClick={() => setSelectedPanelMenu(selectedPanelMenu == "Genomes" ? null : "Genomes")}
                 >
-                    <FcBiotech className={styles.icon} />
+                    <PiGraph  className={styles.icon} />
                 </div>
                 {
                     selectedPanelMenu && <div className={styles.sideMenu}>
                         {
-                            selectedPanelMenu == "Layers" && <NodeToolbar/>
+                            selectedPanelMenu == "Layers" && <NodeToolbar onAddNode={handleAddNode}/>
                         }
                     </div>
                 }

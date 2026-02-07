@@ -20,20 +20,8 @@
   letter-spacing: 0.5px;
 }
 
-.buttonGrid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--spacing-xs);
-}
-
 .nodeButton {
   justify-content: flex-start;
-}
-
-.divider {
-  height: 1px;
-  background-color: var(--color-border-primary);
-  margin: var(--spacing-lg) 0;
 }
 
 .operations {

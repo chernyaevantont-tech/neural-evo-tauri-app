@@ -4,14 +4,10 @@ import styles from './NodeToolbar.module.css';
 
 interface NodeToolbarProps {
   onAddNode: (nodeType: string) => void;
-  onLoadGenome: () => void;
-  onGetSubgenome: () => void;
 }
 
 export const NodeToolbar: React.FC<NodeToolbarProps> = ({
   onAddNode,
-  onLoadGenome,
-  onGetSubgenome,
 }) => {
   const nodeTypes = [
     { type: 'Input', label: 'Input' },
@@ -44,29 +40,6 @@ export const NodeToolbar: React.FC<NodeToolbarProps> = ({
       </div>
 
       <div className={styles.divider} />
-
-      {/* <div className={styles.section}>
-        <h4 className={styles.sectionTitle}>Genome Operations</h4>
-        <div className={styles.operations}>
-          <Button
-            onClick={onLoadGenome}
-            variant="primary"
-            size="md"
-            icon={<LoadIcon size={16} />}
-            fullWidth
-          >
-            Load Genome
-          </Button>
-          <Button
-            onClick={onGetSubgenome}
-            variant="secondary"
-            size="md"
-            fullWidth
-          >
-            Get Subgenome
-          </Button>
-        </div>
-      </div> */}
     </div>
   );
 };
