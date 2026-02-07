@@ -54,7 +54,7 @@ export const NodeCard: React.FC<NodeCardProps> = ({
           cy={radius}
           r={radius}
           fill={theme.colors.accent.primary}
-          opacity={0.5}
+          opacity={0.9}
           pointerEvents="none"
         />
       )}

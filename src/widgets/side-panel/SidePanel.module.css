@@ -1,0 +1,17 @@
+.container {
+  width: 380px;
+  height: 100%;
+  padding: var(--spacing-lg);
+  background-color: var(--color-bg-secondary);
+  border-left: 1px solid var(--color-border-primary);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.divider {
+  height: 1px;
+  background-color: var(--color-border-primary);
+  margin: var(--spacing-md) 0;
+}

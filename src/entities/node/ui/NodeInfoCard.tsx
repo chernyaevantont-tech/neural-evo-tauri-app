@@ -1,6 +1,6 @@
-import React, { CSSProperties } from 'react';
+import React from 'react';
 import { VisualNode } from '../../../shared/types';
-import { theme } from '../../../shared/lib';
+import styles from './NodeInfoCard.module.css';
 
 interface NodeInfoCardProps {
   node: VisualNode | null;
@@ -9,9 +9,9 @@ interface NodeInfoCardProps {
 export const NodeInfoCard: React.FC<NodeInfoCardProps> = ({ node }) => {
   if (!node) {
     return (
-      <div style={containerStyle}>
-        <h3 style={titleStyle}>Node Information</h3>
-        <p style={emptyTextStyle}>Select a node to view details</p>
+      <div className={styles.container}>
+        <h3 className={styles.title}>Node Information</h3>
+        <p className={styles.emptyText}>Select a node to view details</p>
       </div>
     );
   }
@@ -34,123 +34,37 @@ export const NodeInfoCard: React.FC<NodeInfoCardProps> = ({ node }) => {
   };
 
   return (
-    <div style={containerStyle}>
-      <h3 style={titleStyle}>Node Information</h3>
+    <div className={styles.container}>
+      <h3 className={styles.title}>Node Information</h3>
 
-      <div style={sectionStyle}>
-        <div style={labelStyle}>Type</div>
-        <div style={valueStyle}>{info.node}</div>
+      <div className={styles.section}>
+        <div className={styles.label}>Type</div>
+        <div className={styles.value}>{info.node}</div>
       </div>
 
       {info.params && Object.keys(info.params).length > 0 && (
-        <div style={sectionStyle}>
-          <div style={labelStyle}>Parameters</div>
-          <div style={paramsContainer}>
+        <div className={styles.section}>
+          <div className={styles.label}>Parameters</div>
+          <div className={styles.paramsContainer}>
             {Object.entries(info.params).map(([key, value]) => (
-              <div key={key} style={paramRowStyle}>
-                <span style={paramKeyStyle}>{key}</span>
-                <span style={paramValueStyle}>{renderValue(value)}</span>
+              <div key={key} className={styles.paramRow}>
+                <span className={styles.paramKey}>{key}</span>
+                <span className={styles.paramValue}>{renderValue(value)}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      <div style={sectionStyle}>
-        <div style={labelStyle}>Output Shape</div>
-        <div style={valueStyle}>{renderValue(node.node.GetOutputShape())}</div>
+      <div className={styles.section}>
+        <div className={styles.label}>Output Shape</div>
+        <div className={styles.value}>{renderValue(node.node.GetOutputShape())}</div>
       </div>
 
-      <div style={sectionStyle}>
-        <div style={labelStyle}>Node ID</div>
-        <div style={idStyle}>{node.node.id}</div>
+      <div className={styles.section}>
+        <div className={styles.label}>Node ID</div>
+        <div className={styles.idStyle}>{node.node.id}</div>
       </div>
     </div>
   );
-};
-
-const containerStyle: CSSProperties = {
-  backgroundColor: theme.colors.background.secondary,
-  padding: theme.spacing.lg,
-  borderRadius: theme.borderRadius.lg,
-  border: `1px solid ${theme.colors.border.primary}`,
-};
-
-const titleStyle: CSSProperties = {
-  margin: `0 0 ${theme.spacing.lg} 0`,
-  fontSize: theme.typography.fontSize.xl,
-  fontWeight: theme.typography.fontWeight.semibold,
-  color: theme.colors.text.primary,
-  fontFamily: theme.typography.fontFamily,
-  borderBottom: `2px solid ${theme.colors.accent.primary}`,
-  paddingBottom: theme.spacing.sm,
-};
-
-const emptyTextStyle: CSSProperties = {
-  color: theme.colors.text.secondary,
-  fontStyle: 'italic',
-  textAlign: 'center',
-  padding: theme.spacing.xl,
-  fontFamily: theme.typography.fontFamily,
-  fontSize: theme.typography.fontSize.md,
-};
-
-const sectionStyle: CSSProperties = {
-  marginBottom: theme.spacing.md,
-};
-
-const labelStyle: CSSProperties = {
-  fontSize: theme.typography.fontSize.xs,
-  fontWeight: theme.typography.fontWeight.semibold,
-  color: theme.colors.text.secondary,
-  textTransform: 'uppercase',
-  marginBottom: theme.spacing.xs,
-  fontFamily: theme.typography.fontFamily,
-  letterSpacing: '0.5px',
-};
-
-const valueStyle: CSSProperties = {
-  fontSize: theme.typography.fontSize.md,
-  color: theme.colors.text.primary,
-  padding: theme.spacing.sm,
-  backgroundColor: theme.colors.background.tertiary,
-  borderRadius: theme.borderRadius.md,
-  fontFamily: theme.typography.fontFamily,
-  border: `1px solid ${theme.colors.border.primary}`,
-};
-
-const paramsContainer: CSSProperties = {
-  backgroundColor: theme.colors.background.tertiary,
-  borderRadius: theme.borderRadius.md,
-  padding: theme.spacing.sm,
-  border: `1px solid ${theme.colors.border.primary}`,
-};
-
-const paramRowStyle: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  padding: `${theme.spacing.xs} 0`,
-  borderBottom: `1px solid ${theme.colors.border.primary}`,
-  fontFamily: theme.typography.fontFamily,
-};
-
-const paramKeyStyle: CSSProperties = {
-  fontWeight: theme.typography.fontWeight.medium,
-  color: theme.colors.text.primary,
-  fontSize: theme.typography.fontSize.sm,
-};
-
-const paramValueStyle: CSSProperties = {
-  color: theme.colors.text.accent,
-  fontSize: theme.typography.fontSize.sm,
-  textAlign: 'right',
-  maxWidth: '60%',
-  wordBreak: 'break-word',
-};
-
-const idStyle: CSSProperties = {
-  ...valueStyle,
-  fontSize: theme.typography.fontSize.xs,
-  color: theme.colors.text.tertiary,
-  fontFamily: 'monospace',
 };

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Connection, VisualNode } from '../../../shared/types';
 import { theme } from '../../../shared/lib';
+import styles from './ConnectionLine.module.css';
 
 interface ConnectionLineProps {
   connection: Connection;
@@ -56,17 +57,7 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
     : theme.colors.text.secondary;
 
   return (
-    <g
-      onMouseDown={(e) => {
-        e.stopPropagation();
-        onSelect(connection.id);
-      }}
-      onContextMenu={(e) => {
-        e.stopPropagation();
-        onContextMenu(connection.id, e);
-      }}
-      style={{ cursor: 'pointer' }}
-    >
+    <div className={styles.connectionLine}>
       <line
         x1={adjustedStartX}
         y1={adjustedStartY}
@@ -81,6 +72,6 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
         fill={strokeColor}
         opacity={0.8}
       />
-    </g>
+    </div>
   );
 };

@@ -1,0 +1,81 @@
+/* Global CSS Variables from theme.ts */
+:root {
+  /* Background colors */
+  --color-bg-primary: #1e1e1e;
+  --color-bg-secondary: #252526;
+  --color-bg-tertiary: #2d2d30;
+  --color-bg-canvas: #1a1a1a;
+  --color-bg-hover: #2a2d2e;
+
+  /* Border colors */
+  --color-border-primary: #3e3e42;
+  --color-border-secondary: #454545;
+  --color-border-focus: #007acc;
+  --color-border-active: #0e639c;
+
+  /* Text colors */
+  --color-text-primary: #cccccc;
+  --color-text-secondary: #969696;
+  --color-text-tertiary: #6a6a6a;
+  --color-text-accent: #4fc3f7;
+  --color-text-success: #4caf50;
+  --color-text-error: #f44336;
+  --color-text-warning: #ff9800;
+
+  /* Node type colors */
+  --color-node-input: #6bcf7f;
+  --color-node-dense: #4fc3f7;
+  --color-node-conv2d: #ff9f43;
+  --color-node-pooling: #ab47bc;
+  --color-node-flatten: #7cb342;
+  --color-node-add: #ef5350;
+  --color-node-concat: #ec407a;
+  --color-node-output: #ff5252;
+
+  /* Accent colors */
+  --color-accent-primary: #007acc;
+  --color-accent-secondary: #0e639c;
+  --color-accent-hover: #1a8cd8;
+  --color-accent-success: #4caf50;
+  --color-accent-error: #f44336;
+  --color-accent-warning: #ff9800;
+
+  /* Typography */
+  --font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 14px;
+  --font-size-xl: 16px;
+  --font-size-xxl: 18px;
+  
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 20px;
+  --spacing-xxl: 24px;
+
+  /* Border radius */
+  --border-radius-sm: 2px;
+  --border-radius-md: 4px;
+  --border-radius-lg: 6px;
+  --border-radius-xl: 8px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-focus: 0 0 0 2px rgba(0, 122, 204, 0.4);
+
+  /* Transitions */
+  --transition-fast: 100ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+}

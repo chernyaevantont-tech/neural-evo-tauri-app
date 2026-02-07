@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { VisualNode, VisualGenome } from '../shared/types';
 import { NetworkCanvas, SidePanel } from '../widgets';
 import { TitleBar } from '../widgets';
-import { theme } from '../shared/lib';
+import { SideMenu } from '../widgets/side-menu/SideMenu';
+import styles from './App.module.css';
 
 function App() {
   const [selectedNode, setSelectedNode] = useState<VisualNode | null>(null);
@@ -10,28 +11,12 @@ function App() {
   const genomesState = useState<Map<string, VisualGenome>>(new Map());
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        width: '100vw',
-        height: '100vh',
-        overflow: 'hidden',
-        backgroundColor: theme.colors.background.primary,
-        fontFamily: theme.typography.fontFamily,
-        color: theme.colors.text.primary,
-        margin: 0,
-        padding: 0,
-      }}
-    >
+    <div className={styles.container}>
       <TitleBar />
       
-      <div style={{
-        display: 'flex',
-        flex: 1,
-        overflow: 'hidden',
-        minHeight: 0,
-      }}>
+      <div className={styles.content}>
+        <SideMenu/>
+
         <NetworkCanvas
           onNodeSelect={setSelectedNode}
           onGenomeSelect={setSelectedGenome}

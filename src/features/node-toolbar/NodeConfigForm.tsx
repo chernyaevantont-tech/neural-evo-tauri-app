@@ -1,4 +1,4 @@
-import React, { useState, useEffect, CSSProperties } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BaseNode } from '../../evo/nodes/base_node';
 import { InputNode } from '../../evo/nodes/layers/input_node';
 import { DenseNode } from '../../evo/nodes/layers/dense_node';
@@ -10,7 +10,7 @@ import { ActivationFunction, KernelSize, PoolType } from '../../evo/nodes/types'
 import { FlattenNode } from '../../evo/nodes/layers/flatten_node';
 import { OutputNode } from '../../evo/nodes/layers/output_node';
 import { Modal, Button } from '../../shared/ui';
-import { theme } from '../../shared/lib';
+import styles from './NodeConfigForm.module.css';
 
 interface NodeConfigFormProps {
   nodeType: string;
@@ -131,8 +131,8 @@ export const NodeConfigForm: React.FC<NodeConfigFormProps> = ({
   };
 
   const FormField: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-    <div style={fieldStyle}>
-      <label style={labelStyle}>{label}</label>
+    <div className={styles.field}>
+      <label className={styles.label}>{label}</label>
       {children}
     </div>
   );
@@ -141,7 +141,7 @@ export const NodeConfigForm: React.FC<NodeConfigFormProps> = ({
     <>
       <FormField label="Shape Length">
         <input
-          style={inputStyle}
+          className={styles.input}
           type="number"
           value={inputShapeLength}
           onChange={(e) => {
@@ -158,7 +158,7 @@ export const NodeConfigForm: React.FC<NodeConfigFormProps> = ({
       {inputShape.map((d, i) => (
         <FormField key={i} label={`Dimension ${i + 1}`}>
           <input
-            style={inputStyle}
+            className={styles.input}
             type="number"
             value={d}
             onChange={(e) => {
@@ -177,7 +177,7 @@ export const NodeConfigForm: React.FC<NodeConfigFormProps> = ({
     <>
       <FormField label="Shape Length">
         <input
-          style={inputStyle}
+          className={styles.input}
           type="number"
           value={outputShapeLength}
           onChange={(e) => {
@@ -194,7 +194,7 @@ export const NodeConfigForm: React.FC<NodeConfigFormProps> = ({
       {outputShape.map((d, i) => (
         <FormField key={i} label={`Dimension ${i + 1}`}>
           <input
-            style={inputStyle}
+            className={styles.input}
             type="number"
             value={d}
             onChange={(e) => {
@@ -213,7 +213,7 @@ export const NodeConfigForm: React.FC<NodeConfigFormProps> = ({
     <>
       <FormField label="Units">
         <input
-          style={inputStyle}
+          className={styles.input}
           type="number"
           value={units}
           onChange={(e) => setUnits(parseInt(e.target.value) || 1)}
@@ -221,7 +221,7 @@ export const NodeConfigForm: React.FC<NodeConfigFormProps> = ({
         />
       </FormField>
       <FormField label="Activation">
-        <select style={selectStyle} value={activation} onChange={(e) => setActivation(e.target.value as ActivationFunction)}>
+        <select className={styles.select} value={activation} onChange={(e) => setActivation(e.target.value as ActivationFunction)}>
           <option value="relu">ReLU</option>
           <option value="leaky_relu">Leaky ReLU</option>
           <option value="softmax">Softmax</option>
@@ -236,22 +236,22 @@ export const NodeConfigForm: React.FC<NodeConfigFormProps> = ({
   const renderConv2DConfig = () => (
     <>
       <FormField label="Filters">
-        <input style={inputStyle} type="number" value={filters} onChange={(e) => setFilters(parseInt(e.target.value) || 1)} min="1" />
+        <input className={styles.input} type="number" value={filters} onChange={(e) => setFilters(parseInt(e.target.value) || 1)} min="1" />
       </FormField>
       <FormField label="Kernel Height">
-        <input style={inputStyle} type="number" value={kernelH} onChange={(e) => setKernelH(parseInt(e.target.value) || 1)} min="1" />
+        <input className={styles.input} type="number" value={kernelH} onChange={(e) => setKernelH(parseInt(e.target.value) || 1)} min="1" />
       </FormField>
       <FormField label="Kernel Width">
-        <input style={inputStyle} type="number" value={kernelW} onChange={(e) => setKernelW(parseInt(e.target.value) || 1)} min="1" />
+        <input className={styles.input} type="number" value={kernelW} onChange={(e) => setKernelW(parseInt(e.target.value) || 1)} min="1" />
       </FormField>
       <FormField label="Stride">
-        <input style={inputStyle} type="number" value={stride} onChange={(e) => setStride(parseInt(e.target.value) || 1)} min="1" />
+        <input className={styles.input} type="number" value={stride} onChange={(e) => setStride(parseInt(e.target.value) || 1)} min="1" />
       </FormField>
       <FormField label="Padding">
-        <input style={inputStyle} type="number" value={padding} onChange={(e) => setPadding(parseInt(e.target.value) || 0)} min="0" />
+        <input className={styles.input} type="number" value={padding} onChange={(e) => setPadding(parseInt(e.target.value) || 0)} min="0" />
       </FormField>
       <FormField label="Dilation">
-        <input style={inputStyle} type="number" value={dilation} onChange={(e) => setDilation(parseInt(e.target.value) || 1)} min="1" />
+        <input className={styles.input} type="number" value={dilation} onChange={(e) => setDilation(parseInt(e.target.value) || 1)} min="1" />
       </FormField>
       <FormField label="Use Bias">
         <input type="checkbox" checked={convUseBias} onChange={(e) => setConvUseBias(e.target.checked)} />
@@ -262,41 +262,41 @@ export const NodeConfigForm: React.FC<NodeConfigFormProps> = ({
   const renderPoolingConfig = () => (
     <>
       <FormField label="Pool Type">
-        <select style={selectStyle} value={poolType} onChange={(e) => setPoolType(e.target.value as PoolType)}>
+        <select className={styles.select} value={poolType} onChange={(e) => setPoolType(e.target.value as PoolType)}>
           <option value="max">Max</option>
           <option value="avg">Average</option>
         </select>
       </FormField>
       <FormField label="Kernel Height">
-        <input style={inputStyle} type="number" value={poolKernelH} onChange={(e) => setPoolKernelH(parseInt(e.target.value) || 1)} min="1" />
+        <input className={styles.input} type="number" value={poolKernelH} onChange={(e) => setPoolKernelH(parseInt(e.target.value) || 1)} min="1" />
       </FormField>
       <FormField label="Kernel Width">
-        <input style={inputStyle} type="number" value={poolKernelW} onChange={(e) => setPoolKernelW(parseInt(e.target.value) || 1)} min="1" />
+        <input className={styles.input} type="number" value={poolKernelW} onChange={(e) => setPoolKernelW(parseInt(e.target.value) || 1)} min="1" />
       </FormField>
       <FormField label="Stride">
-        <input style={inputStyle} type="number" value={poolStride} onChange={(e) => setPoolStride(parseInt(e.target.value) || 1)} min="1" />
+        <input className={styles.input} type="number" value={poolStride} onChange={(e) => setPoolStride(parseInt(e.target.value) || 1)} min="1" />
       </FormField>
       <FormField label="Padding">
-        <input style={inputStyle} type="number" value={poolPadding} onChange={(e) => setPoolPadding(parseInt(e.target.value) || 0)} min="0" />
+        <input className={styles.input} type="number" value={poolPadding} onChange={(e) => setPoolPadding(parseInt(e.target.value) || 0)} min="0" />
       </FormField>
     </>
   );
 
   return (
     <Modal isOpen={true} onClose={onCancel} title={`${existingNode ? 'Edit' : 'Add'} ${nodeType} Node`} maxWidth="500px">
-      <div style={formStyle}>
+      <div className={styles.form}>
         {nodeType === 'Input' && renderInputConfig()}
         {nodeType === 'Output' && renderOutputConfig()}
         {nodeType === 'Dense' && renderDenseConfig()}
         {nodeType === 'Conv2D' && renderConv2DConfig()}
         {nodeType === 'Pooling' && renderPoolingConfig()}
         {(nodeType === 'Add' || nodeType === 'Concat2D' || nodeType === 'Flatten') && (
-          <p style={{ color: theme.colors.text.secondary, fontStyle: 'italic' }}>
+          <p className={styles.nodeConfigText}>
             This node has no configurable parameters.
           </p>
         )}
 
-        <div style={buttonsStyle}>
+        <div className={styles.buttons}>
           <Button onClick={handleSave} variant="primary">
             {existingNode ? 'Update' : 'Create'}
           </Button>
@@ -309,42 +309,3 @@ export const NodeConfigForm: React.FC<NodeConfigFormProps> = ({
   );
 };
 
-const formStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: theme.spacing.md,
-};
-
-const fieldStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: theme.spacing.xs,
-};
-
-const labelStyle: CSSProperties = {
-  fontSize: theme.typography.fontSize.sm,
-  fontWeight: theme.typography.fontWeight.medium,
-  color: theme.colors.text.primary,
-  fontFamily: theme.typography.fontFamily,
-};
-
-const inputStyle: CSSProperties = {
-  padding: theme.spacing.sm,
-  borderRadius: theme.borderRadius.md,
-  border: `1px solid ${theme.colors.border.primary}`,
-  backgroundColor: theme.colors.background.tertiary,
-  color: theme.colors.text.primary,
-  fontSize: theme.typography.fontSize.md,
-  fontFamily: theme.typography.fontFamily,
-};
-
-const selectStyle: CSSProperties = {
-  ...inputStyle,
-  cursor: 'pointer',
-};
-
-const buttonsStyle: CSSProperties = {
-  display: 'flex',
-  gap: theme.spacing.sm,
-  marginTop: theme.spacing.lg,
-};

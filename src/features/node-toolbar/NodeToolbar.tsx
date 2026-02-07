@@ -1,6 +1,6 @@
-import React, { CSSProperties } from 'react';
+import React from 'react';
 import { Button, LoadIcon, PlusIcon } from '../../shared/ui';
-import { theme } from '../../shared/lib';
+import styles from './NodeToolbar.module.css';
 
 interface NodeToolbarProps {
   onAddNode: (nodeType: string) => void;
@@ -25,10 +25,10 @@ export const NodeToolbar: React.FC<NodeToolbarProps> = ({
   ];
 
   return (
-    <div style={containerStyle}>
-      <div style={sectionStyle}>
-        <h4 style={sectionTitleStyle}>Add Layers</h4>
-        <div style={buttonGridStyle}>
+    <div className={styles.container}>
+      <div className={styles.section}>
+        <h4 className={styles.sectionTitle}>Add Layers</h4>
+        <div className={styles.buttonGrid}>
           {nodeTypes.map(({ type, label }) => (
             <Button
               key={type}
@@ -36,7 +36,6 @@ export const NodeToolbar: React.FC<NodeToolbarProps> = ({
               variant="secondary"
               size="sm"
               icon={<PlusIcon size={14} />}
-              style={nodeButtonStyle}
             >
               {label}
             </Button>
@@ -44,11 +43,11 @@ export const NodeToolbar: React.FC<NodeToolbarProps> = ({
         </div>
       </div>
 
-      <div style={dividerStyle} />
+      <div className={styles.divider} />
 
-      <div style={sectionStyle}>
-        <h4 style={sectionTitleStyle}>Genome Operations</h4>
-        <div style={operationsStyle}>
+      {/* <div className={styles.section}>
+        <h4 className={styles.sectionTitle}>Genome Operations</h4>
+        <div className={styles.operations}>
           <Button
             onClick={onLoadGenome}
             variant="primary"
@@ -67,58 +66,7 @@ export const NodeToolbar: React.FC<NodeToolbarProps> = ({
             Get Subgenome
           </Button>
         </div>
-      </div>
+      </div> */}
     </div>
   );
-};
-
-const containerStyle: CSSProperties = {
-  position: 'absolute',
-  top: theme.spacing.md,
-  left: theme.spacing.md,
-  zIndex: 10,
-  backgroundColor: theme.colors.background.secondary,
-  padding: theme.spacing.lg,
-  borderRadius: theme.borderRadius.lg,
-  boxShadow: theme.shadows.lg,
-  border: `1px solid ${theme.colors.border.primary}`,
-  maxWidth: '280px',
-};
-
-const sectionStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: theme.spacing.sm,
-};
-
-const sectionTitleStyle: CSSProperties = {
-  margin: 0,
-  fontSize: theme.typography.fontSize.sm,
-  fontWeight: theme.typography.fontWeight.semibold,
-  color: theme.colors.text.secondary,
-  textTransform: 'uppercase',
-  fontFamily: theme.typography.fontFamily,
-  letterSpacing: '0.5px',
-};
-
-const buttonGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(2, 1fr)',
-  gap: theme.spacing.xs,
-};
-
-const nodeButtonStyle: CSSProperties = {
-  justifyContent: 'flex-start',
-};
-
-const dividerStyle: CSSProperties = {
-  height: '1px',
-  backgroundColor: theme.colors.border.primary,
-  margin: `${theme.spacing.lg} 0`,
-};
-
-const operationsStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: theme.spacing.xs,
 };

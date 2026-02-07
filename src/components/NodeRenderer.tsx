@@ -1,5 +1,6 @@
 import React from 'react';
 import { VisualNode } from './types';
+import styles from './NodeRenderer.module.css';
 
 interface NodeRendererProps {
     node: VisualNode;
@@ -43,8 +44,7 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
     const label = getNodeLabel(node.node.GetNodeType());
 
     return (
-        <g
-            transform={`translate(${node.position.x}, ${node.position.y})`}
+        <div className={styles.nodeRenderer}
             onMouseDown={(e) => {
                 e.stopPropagation();
                 onDragStart(node.node.id, e);
@@ -54,7 +54,6 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
                 e.stopPropagation();
                 onContextMenu(node.node.id, e);
             }}
-            style={{ cursor: 'move' }}
         >
             <circle
                 cx={radius}
@@ -85,7 +84,7 @@ export const NodeRenderer: React.FC<NodeRendererProps> = ({
             >
                 {label}
             </text>
-        </g>
+        </div>
     );
 };
 

@@ -1,0 +1,93 @@
+.container {
+  background-color: var(--color-bg-secondary);
+  padding: var(--spacing-lg);
+  border-radius: var(--border-radius-lg);
+  border: 1px solid var(--color-border-primary);
+}
+
+.title {
+  margin: 0 0 var(--spacing-lg) 0;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  font-family: var(--font-family);
+  border-bottom: 2px solid var(--color-accent-primary);
+  padding-bottom: var(--spacing-sm);
+}
+
+.emptyText {
+  color: var(--color-text-secondary);
+  font-style: italic;
+  text-align: center;
+  padding: var(--spacing-xl);
+  font-family: var(--font-family);
+  font-size: var(--font-size-md);
+}
+
+.section {
+  margin-bottom: var(--spacing-md);
+}
+
+.label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  margin-bottom: var(--spacing-xs);
+  font-family: var(--font-family);
+  letter-spacing: 0.5px;
+}
+
+.value {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  padding: var(--spacing-sm);
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--border-radius-md);
+  font-family: var(--font-family);
+  border: 1px solid var(--color-border-primary);
+}
+
+.paramsContainer {
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-sm);
+  border: 1px solid var(--color-border-primary);
+}
+
+.paramRow {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--spacing-xs) 0;
+  border-bottom: 1px solid var(--color-border-primary);
+  font-family: var(--font-family);
+}
+
+.paramRow:last-child {
+  border-bottom: none;
+}
+
+.paramKey {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.paramValue {
+  color: var(--color-text-accent);
+  font-size: var(--font-size-sm);
+  text-align: right;
+  max-width: 60%;
+  word-break: break-word;
+}
+
+.idStyle {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  font-family: monospace;
+  word-break: break-all;
+  padding: var(--spacing-sm);
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--color-border-primary);
+}

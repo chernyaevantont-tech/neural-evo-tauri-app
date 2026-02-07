@@ -1,6 +1,6 @@
-import React, { CSSProperties } from 'react';
-import { theme } from '../../shared/lib';
+import React from 'react';
 import { EditIcon, TrashIcon, CopyIcon } from '../../shared/ui';
+import styles from './ContextMenu.module.css';
 
 interface ContextMenuProps {
   x: number;
@@ -27,25 +27,17 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   }> = ({ icon, label, onClick, danger }) => (
     <button
       onClick={onClick}
-      style={{
-        ...menuItemStyle,
-        color: danger ? theme.colors.accent.error : theme.colors.text.primary,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = theme.colors.background.hover;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = 'transparent';
-      }}
+      className={`${styles.menuItem} ${danger ? styles.danger : ''}`}
     >
-      <span style={iconStyle}>{icon}</span>
+      <span className={styles.icon}>{icon}</span>
       {label}
     </button>
   );
 
   return (
     <div
-      style={{ ...containerStyle, left: x, top: y }}
+      className={styles.container}
+      style={{ left: x, top: y }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {type === 'node' && (
@@ -66,36 +58,4 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       />
     </div>
   );
-};
-
-const containerStyle: CSSProperties = {
-  position: 'fixed',
-  backgroundColor: theme.colors.background.secondary,
-  border: `1px solid ${theme.colors.border.primary}`,
-  borderRadius: theme.borderRadius.md,
-  boxShadow: theme.shadows.lg,
-  zIndex: 2000,
-  minWidth: '160px',
-  overflow: 'hidden',
-};
-
-const menuItemStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: theme.spacing.sm,
-  width: '100%',
-  padding: `${theme.spacing.sm} ${theme.spacing.md}`,
-  fontSize: theme.typography.fontSize.md,
-  fontFamily: theme.typography.fontFamily,
-  border: 'none',
-  background: 'transparent',
-  cursor: 'pointer',
-  textAlign: 'left',
-  transition: theme.transitions.fast,
-};
-
-const iconStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
 };

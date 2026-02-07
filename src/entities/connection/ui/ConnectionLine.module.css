@@ -1,0 +1,5 @@
+/* ConnectionLine uses SVG, no specific styles needed */
+.connectionLine {
+  pointer-events: stroke;
+  cursor: pointer;
+}

@@ -882,11 +882,11 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
   return (
     <div style={containerStyle}>
-      <NodeToolbar
+      {/* <NodeToolbar
         onAddNode={(type: string) => openConfigPanel(type)}
         onLoadGenome={handleLoadGenome}
         onGetSubgenome={handleGetSubgenome}
-      />
+      /> */}
 
       {configPanelOpen && configNodeType && (
         <NodeConfigForm
