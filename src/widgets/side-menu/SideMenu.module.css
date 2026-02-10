@@ -54,3 +54,7 @@
     left: 40px;
     z-index: 1000;
 }
+
+.divider {
+  border-bottom: 1px solid var(--color-border-primary);
+}

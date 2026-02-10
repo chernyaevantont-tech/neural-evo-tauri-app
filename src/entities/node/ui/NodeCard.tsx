@@ -33,7 +33,7 @@ export const NodeCard: React.FC<NodeCardProps> = ({
         e.stopPropagation();
         onContextMenu(node.node.id, e);
       }}
-      style={{ cursor: 'move' }}
+      style={{ cursor: 'move', userSelect: 'none' }}
     >
       {/* Main circle */}
       <circle

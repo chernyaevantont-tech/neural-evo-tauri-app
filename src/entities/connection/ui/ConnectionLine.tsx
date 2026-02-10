@@ -57,7 +57,14 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
     : theme.colors.text.secondary;
 
   return (
-    <div className={styles.connectionLine}>
+    <g 
+      className={styles.connectionLine}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect(connection.id);
+      }}
+      onContextMenu={(e) => onContextMenu(connection.id, e)}
+    >
       <line
         x1={adjustedStartX}
         y1={adjustedStartY}
@@ -72,6 +79,6 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
         fill={strokeColor}
         opacity={0.8}
       />
-    </div>
+    </g>
   );
 };
