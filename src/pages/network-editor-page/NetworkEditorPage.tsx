@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import styles from './NetworkEditorPage.module.css';
 import { VisualGenome, VisualNode } from '../../components/types';
 import { NetworkCanvas, SidePanel, TitleBar } from '../../widgets';
-import { SideMenu } from '../../widgets/side-menu/SideMenu';
+import { MenuType, SideMenu } from '../../widgets/side-menu/SideMenu';
 import { useCanvasInteraction, useNetworkState } from './hooks';
 import { BaseNode } from '../../evo/nodes/base_node';
 import { Position } from '../../shared/types';
@@ -20,6 +20,8 @@ export const NetworkEditorPage: React.FC = () => {
     const [configNodeType, setConfigNodeType] = useState<string | null>(null);
     const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
     const svgRef = useRef<SVGSVGElement>(null);
+
+    const [menuType, setMenuType] = useState<MenuType>("Layers");
 
     const openConfigPanel = useCallback((type: string, nodeId?: string) => {
         setConfigNodeType(type);
@@ -255,6 +257,8 @@ export const NetworkEditorPage: React.FC = () => {
                     handleAddNode={openConfigPanel}
                     handleLoadGenome={handleLoadGenome}
                     handleGetSubgenome={handleGetSubgenome}
+                    menuType={menuType}
+                    setMenuType={(value) => {setMenuType(value); canvasState.setConnectingFrom(null)}}
                 />
 
                 <NetworkCanvas
@@ -271,11 +275,13 @@ export const NetworkEditorPage: React.FC = () => {
                     setEditingNodeId={setEditingNodeId}
                     openConfigPanel={openConfigPanel}
                     svgRef={svgRef}
+                    menuType={menuType}
                 />
 
                 <SidePanel
                     selectedNode={selectedNode}
                     genomes={Array.from(networkState.genomes.values())}
+                    menuType={menuType}
                 />
             </div>
         </div>

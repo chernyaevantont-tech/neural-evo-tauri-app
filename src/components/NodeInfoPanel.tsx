@@ -89,7 +89,8 @@ const headerStyle: React.CSSProperties = {
     fontWeight: 'bold',
     color: '#333',
     borderBottom: '2px solid #2196F3',
-    paddingBottom: '10px'
+    paddingBottom: '10px',
+    userSelect: 'none',
 };
 
 const emptyStyle: React.CSSProperties = {

@@ -13,6 +13,7 @@
   font-family: var(--font-family);
   border-bottom: 2px solid var(--color-accent-primary);
   padding-bottom: var(--spacing-sm);
+  user-select: none;
 }
 
 .emptyText {
@@ -22,6 +23,7 @@
   padding: var(--spacing-xl);
   font-family: var(--font-family);
   font-size: var(--font-size-md);
+  user-select: none;
 }
 
 .list {

@@ -1,22 +1,29 @@
 import { BsLayers } from "react-icons/bs";
 import styles from './SideMenu.module.css'
-import { useState } from "react";
+import { Dispatch, SetStateAction, useState } from "react";
 import { NodeToolbar } from "../../features/node-toolbar";
 import { PiGraph } from "react-icons/pi";
 import { GenomeToolbar } from "../../features/genome-toolbar";
 import { HiOutlineMenu } from "react-icons/hi";
 import { RxCross1 } from "react-icons/rx";
 
-type MenuType = "Layers" | "Genomes";
+export type MenuType = "Layers" | "Genomes";
 
 interface SideMenuProps {
     handleAddNode: (nodeType: string) => void;
     handleGetSubgenome: () => void;
     handleLoadGenome: () => void;
+    menuType: MenuType;
+    setMenuType: Dispatch<SetStateAction<MenuType>>;
 }
 
-export const SideMenu: React.FC<SideMenuProps> = ({ handleAddNode, handleLoadGenome, handleGetSubgenome }) => {
-    const [selectedPanelMenu, setSelectedPanelMenu] = useState<MenuType>("Layers");
+export const SideMenu: React.FC<SideMenuProps> = ({ 
+    handleAddNode, 
+    handleLoadGenome, 
+    handleGetSubgenome,
+    menuType,
+    setMenuType
+}) => {
     const [menuIsOpen, setMenuIsOpen] = useState<boolean>(false);
 
     return (
@@ -35,24 +42,24 @@ export const SideMenu: React.FC<SideMenuProps> = ({ handleAddNode, handleLoadGen
                     }
                 </div>
                 <div
-                    className={`${styles.iconContainer} ${selectedPanelMenu == "Layers" && styles.selectedIcon}`}
-                    onClick={() => setSelectedPanelMenu("Layers")}
+                    className={`${styles.iconContainer} ${menuType == "Layers" && styles.selectedIcon}`}
+                    onClick={() => setMenuType("Layers")}
                 >
                     <BsLayers className={styles.icon} />
                 </div>
                 <div
-                    className={`${styles.iconContainer} ${selectedPanelMenu == "Genomes" && styles.selectedIcon}`}
-                    onClick={() => setSelectedPanelMenu("Genomes")}
+                    className={`${styles.iconContainer} ${menuType == "Genomes" && styles.selectedIcon}`}
+                    onClick={() => setMenuType("Genomes")}
                 >
                     <PiGraph className={styles.icon} />
                 </div>
                 {
                     menuIsOpen && <div className={styles.sideMenu}>
                         {
-                            selectedPanelMenu == "Layers" && <NodeToolbar onAddNode={handleAddNode} />
+                            menuType == "Layers" && <NodeToolbar onAddNode={handleAddNode} />
                         }
                         {
-                            selectedPanelMenu == "Genomes" && <GenomeToolbar
+                            menuType == "Genomes" && <GenomeToolbar
                                 onLoadGenome={handleLoadGenome}
                                 onGetSubgenome={handleGetSubgenome}
                             />

@@ -13,6 +13,7 @@ import { createNewGenomeWithNode } from './hooks';
 import { NodeConfigForm } from '../../features/node-toolbar';
 import { ContextMenu } from '../../features/genome-operations';
 import { CanvasInteractionType, NetworkStateType } from '../../pages/network-editor-page/hooks';
+import { MenuType } from '../side-menu/SideMenu';
 
 interface NetworkCanvasProps {
   onNodeSelect: (node: VisualNode | null) => void;
@@ -28,6 +29,7 @@ interface NetworkCanvasProps {
   setEditingNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   openConfigPanel: (type: string, nodeId?: string) => void;
   svgRef: RefObject<SVGSVGElement | null>;
+  menuType: MenuType;
 }
 
 export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
@@ -43,7 +45,8 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   editingNodeId,
   setEditingNodeId,
   openConfigPanel,
-  svgRef
+  svgRef,
+  menuType
 }) => {
   const [genomes, setGenomes] = genomesState;
 
@@ -306,8 +309,8 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   const handleConnect = useCallback(
     (nodeId: string) => {
       if (connectingFrom === null) {
-        setConnectingFrom(nodeId);
-      } else if (connectingFrom !== nodeId) {
+        setConnectingFrom(menuType == "Layers" ? nodeId : nodes.get(nodeId)!.genomeId);
+      } else if (menuType == "Layers" && connectingFrom !== nodeId) {
         const fromNode = nodes.get(connectingFrom);
         const toNode = nodes.get(nodeId);
 
@@ -399,6 +402,28 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
             alert('Incompatible nodes! Cannot connect.');
           }
         }
+        setConnectingFrom(null);
+      } else if (connectingFrom != selectedGenomeId) {
+        const fromGenome = genomes.get(selectedGenomeId!)!;
+        const fromSubgenomeNodeIds = fromGenome.genome.GetRandomSubgenome();
+        console.log("from subgenome node ids", fromSubgenomeNodeIds);
+        const subgenomeInputNode = nodes.get(fromSubgenomeNodeIds[0])!;
+        const subgenomeOutputNode = nodes.get(fromSubgenomeNodeIds[fromSubgenomeNodeIds.length-1])!;
+
+        console.log("subgenome input node", subgenomeInputNode);
+        console.log("subgenome output node", subgenomeOutputNode);
+
+        const toGenome = genomes.get(connectingFrom)!;
+        const insertion = toGenome.genome.FindInsertionPoint(subgenomeInputNode.node, subgenomeOutputNode.node);
+
+        console.log("from genome id", fromGenome.id, "to genome id", toGenome.id)
+        if (insertion) {
+          console.log("cut from node id", insertion.cutFromNodeId);
+          console.log("cut to node id", insertion.cutToNodeId);
+          console.log("input adapter nodes", insertion.inputAdapterNodes);
+          console.log("output adapter nodes", insertion.outputAdapterNodes);
+        }
+
         setConnectingFrom(null);
       }
     },
