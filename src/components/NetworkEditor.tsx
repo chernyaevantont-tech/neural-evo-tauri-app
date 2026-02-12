@@ -1000,7 +1000,7 @@ export const NetworkEditor: React.FC<NetworkEditorProps> = ({ onNodeSelect, onGe
             node.highlighted = false;
         }
 
-        const subGenomeNodeIds = genomes.get(selectedGenomeId)!.genome.GetRandomSubgenome();
+        const subGenomeNodeIds = genomes.get(selectedGenomeId)!.genome.GetRandomSubgenomeNodeIds();
         for (let nodeId of subGenomeNodeIds) {
             newNodes.get(nodeId)!.highlighted = true;
         }

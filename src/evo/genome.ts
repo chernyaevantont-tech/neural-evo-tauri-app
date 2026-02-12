@@ -16,7 +16,7 @@ export class Genome {
         this.outputNodes = outputNodes;
     }
 
-    public GetRandomSubgenome(): string[] {
+    private _getRandomSubgenome(): BaseNode[] {
         // Шаг 1: Находим все линейные участки (цепочки нод с 1 входом и 1 выходом)
         const visited = new Set<string>();
         const linearChains: BaseNode[][] = [];
@@ -92,7 +92,22 @@ export class Genome {
 
         const subchain = selectedChain.slice(startIndex, startIndex + length);
 
-        return subchain.map(node => node.id);
+        return subchain
+    }
+
+    public GetRandomSubgenomeNodeIds(): string[] {
+        return this._getRandomSubgenome().map(node => node.id);
+    }
+
+    public GetRandomSubgenome(): BaseNode[] {
+        const subgenome = this._getRandomSubgenome();
+        if (subgenome.length == 0) return [];
+        const newSubgenome: BaseNode[] = [subgenome[0].Clone()];
+        for (let i = 1; i < subgenome.length; i++) {
+            newSubgenome.push(subgenome[i].Clone());
+            newSubgenome[i - 1].AddNext(newSubgenome[i]);
+        }
+        return newSubgenome;
     }
 
     public FindInsertionPoint(
@@ -204,23 +219,23 @@ export class Genome {
                     // Используем pooling для уменьшения
                     const hRatio = fromH / toH;
                     const wRatio = fromW / toW;
-                    
+
                     // Выбираем stride чтобы приблизиться к целевому размеру
                     const stride = Math.max(2, Math.floor(Math.min(hRatio, wRatio)));
                     const kernelSize = { h: stride, w: stride };
-                    
+
                     adapters.push(new PoolingNode('max', kernelSize, stride, 0));
-                    
+
                     // После pooling пересчитываем размер
                     const newH = Math.floor((fromH - kernelSize.h) / stride + 1);
                     const newW = Math.floor((fromW - kernelSize.w) / stride + 1);
-                    
+
                     // Если всё ещё не совпадает, пробуем conv2d с подходящим stride
                     if (newH !== toH || newW !== toW) {
                         const remainingHRatio = newH / toH;
                         const remainingWRatio = newW / toW;
                         const convStride = Math.max(1, Math.floor(Math.min(remainingHRatio, remainingWRatio)));
-                        
+
                         adapters.push(new Conv2DNode(
                             fromC,
                             { h: 3, w: 3 },
@@ -256,10 +271,10 @@ export class Genome {
         // Случай 2: 3D -> 1D (нужен Flatten + возможно Dense)
         if (fromShape.length === 3 && toShape.length === 1) {
             adapters.push(new FlattenNode());
-            
+
             // Вычисляем размер после flatten
             const flattenedSize = fromShape[0] * fromShape[1] * fromShape[2];
-            
+
             // Если размеры не совпадают, добавляем Dense слой
             if (flattenedSize !== toShape[0]) {
                 adapters.push(new DenseNode(toShape[0], 'relu', true));
@@ -290,4 +305,91 @@ export class Genome {
         return null;
     }
 
+    public Breed(genome: Genome): { genome: Genome, nodes: BaseNode[], isValid: boolean} | null {
+        const fromSubgenome = genome.GetRandomSubgenome();
+        if (fromSubgenome.length == 0) return null;
+        const insertion = this.FindInsertionPoint(fromSubgenome[0], fromSubgenome[fromSubgenome.length - 1]);
+        if (insertion == null) return null;
+
+        const nodesToCheck = [...this.inputNodes];
+        const nodesChecked = new Set<BaseNode>();
+        const oldNodes: BaseNode[] = [];
+        const newNodes: BaseNode[] = [];
+        const oldNewNode = new Map<BaseNode, BaseNode>();
+        const newInputNodes: BaseNode[] = [];
+        const newOutputNodes: BaseNode[] = [];
+        let cutToNode: BaseNode | null = null;
+        let isValidFlag = true;
+
+        while (nodesToCheck.length > 0) {
+            const currentNode = nodesToCheck.shift()!;
+            if (nodesChecked.has(currentNode)) continue;
+            nodesChecked.add(currentNode);
+            const newNode = currentNode.Clone();
+            newNodes.push(newNode);
+            if (currentNode.next.length == 0) {
+                if (currentNode.GetNodeType() != "Output") isValidFlag = false;
+                newOutputNodes.push(newNode)
+            }
+            if (currentNode.previous.length == 0) {
+                if (currentNode.GetNodeType() != "Input") isValidFlag = false;
+                newInputNodes.push(newNode)
+            }
+            if (currentNode.id == insertion.cutToNodeId) {
+                cutToNode = newNode;
+            }
+            oldNodes.push(currentNode);
+            oldNewNode.set(currentNode, newNode);
+            nodesToCheck.push(...currentNode.next)
+        }
+
+        for (let i = 0; i < newNodes.length; i++) {
+            if (oldNodes[i].id == insertion.cutFromNodeId) {
+                if (insertion.inputAdapterNodes.length > 0) {
+                    newNodes[i].AddNext(insertion.inputAdapterNodes[0]);
+                    for (let j = 1; j < insertion.inputAdapterNodes.length; j++) {
+                        insertion.inputAdapterNodes[j - 1].AddNext(insertion.inputAdapterNodes[j]);
+                    }
+
+                    insertion.inputAdapterNodes[insertion.inputAdapterNodes.length - 1].AddNext(fromSubgenome[0]);
+                } else {
+                    newNodes[i].AddNext(fromSubgenome[0]);
+                }
+
+                if (insertion.outputAdapterNodes.length > 0) {
+                    fromSubgenome[fromSubgenome.length - 1].AddNext(insertion.outputAdapterNodes[0]);
+                    for (let j = 1; j < insertion.outputAdapterNodes.length; j++) {
+                        insertion.outputAdapterNodes[j - 1].AddNext(insertion.outputAdapterNodes[j]);
+                    }
+                    insertion.outputAdapterNodes[insertion.outputAdapterNodes.length - 1].AddNext(cutToNode!)
+                } else {
+                    fromSubgenome[fromSubgenome.length - 1].AddNext(cutToNode!);
+                }
+
+                for (let oldNextNode of oldNodes[i].next) {
+                    const newNextNode = oldNewNode.get(oldNextNode)!;
+                    if (newNextNode == cutToNode) continue;
+                    newNodes[i].AddNext(newNextNode);
+                }
+            }
+            else {
+                for (let oldNextNode of oldNodes[i].next) {
+                    console.log(oldNextNode, oldNodes[i].next, oldNewNode, oldNewNode.get(oldNextNode))
+                    newNodes[i].AddNext(oldNewNode.get(oldNextNode)!);
+                }
+            }
+        }
+
+        newNodes.push(
+            ...fromSubgenome,
+            ...insertion.inputAdapterNodes,
+            ...insertion.outputAdapterNodes
+        );
+
+        return {
+            genome: new Genome(newInputNodes, newOutputNodes),
+            nodes: newNodes,
+            isValid: isValidFlag
+        }
+    }
 }

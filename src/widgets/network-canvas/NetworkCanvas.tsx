@@ -8,12 +8,12 @@ import { Genome } from '../../evo/genome';
 import { InputNode } from '../../evo/nodes/layers/input_node';
 import { OutputNode } from '../../evo/nodes/layers/output_node';
 import { theme } from '../../shared/lib';
-import { loadGenomeFromFile } from '../../shared/api';
 import { createNewGenomeWithNode } from './hooks';
 import { NodeConfigForm } from '../../features/node-toolbar';
 import { ContextMenu } from '../../features/genome-operations';
 import { CanvasInteractionType, NetworkStateType } from '../../pages/network-editor-page/hooks';
 import { MenuType } from '../side-menu/SideMenu';
+import { addNewGenome } from '../../features/genome-operations/lib/add-new-genome';
 
 interface NetworkCanvasProps {
   onNodeSelect: (node: VisualNode | null) => void;
@@ -166,8 +166,6 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     }
 
     else {
-      console.log("aboba");
-
       const newGenome = createNewGenomeWithNode(newNode);
       const pos = { x: 100 + nodes.size * 20, y: 100 + nodes.size * 20 };
 
@@ -404,27 +402,53 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         }
         setConnectingFrom(null);
       } else if (connectingFrom != selectedGenomeId) {
-        const fromGenome = genomes.get(selectedGenomeId!)!;
-        const fromSubgenomeNodeIds = fromGenome.genome.GetRandomSubgenome();
-        console.log("from subgenome node ids", fromSubgenomeNodeIds);
-        const subgenomeInputNode = nodes.get(fromSubgenomeNodeIds[0])!;
-        const subgenomeOutputNode = nodes.get(fromSubgenomeNodeIds[fromSubgenomeNodeIds.length-1])!;
+        // const fromGenome = genomes.get(selectedGenomeId!)!;
+        // const fromSubgenomeNodeIds = fromGenome.genome.GetRandomSubgenomeNodeIds();
+        // console.log("from subgenome node ids", fromSubgenomeNodeIds);
+        // const subgenomeInputNode = nodes.get(fromSubgenomeNodeIds[0])!;
+        // const subgenomeOutputNode = nodes.get(fromSubgenomeNodeIds[fromSubgenomeNodeIds.length-1])!;
 
-        console.log("subgenome input node", subgenomeInputNode);
-        console.log("subgenome output node", subgenomeOutputNode);
+        // console.log("subgenome input node", subgenomeInputNode);
+        // console.log("subgenome output node", subgenomeOutputNode);
 
-        const toGenome = genomes.get(connectingFrom)!;
-        const insertion = toGenome.genome.FindInsertionPoint(subgenomeInputNode.node, subgenomeOutputNode.node);
+        // const toGenome = genomes.get(connectingFrom)!;
+        // const insertion = toGenome.genome.FindInsertionPoint(subgenomeInputNode.node, subgenomeOutputNode.node);
 
-        console.log("from genome id", fromGenome.id, "to genome id", toGenome.id)
-        if (insertion) {
-          console.log("cut from node id", insertion.cutFromNodeId);
-          console.log("cut to node id", insertion.cutToNodeId);
-          console.log("input adapter nodes", insertion.inputAdapterNodes);
-          console.log("output adapter nodes", insertion.outputAdapterNodes);
+        // console.log("from genome id", fromGenome.id, "to genome id", toGenome.id)
+        // if (insertion) {
+        //   console.log("cut from node id", insertion.cutFromNodeId);
+        //   console.log("cut to node id", insertion.cutToNodeId);
+        //   console.log("input adapter nodes", insertion.inputAdapterNodes);
+        //   console.log("output adapter nodes", insertion.outputAdapterNodes);
+        // }
+        if (svgRef.current) {
+          const svg = svgRef.current;
+          const rect = svg.getBoundingClientRect();
+
+          const fromGenome = genomes.get(selectedGenomeId!)!
+          const toGenome = genomes.get(connectingFrom)!;
+
+          const newGenome = toGenome.genome.Breed(fromGenome.genome);
+
+          if (newGenome) {
+            addNewGenome(
+              newGenome.nodes,
+              newGenome.genome,
+              newGenome.isValid,
+              nodes,
+              setNodes,
+              setGenomes,
+              setGenomeNode,
+              setConnections,
+              rect.width,
+              rect.height,
+              translate.x,
+              translate.y,
+              scale,
+            );
+          }
+          setConnectingFrom(null);
         }
-
-        setConnectingFrom(null);
       }
     },
     [connectingFrom, nodes, genomeNode, genomes, selectedNodeId, onNodeSelect, setConnectingFrom, setConnections, setNodes, setGenomeNode, setGenomes]
