@@ -8,7 +8,7 @@ interface ContextMenuProps {
   onEdit?: () => void;
   onCopy?: () => void;
   onDelete: () => void;
-  type: 'node' | 'connection';
+  type: 'node' | 'connection' | 'genome';
 }
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({
@@ -48,14 +48,19 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           {onCopy && (
             <MenuItem icon={<CopyIcon size={14} />} label="Copy Node" onClick={onCopy} />
           )}
+          <MenuItem icon={<TrashIcon size={14} />} label='Delete Node' onClick={onDelete} danger />
         </>
       )}
-      <MenuItem
-        icon={<TrashIcon size={14} />}
-        label={`Delete ${type === 'node' ? 'Node' : 'Connection'}`}
-        onClick={onDelete}
-        danger
-      />
+      {type === 'connection' && (
+        <>
+          <MenuItem icon={<TrashIcon size={14} />} label='Delete Genome' onClick={onDelete} danger />
+        </>
+      )}
+      {type === 'genome' && (
+        <>
+          <MenuItem icon={<TrashIcon size={14} />} label='Delete Genome' onClick={onDelete} danger />
+        </>
+      )}
     </div>
   );
 };

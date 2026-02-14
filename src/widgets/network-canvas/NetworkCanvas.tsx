@@ -14,6 +14,7 @@ import { ContextMenu } from '../../features/genome-operations';
 import { CanvasInteractionType, NetworkStateType } from '../../pages/network-editor-page/hooks';
 import { MenuType } from '../side-menu/SideMenu';
 import { addNewGenome } from '../../features/genome-operations/lib/add-new-genome';
+import { deleteGenome } from '../../features/genome-operations/lib/delete-genome';
 
 interface NetworkCanvasProps {
   onNodeSelect: (node: VisualNode | null) => void;
@@ -84,6 +85,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   const [connectionContextMenu, setConnectionContextMenu] = useState<{ x: number; y: number; connectionId: string } | null>(null);
+  const [genomeContextMenu, setGenomeContextMenu] = useState<{ x: number; y: number; genomeId: string } | null>(null);
 
   const panningRef = useRef<boolean>(false);
   const lastMousePosRef = useRef<Position>({ x: 0, y: 0 });
@@ -235,6 +237,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         // Закрываем контекстные меню
         setNodeContextMenu(null);
         setConnectionContextMenu(null);
+        setGenomeContextMenu(null);
       } else if (draggingNodeId && svgRef.current) {
         // Перетаскивание ноды
         const rect = svgRef.current.getBoundingClientRect();
@@ -456,18 +459,26 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
   // Функция: Расчет позиций для нового загруженного графа с центрированием
 
-  const handleNodeContextMenu = useCallback((nodeId: string, e: React.MouseEvent) => {
+  const handleNodeContextMenu = (nodeId: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (menuType == "Layers") {
+      setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeId });
+      setGenomeContextMenu(null);
+    } else if (menuType == "Genomes") {
+      setGenomeContextMenu({ x: e.clientX, y: e.clientY, genomeId: nodes.get(nodeId)!.genomeId });
+      setNodeContextMenu(null);
+    }
+    console.log("menu type", menuType)
     setConnectionContextMenu(null);
-    setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeId });
-  }, []);
+  };
 
   const handleConnectionContextMenu = useCallback((connectionId: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setNodeContextMenu(null);
     setConnectionContextMenu({ x: e.clientX, y: e.clientY, connectionId });
+    setGenomeContextMenu(null);
   }, []);
 
   const handleNodeEdit = () => {
@@ -769,6 +780,26 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
         />
       )}
 
+      {genomeContextMenu && (
+        <ContextMenu
+          x={genomeContextMenu.x}
+          y={genomeContextMenu.y}
+          type="genome"
+          onDelete={() => {
+            if (selectedGenomeId) deleteGenome(
+              selectedGenomeId,
+              setGenomes,
+              nodes,
+              setNodes,
+              genomeNode,
+              setGenomeNode,
+              setConnections
+            );
+            setGenomeContextMenu(null);
+          }}
+        />
+      )}
+
       <svg
         ref={svgRef}
         width="100%"
@@ -790,11 +821,13 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
             setConnectingFrom(null);
             setNodeContextMenu(null);
             setConnectionContextMenu(null);
+            setGenomeContextMenu(null);
             if (onNodeSelect) onNodeSelect(null);
             if (onGenomeSelect) onGenomeSelect(null);
           } else {
             setNodeContextMenu(null);
             setConnectionContextMenu(null);
+            setGenomeContextMenu(null);
           }
         }}
       >
