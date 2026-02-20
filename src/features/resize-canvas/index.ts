@@ -1,0 +1,1 @@
+export {useResizeCanvas} from './model/useResizeCanvas';

@@ -1,804 +1,129 @@
-import React, { useRef, useCallback, CSSProperties, useState, RefObject } from 'react';
-import { v4 as uuidv4, v4 } from 'uuid';
-import { VisualNode, Connection, VisualGenome, Position } from '../../shared/types';
-import { NodeCard } from '../../entities/node/ui';
-import { ConnectionLine } from '../../entities/connection/ui';
-import { BaseNode } from '../../evo/nodes/base_node';
-import { Genome } from '../../evo/genome';
-import { InputNode } from '../../evo/nodes/layers/input_node';
-import { OutputNode } from '../../evo/nodes/layers/output_node';
+import React, { CSSProperties, RefObject, useEffect, useRef } from 'react';
+import { Node, useCanvasGenomeStore } from '../../entities/canvas-genome';
+import { ConnectionLine } from '../../entities/canvas-genome';
 import { theme } from '../../shared/lib';
-import { createNewGenomeWithNode } from './hooks';
-import { NodeConfigForm } from '../../features/node-toolbar';
-import { ContextMenu } from '../../features/genome-operations';
-import { CanvasInteractionType, NetworkStateType } from '../../pages/network-editor-page/hooks';
 import { MenuType } from '../side-menu/SideMenu';
-import { addNewGenome } from '../../features/genome-operations/lib/add-new-genome';
-import { deleteGenome } from '../../features/genome-operations/lib/delete-genome';
+import { useCanvasStateStore } from '../../entities/canvas-state';
+import { ContextMenu } from '../../shared/ui/ContextMenu/ContextMenu';
+import { CopyNodeContextMenuItem } from '../../features/copy-node';
+import { EditNodeContextMenuItem } from '../../features/edit-node';
+import { DeleteNodeContextMenuItem } from '../../features/delete-node';
+import { DeleteGenomeContextMenuItem } from '../../features/delete-genome';
+import { DeleteConnectionContextMenuItem } from '../../features/delete-connection';
+import { useContinueMovingNode, useEndDraggingNode, useStartDraggingNode } from '../../features/dragging-move-node';
+import { useContinueCanvasPanning, useEndCanvasPanning, useStartCanvasPanning } from '../../features/canvas-panning';
+import { useResizeCanvas } from '../../features/resize-canvas';
+import { useConnectNodes } from '../../features/connect-nodes';
+import { useCanvasSelectedBreed } from '../../features/breed-genomes';
+import { ConnectionContextMenu } from './ConnectionContextMenu/ConnectionContextMenu';
+import { NodeContextMenu } from './NodeContextMenu/NodeContextMenu';
+import { GenomeContextMenu } from './GenomContextMenu/GenomeContextMenu';
+import { useOnClickOutside } from './hooks';
 
 interface NetworkCanvasProps {
-  onNodeSelect: (node: VisualNode | null) => void;
-  onGenomeSelect: (genome: VisualGenome | null) => void;
-  genomesState: [Map<string, VisualGenome>, React.Dispatch<React.SetStateAction<Map<string, VisualGenome>>>];
-  networkState: NetworkStateType;
-  canvasState: CanvasInteractionType;
-  configPanelOpen: boolean;
-  setConfigPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  configNodeType: string | null;
-  setConfigNodeType: React.Dispatch<React.SetStateAction<string | null>>;
-  editingNodeId: string | null;
-  setEditingNodeId: React.Dispatch<React.SetStateAction<string | null>>;
-  openConfigPanel: (type: string, nodeId?: string) => void;
-  svgRef: RefObject<SVGSVGElement | null>;
   menuType: MenuType;
 }
 
 export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
-  onNodeSelect,
-  onGenomeSelect,
-  genomesState,
-  networkState,
-  canvasState,
-  configPanelOpen,
-  setConfigPanelOpen,
-  configNodeType,
-  setConfigNodeType,
-  editingNodeId,
-  setEditingNodeId,
-  openConfigPanel,
-  svgRef,
   menuType
 }) => {
-  const [genomes, setGenomes] = genomesState;
+  const svgRef = useRef<SVGSVGElement>(null);
 
-  const {
-    nodes,
-    setNodes,
-    genomeNode,
-    setGenomeNode,
-    connections,
-    setConnections,
-    selectedNodeId,
-    setSelectedNodeId,
-    selectedGenomeId,
-    setSelectedGenomeId,
-    selectedConnectionId,
-    setSelectedConnectionId,
-  } = networkState;
+  const isPanning = useCanvasStateStore(state => state.isPanning);
+  const selectedNodeId = useCanvasStateStore(state => state.selectedNodeId);
+  const selectedConnectionId = useCanvasStateStore(state => state.selectedConnectionId);
+  const translate = useCanvasStateStore(state => state.translate);
+  const scale = useCanvasStateStore(state => state.scale);
+  const setCanvasWidth = useCanvasStateStore(state => state.setCanvasWidth);
+  const setCanvasHeight = useCanvasStateStore(state => state.setCanvasHeight);
+  const setNodeContextMenu = useCanvasStateStore(state => state.setNodeContextMenu);
+  const setConnectionContextMenu = useCanvasStateStore(state => state.setConnectionContextMenu);
+  const setGenomeContextMenu = useCanvasStateStore(state => state.setGenomeContextMenu);
+  const setSelectedNodeId = useCanvasStateStore(state => state.setSelectedNodeId);
+  const setSelectedConnectionId = useCanvasStateStore(state => state.setSelectedConnectionId);
+  const setSelectedGenomeId = useCanvasStateStore(state => state.setSelectedGenomeId);
 
-  const {
-    draggingNodeId,
-    setDraggingNodeId,
-    connectingFrom,
-    setConnectingFrom,
-    dragOffset,
-    setDragOffset,
-    scale,
-    translate,
-    setTranslate,
-    isPanning,
-    setIsPanning,
-    panStart,
-    setPanStart,
-    handleWheel,
-  } = canvasState;
+  const nodes = useCanvasGenomeStore(state => state.nodes);
+  const connections = useCanvasGenomeStore(state => state.connections);
 
-  const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
-  const [connectionContextMenu, setConnectionContextMenu] = useState<{ x: number; y: number; connectionId: string } | null>(null);
-  const [genomeContextMenu, setGenomeContextMenu] = useState<{ x: number; y: number; genomeId: string } | null>(null);
+  const canvasStartMovingNodeHandle = useStartDraggingNode();
+  const canvasMovingNodeHandle = useContinueMovingNode();
+  const canvasEndMovingNodeHandle = useEndDraggingNode();
 
-  const panningRef = useRef<boolean>(false);
-  const lastMousePosRef = useRef<Position>({ x: 0, y: 0 });
+  const canvasStartPaddingHandle = useStartCanvasPanning();
+  const canvasPaddingHandle = useContinueCanvasPanning();
+  const canvasEndPaddingHandle = useEndCanvasPanning();
 
-  const handleConfigSave = useCallback((newNode: BaseNode) => {
-    if (editingNodeId) {
-      const oldVisualNode = nodes.get(editingNodeId);
-      if (!oldVisualNode) return;
+  const resizeCanvas = useResizeCanvas();
 
-      const incomingConnections: string[] = [];
-      const outgoingConnections: string[] = [];
+  const connectNodes = useConnectNodes();
+  const breedGenomes = useCanvasSelectedBreed();
 
-      connections.forEach((conn) => {
-        if (conn.toNodeId === editingNodeId) {
-          incomingConnections.push(conn.fromNodeId);
-          nodes.get(conn.fromNodeId)!.node.RemoveNext(oldVisualNode.node);
-        }
-        if (conn.fromNodeId === editingNodeId) {
-          outgoingConnections.push(conn.toNodeId);
-          oldVisualNode.node.RemoveNext(nodes.get(conn.toNodeId)!.node);
-        }
-      });
+  useEffect(() => {
+    if (!svgRef || !svgRef.current) return;
+    setCanvasWidth(svgRef.current.width.baseVal.value)
+    setCanvasHeight(svgRef.current.height.baseVal.value)
+  }, [svgRef.current?.width, svgRef.current?.height]);
 
-      const updatedVisualNode: VisualNode = {
-        ...oldVisualNode,
-        node: newNode,
-      };
+  useOnClickOutside(svgRef, () => {
+    // setNodeContextMenu(null);
+  });
 
-      setNodes((prev) => {
-        const newNodes = new Map(prev);
-        newNodes.set(newNode.id, updatedVisualNode);
-        newNodes.delete(editingNodeId);
-        nodes.set(newNode.id, updatedVisualNode);
-        return newNodes;
-      });
-
-      setGenomeNode((prev) => {
-        const newGenomeNode = new Map(prev);
-        newGenomeNode.set(
-          selectedGenomeId!,
-          [...prev.get(selectedGenomeId!)!.filter((n) => n.node.id !== editingNodeId), updatedVisualNode]
-        );
-        return newGenomeNode;
-      });
-
-      // Restore connections
-      setConnections((prev) => {
-        const newConns = new Map<string, Connection>();
-
-        incomingConnections.forEach((fromId) => {
-          const fromNode = nodes.get(fromId);
-          if (fromNode && newNode.CheckCompability(fromNode.node)) {
-            fromNode.node.AddNext(newNode);
-            const connId = v4();
-            newConns.set(connId, { id: connId, fromNodeId: fromId, toNodeId: newNode.id });
-          }
-        });
-
-        outgoingConnections.forEach((toId) => {
-          const toNode = nodes.get(toId);
-          if (toNode && toNode.node.CheckCompability(newNode)) {
-            newNode.AddNext(toNode.node);
-            const connId = v4();
-            newConns.set(connId, { id: connId, fromNodeId: newNode.id, toNodeId: toId });
-          }
-        });
-
-        prev.forEach((conn, connId) => {
-          if (conn.fromNodeId !== editingNodeId && conn.toNodeId !== editingNodeId) {
-            newConns.set(connId, conn);
-          }
-        });
-
-        return newConns;
-      });
-
-      if (selectedNodeId === editingNodeId) {
-        onNodeSelect(updatedVisualNode);
-      }
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (e.button == 2) {
+      canvasStartPaddingHandle(e.clientX, e.clientY);
     }
-
-    else {
-      const newGenome = createNewGenomeWithNode(newNode);
-      const pos = { x: 100 + nodes.size * 20, y: 100 + nodes.size * 20 };
-
-      const visualNode: VisualNode = {
-        node: newNode,
-        position: pos,
-        genomeId: newGenome.id,
-        highlighted: false,
-      };
-
-      setNodes((prev) => new Map(prev).set(newNode.id, visualNode));
-      setGenomes((prev) => new Map(prev).set(newGenome.id, newGenome));
-      setGenomeNode((prev) => new Map(prev).set(newGenome.id, [visualNode]));
-    }
-
-    setConfigPanelOpen(false);
-    setConfigNodeType(null);
-    setEditingNodeId(null);
-  }, [editingNodeId, selectedNodeId, selectedGenomeId, onNodeSelect, nodes, setNodes, setGenomes, setGenomeNode, setConnections]);
-
-  const handleConfigCancel = useCallback(() => {
-    setConfigPanelOpen(false);
-    setConfigNodeType(null);
-    setEditingNodeId(null);
-  }, []);
-
-  const handleNodeDragStart = useCallback(
-    (nodeId: string, e: React.MouseEvent) => {
-      e.preventDefault();
-      const node = nodes.get(nodeId);
-      if (!node || !svgRef.current) return;
-
-      setNodeContextMenu(null);
-      setConnectionContextMenu(null);
-
-      const rect = svgRef.current.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      const worldX = (mouseX - translate.x) / scale;
-      const worldY = (mouseY - translate.y) / scale;
-
-      setDragOffset({
-        x: worldX - node.position.x,
-        y: worldY - node.position.y,
-      });
-      setDraggingNodeId(nodeId);
-    },
-    [scale, translate, setDragOffset, setDraggingNodeId, nodes]
-  );
-
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      if (panningRef.current) {
-        // Вычисляем дельту движения курсора
-        const dx = e.clientX - lastMousePosRef.current.x;
-        const dy = e.clientY - lastMousePosRef.current.y;
-
-        // Обновляем позицию холста
-        setTranslate((prev) => ({
-          x: prev.x + dx,
-          y: prev.y + dy,
-        }));
-
-        // Сохраняем текущую позицию курсора для следующего кадра
-        lastMousePosRef.current = { x: e.clientX, y: e.clientY };
-
-        // Закрываем контекстные меню
-        setNodeContextMenu(null);
-        setConnectionContextMenu(null);
-        setGenomeContextMenu(null);
-      } else if (draggingNodeId && svgRef.current) {
-        // Перетаскивание ноды
-        const rect = svgRef.current.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-        const worldX = (mouseX - translate.x) / scale;
-        const worldY = (mouseY - translate.y) / scale;
-
-        setNodes((prev) => {
-          const newNodes = new Map(prev);
-          const node = newNodes.get(draggingNodeId);
-          if (node) {
-            node.position = {
-              x: Math.round(worldX - dragOffset.x),
-              y: Math.round(worldY - dragOffset.y),
-            };
-            newNodes.set(draggingNodeId, { ...node });
-          }
-          return newNodes;
-        });
-      }
-    },
-    [draggingNodeId, dragOffset, scale, translate, setTranslate, setNodes]
-  );
-
-  const handleMouseUp = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.button === 2) {
-        // Правая кнопка мыши - завершаем панорамирование
-        panningRef.current = false;
-        setIsPanning(false);
-      }
-      setDraggingNodeId(null);
-    },
-    [setIsPanning, setDraggingNodeId]
-  );
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.button === 2) {
-        // Правая кнопка мыши - начинаем панорамирование
-        e.preventDefault();
-        panningRef.current = true;
-        lastMousePosRef.current = { x: e.clientX, y: e.clientY };
-        setIsPanning(true);
-      }
-    },
-    [setIsPanning]
-  );
-
-  const handleNodeSelect = useCallback(
-    (nodeId: string) => {
-      setSelectedNodeId(nodeId);
-      setSelectedConnectionId(null);
-      const node = nodes.get(nodeId);
-      if (node && onNodeSelect) {
-        setSelectedGenomeId(node.genomeId);
-        onNodeSelect(node);
-      }
-    },
-    [onNodeSelect, setSelectedNodeId, setSelectedConnectionId, setSelectedGenomeId, nodes]
-  );
-
-  const handleConnectionSelect = (connectionId: string) => {
-    setSelectedConnectionId(connectionId);
-    setSelectedNodeId(null);
-    setSelectedGenomeId(null);
-  };
-
-  const handleConnect = useCallback(
-    (nodeId: string) => {
-      if (connectingFrom === null) {
-        setConnectingFrom(menuType == "Layers" ? nodeId : nodes.get(nodeId)!.genomeId);
-      } else if (menuType == "Layers" && connectingFrom !== nodeId) {
-        const fromNode = nodes.get(connectingFrom);
-        const toNode = nodes.get(nodeId);
-
-        if (fromNode && toNode) {
-          if (toNode.node.CheckCompability(fromNode.node)) {
-            fromNode.node.AddNext(toNode.node);
-
-            const connectionId = uuidv4();
-            const connection: Connection = {
-              id: connectionId,
-              fromNodeId: connectingFrom,
-              toNodeId: nodeId,
-            };
-
-            setConnections((prev) => new Map(prev).set(connectionId, connection));
-
-            const fromGenomeId = fromNode.genomeId;
-            const toGenomeId = toNode.genomeId;
-
-            // Create new VisualNode objects to force React update
-            const updatedFromNode: VisualNode = { ...fromNode };
-            const updatedToNode: VisualNode = { ...toNode, genomeId: fromGenomeId };
-
-            const newNodes = new Map(nodes);
-            newNodes.set(connectingFrom, updatedFromNode);
-            newNodes.set(nodeId, updatedToNode);
-
-            const connectedNodesMap: Map<BaseNode, boolean> = new Map();
-            const nodesToCheck: BaseNode[] = [toNode.node];
-
-            while (nodesToCheck.length > 0) {
-              const currentNode = nodesToCheck.shift()!;
-              if (!connectedNodesMap.get(currentNode)) {
-                connectedNodesMap.set(currentNode, true);
-                const oldNode = newNodes.get(currentNode.id)!;
-                newNodes.set(currentNode.id, { ...oldNode, genomeId: fromGenomeId });
-                nodesToCheck.push(...currentNode.previous, ...currentNode.next);
-              }
-            }
-
-            setNodes(newNodes);
-
-            const fromGenomeNode = genomeNode.get(fromGenomeId)!;
-            const fromGenome = genomes.get(fromGenomeId)!;
-
-            if (fromGenomeId !== toGenomeId) {
-              const toGenomeNodes = genomeNode.get(toGenomeId)!;
-              toGenomeNodes.forEach(n => n.genomeId = fromGenomeId);
-
-              fromGenomeNode.push(...toGenomeNodes);
-
-              genomeNode.delete(toGenomeId);
-              genomes.delete(toGenomeId);
-            }
-
-            genomes.set(fromGenomeId, fromGenome);
-
-            let isValidFlag = true;
-            const inputNodes: BaseNode[] = [];
-            const outputNodes: BaseNode[] = [];
-            for (let node of fromGenomeNode) {
-              if (node.node.previous.length === 0) {
-                inputNodes.push(node.node);
-                if (!(node.node instanceof InputNode)) {
-                  isValidFlag = false;
-                }
-              }
-              if (node.node.next.length === 0) {
-                outputNodes.push(node.node);
-                if (!(node.node instanceof OutputNode)) {
-                  isValidFlag = false;
-                }
-              }
-            }
-
-            fromGenome.genome = new Genome(inputNodes, outputNodes);
-            fromGenome.isValid = isValidFlag;
-
-            setGenomes(new Map(genomes));
-            setGenomeNode(new Map(genomeNode));
-
-            // Update selected node info if one of the connected nodes is selected
-            if (selectedNodeId === connectingFrom && onNodeSelect) {
-              onNodeSelect(updatedFromNode);
-            } else if (selectedNodeId === nodeId && onNodeSelect) {
-              onNodeSelect(updatedToNode);
-            }
-          } else {
-            alert('Incompatible nodes! Cannot connect.');
-          }
-        }
-        setConnectingFrom(null);
-      } else if (connectingFrom != selectedGenomeId) {
-        // const fromGenome = genomes.get(selectedGenomeId!)!;
-        // const fromSubgenomeNodeIds = fromGenome.genome.GetRandomSubgenomeNodeIds();
-        // console.log("from subgenome node ids", fromSubgenomeNodeIds);
-        // const subgenomeInputNode = nodes.get(fromSubgenomeNodeIds[0])!;
-        // const subgenomeOutputNode = nodes.get(fromSubgenomeNodeIds[fromSubgenomeNodeIds.length-1])!;
-
-        // console.log("subgenome input node", subgenomeInputNode);
-        // console.log("subgenome output node", subgenomeOutputNode);
-
-        // const toGenome = genomes.get(connectingFrom)!;
-        // const insertion = toGenome.genome.FindInsertionPoint(subgenomeInputNode.node, subgenomeOutputNode.node);
-
-        // console.log("from genome id", fromGenome.id, "to genome id", toGenome.id)
-        // if (insertion) {
-        //   console.log("cut from node id", insertion.cutFromNodeId);
-        //   console.log("cut to node id", insertion.cutToNodeId);
-        //   console.log("input adapter nodes", insertion.inputAdapterNodes);
-        //   console.log("output adapter nodes", insertion.outputAdapterNodes);
-        // }
-        if (svgRef.current) {
-          const svg = svgRef.current;
-          const rect = svg.getBoundingClientRect();
-
-          const fromGenome = genomes.get(selectedGenomeId!)!
-          const toGenome = genomes.get(connectingFrom)!;
-
-          const newGenome = toGenome.genome.Breed(fromGenome.genome);
-
-          if (newGenome) {
-            addNewGenome(
-              newGenome.nodes,
-              newGenome.genome,
-              newGenome.isValid,
-              nodes,
-              setNodes,
-              setGenomes,
-              setGenomeNode,
-              setConnections,
-              rect.width,
-              rect.height,
-              translate.x,
-              translate.y,
-              scale,
-            );
-          }
-          setConnectingFrom(null);
-        }
-      }
-    },
-    [connectingFrom, nodes, genomeNode, genomes, selectedNodeId, onNodeSelect, setConnectingFrom, setConnections, setNodes, setGenomeNode, setGenomes]
-  );
-
-  // Функция: Расчет позиций для нового загруженного графа с центрированием
-
-  const handleNodeContextMenu = (nodeId: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (menuType == "Layers") {
-      setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeId });
-      setGenomeContextMenu(null);
-    } else if (menuType == "Genomes") {
-      setGenomeContextMenu({ x: e.clientX, y: e.clientY, genomeId: nodes.get(nodeId)!.genomeId });
-      setNodeContextMenu(null);
-    }
-    console.log("menu type", menuType)
-    setConnectionContextMenu(null);
-  };
-
-  const handleConnectionContextMenu = useCallback((connectionId: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
     setNodeContextMenu(null);
-    setConnectionContextMenu({ x: e.clientX, y: e.clientY, connectionId });
-    setGenomeContextMenu(null);
-  }, []);
+  }
 
-  const handleNodeEdit = () => {
-    if (!nodeContextMenu) return;
-    const node = nodes.get(nodeContextMenu.nodeId);
-    if (!node) return;
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!svgRef.current) return;
+    canvasMovingNodeHandle(
+      svgRef.current.clientLeft,
+      svgRef.current.clientTop,
+      e.clientX,
+      e.clientY
+    );
+    canvasPaddingHandle(
+      e.clientX,
+      e.clientY
+    );
+  }
 
-    setSelectedNodeId(nodeContextMenu.nodeId);
-    openConfigPanel(node.node.GetNodeType(), nodeContextMenu.nodeId);
+  const onMouseUp = (e: React.MouseEvent) => {
+    canvasEndMovingNodeHandle();
+    canvasEndPaddingHandle();
+  }
+
+  const onWheel = (e: React.WheelEvent) => {
     setNodeContextMenu(null);
-  };
+    if (!svgRef.current) return;
+    resizeCanvas(
+      e.clientX,
+      e.clientY,
+      e.deltaY,
+      svgRef.current.clientLeft,
+      svgRef.current.clientTop,
+    )
+  }
 
-  const handleNodeCopy = () => {
-    if (!nodeContextMenu) return;
-    const node = nodes.get(nodeContextMenu.nodeId);
-    if (!node) return;
-
-    const newNodes = new Map(nodes);
-    const newGenomes = new Map(genomes);
-    const newGenomeNode = new Map(genomeNode);
-
-    const copyNode = node.node.Clone();
-    const newGenomeId = uuidv4();
-    const newVisualNode: VisualNode = {
-      node: copyNode,
-      genomeId: newGenomeId,
-      position: {
-        x: node.position.x + 50,
-        y: node.position.y + 50,
-      },
-      highlighted: false,
-    };
-
-    newNodes.set(copyNode.id, newVisualNode);
-    newGenomes.set(newGenomeId, {
-      id: newGenomeId,
-      isValid: false,
-      genome: new Genome([copyNode], [copyNode]),
-    });
-    newGenomeNode.set(newGenomeId, [newVisualNode]);
-
-    setNodes(newNodes);
-    setGenomes(newGenomes);
-    setGenomeNode(newGenomeNode);
-    setNodeContextMenu(null);
-  };
-
-  const handleNodeDelete = () => {
-    if (!nodeContextMenu) return;
-
-    const nodeIdToDelete = nodeContextMenu.nodeId;
-    const nodeToDelete = nodes.get(nodeIdToDelete);
-    if (!nodeToDelete) return;
-
-    const deletingNode = nodeToDelete;
-    setNodeContextMenu(null);
-
-    // Remove connections
-    setConnections((prev) => {
-      const newConns = new Map(prev);
-      for (const [id, conn] of newConns) {
-        if (conn.fromNodeId === nodeIdToDelete || conn.toNodeId === nodeIdToDelete) {
-          newConns.delete(id);
-        }
-      }
-      return newConns;
-    });
-
-    const newNodes = new Map(nodes);
-    newNodes.delete(nodeIdToDelete);
-
-    const nodeGenomeId = deletingNode.genomeId;
-
-    if (genomeNode.get(nodeGenomeId)!.length > 1) {
-      const newGenomes = new Map(genomes);
-      const newGenomeNode = new Map(genomeNode);
-
-      const connectedNodes = [...deletingNode.node.previous, ...deletingNode.node.next];
-      const checkedNodes = new Map<BaseNode, boolean>(connectedNodes.map(n => [n, false]));
-
-      deletingNode.node.ClearAllConnections();
-
-      for (let node of connectedNodes) {
-        if (checkedNodes.get(node)) continue;
-        checkedNodes.set(node, true);
-
-        const newGenomeId = uuidv4();
-        const connectedVisualNodes: VisualNode[] = [];
-        const connectedNodesMap: Map<BaseNode, boolean> = new Map();
-        const nodesToCheck: BaseNode[] = [node];
-        const inputNodes: BaseNode[] = [];
-        const outputNodes: BaseNode[] = [];
-        let isValidFlag = true;
-
-        while (nodesToCheck.length > 0) {
-          const currentNode = nodesToCheck.shift()!;
-
-          if (!connectedNodesMap.get(currentNode)) {
-            if (currentNode.previous.length === 0) {
-              inputNodes.push(currentNode);
-              if (!(currentNode instanceof InputNode)) {
-                isValidFlag = false;
-              }
-            }
-            if (currentNode.next.length === 0) {
-              outputNodes.push(currentNode);
-              if (!(currentNode instanceof OutputNode)) {
-                isValidFlag = false;
-              }
-            }
-            const currentNodeId = currentNode.id;
-            const currentVisualNode = nodes.get(currentNodeId)!;
-            connectedNodesMap.set(currentNode, true);
-            connectedVisualNodes.push({ ...nodes.get(currentNodeId)!, genomeId: newGenomeId });
-            newNodes.set(currentNodeId, { ...currentVisualNode, genomeId: newGenomeId });
-            nodesToCheck.push(...currentNode.previous, ...currentNode.next);
-          }
-        }
-
-        if (connectedVisualNodes.length === 0) continue;
-
-        const newGenome = new Genome(inputNodes, outputNodes);
-        newGenomeNode.set(newGenomeId, connectedVisualNodes);
-        newGenomes.set(newGenomeId, { id: newGenomeId, isValid: isValidFlag, genome: newGenome });
-      }
-
-      newGenomes.delete(nodeGenomeId);
-      newGenomeNode.delete(nodeGenomeId);
-      setGenomeNode(newGenomeNode);
-      setGenomes(newGenomes);
-    } else {
-      setGenomeNode((prev) => {
-        const newGenomeNode = new Map(prev);
-        newGenomeNode.delete(nodeGenomeId);
-        return newGenomeNode;
-      });
-      setGenomes((prev) => {
-        const newGenomes = new Map(prev);
-        newGenomes.delete(nodeGenomeId);
-        return newGenomes;
-      });
-    }
-
-    setNodes(newNodes);
-    setSelectedNodeId(null);
-    setSelectedConnectionId(null);
-    setSelectedGenomeId(null);
-    if (onNodeSelect) {
-      onNodeSelect(null);
-    }
-  };
-
-  const handleConnectionDelete = () => {
-    if (!connectionContextMenu) return;
-
-    const connectionId = connectionContextMenu.connectionId;
-    const connectionToDelete = connections.get(connectionId);
-    if (!connectionToDelete) return;
-
-    setConnectionContextMenu(null);
-
-    setConnections((prev) => {
-      const newConnections = new Map(prev);
-      newConnections.delete(connectionId);
-      return newConnections;
-    });
-
-    const newNodes = new Map(nodes);
-    const newGenomes = new Map(genomes);
-    const newGenomeNode = new Map(genomeNode);
-
-    const fromNode = newNodes.get(connectionToDelete.fromNodeId)!;
-    const toNode = newNodes.get(connectionToDelete.toNodeId)!;
-
-    const genomeId = toNode.genomeId;
-
-    fromNode.node.RemoveNext(toNode.node);
-
-    const toNodeConnectedNodes: VisualNode[] = [];
-    const toConnectedNodesMap: Map<BaseNode, boolean> = new Map();
-    const toNodesToCheck: BaseNode[] = [toNode.node];
-
-    const toGenomeId = uuidv4();
-    let toGenomeValidFlag = true;
-    const toInputNodes: BaseNode[] = [];
-    const toOutputNodes: BaseNode[] = [];
-
-    let sameGenomeFlag = false;
-
-    while (toNodesToCheck.length > 0) {
-      const currentNode = toNodesToCheck.shift()!;
-      if (!toConnectedNodesMap.get(currentNode)) {
-        if (currentNode.id === fromNode.node.id && currentNode.id === toNode.node.id) {
-          sameGenomeFlag = true;
-          break;
-        }
-        if (currentNode.previous.length === 0) {
-          toInputNodes.push(currentNode);
-          if (!(currentNode instanceof InputNode)) {
-            toGenomeValidFlag = false;
-          }
-        }
-        if (currentNode.next.length === 0) {
-          toOutputNodes.push(currentNode);
-          if (!(currentNode instanceof OutputNode)) {
-            toGenomeValidFlag = false;
-          }
-        }
-        toConnectedNodesMap.set(currentNode, true);
-        toNodesToCheck.push(...currentNode.previous, ...currentNode.next);
-        toNodeConnectedNodes.push({ ...nodes.get(currentNode.id)!, node: currentNode });
-        newNodes.set(currentNode.id, { ...nodes.get(currentNode.id)!, genomeId: toGenomeId });
-      }
-    }
-
-    if (!sameGenomeFlag) {
-      const fromNodeConnectedNodes: VisualNode[] = [];
-      const fromConnectedNodesMap: Map<BaseNode, boolean> = new Map();
-      const fromNodesToCheck: BaseNode[] = [fromNode.node];
-
-      const fromGenomeId = uuidv4();
-      let fromGenomeValidFlag = true;
-      const fromInputNodes: BaseNode[] = [];
-      const fromOutputNodes: BaseNode[] = [];
-
-      while (fromNodesToCheck.length > 0) {
-        const currentNode = fromNodesToCheck.shift()!;
-        if (!fromConnectedNodesMap.get(currentNode)) {
-          if (currentNode.previous.length === 0) {
-            fromInputNodes.push(currentNode);
-            if (!(currentNode instanceof InputNode)) {
-              fromGenomeValidFlag = false;
-            }
-          }
-          if (currentNode.next.length === 0) {
-            fromOutputNodes.push(currentNode);
-            if (!(currentNode instanceof OutputNode)) {
-              fromGenomeValidFlag = false;
-            }
-          }
-          fromConnectedNodesMap.set(currentNode, true);
-          fromNodesToCheck.push(...currentNode.previous, ...currentNode.next);
-          fromNodeConnectedNodes.push({ ...nodes.get(currentNode.id)!, node: currentNode });
-          newNodes.set(currentNode.id, { ...nodes.get(currentNode.id)!, genomeId: fromGenomeId });
-        }
-      }
-
-      const toGenome = new Genome(toInputNodes, toOutputNodes);
-      const fromGenome = new Genome(fromInputNodes, fromOutputNodes);
-
-      newGenomes.delete(genomeId);
-      newGenomes.set(toGenomeId, { genome: toGenome, isValid: toGenomeValidFlag, id: toGenomeId });
-      newGenomes.set(fromGenomeId, { genome: fromGenome, isValid: fromGenomeValidFlag, id: fromGenomeId });
-      setGenomes(newGenomes);
-
-      newGenomeNode.delete(genomeId);
-      newGenomeNode.set(toGenomeId, toNodeConnectedNodes);
-      newGenomeNode.set(fromGenomeId, fromNodeConnectedNodes);
-      setGenomeNode(newGenomeNode);
-
-      setNodes(newNodes);
-    }
-  };
+  const onDragStart = (nodeId: string, e: React.MouseEvent) => {
+    if (!svgRef.current) return;
+    canvasStartMovingNodeHandle(
+      nodeId,
+      svgRef.current.clientLeft,
+      svgRef.current.clientTop,
+      e.clientX,
+      e.clientY
+    )
+  }
 
   return (
     <div style={containerStyle}>
-      {/* <NodeToolbar
-        onAddNode={(type: string) => openConfigPanel(type)}
-        onLoadGenome={handleLoadGenome}
-        onGetSubgenome={handleGetSubgenome}
-      /> */}
 
-      {configPanelOpen && configNodeType && (
-        <NodeConfigForm
-          nodeType={configNodeType}
-          existingNode={editingNodeId ? nodes.get(editingNodeId)?.node : undefined}
-          onSave={handleConfigSave}
-          onCancel={handleConfigCancel}
-        />
-      )}
-
-      {nodeContextMenu && (
-        <ContextMenu
-          x={nodeContextMenu.x}
-          y={nodeContextMenu.y}
-          type="node"
-          onEdit={handleNodeEdit}
-          onCopy={handleNodeCopy}
-          onDelete={handleNodeDelete}
-        />
-      )}
-
-      {connectionContextMenu && (
-        <ContextMenu
-          x={connectionContextMenu.x}
-          y={connectionContextMenu.y}
-          type="connection"
-          onDelete={handleConnectionDelete}
-        />
-      )}
-
-      {genomeContextMenu && (
-        <ContextMenu
-          x={genomeContextMenu.x}
-          y={genomeContextMenu.y}
-          type="genome"
-          onDelete={() => {
-            if (selectedGenomeId) deleteGenome(
-              selectedGenomeId,
-              setGenomes,
-              nodes,
-              setNodes,
-              genomeNode,
-              setGenomeNode,
-              setConnections
-            );
-            setGenomeContextMenu(null);
-          }}
-        />
-      )}
+      <NodeContextMenu />
+      <ConnectionContextMenu />
+      <GenomeContextMenu />
 
       <svg
         ref={svgRef}
@@ -808,27 +133,25 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
           background: theme.colors.background.canvas,
           cursor: isPanning ? 'grabbing' : 'default',
         }}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseDown={handleMouseDown}
-        onWheel={(e) => handleWheel(e, svgRef.current)}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseDown={onMouseDown}
+        onWheel={onWheel}
         onContextMenu={(e) => e.preventDefault()}
         onClick={(e) => {
           if (e.target === svgRef.current) {
             setSelectedNodeId(null);
-            setSelectedGenomeId(null);
-            setSelectedConnectionId(null);
-            setConnectingFrom(null);
+            connectNodes(null);
             setNodeContextMenu(null);
             setConnectionContextMenu(null);
             setGenomeContextMenu(null);
-            if (onNodeSelect) onNodeSelect(null);
-            if (onGenomeSelect) onGenomeSelect(null);
+            breedGenomes(null);
           } else {
             setNodeContextMenu(null);
-            setConnectionContextMenu(null);
-            setGenomeContextMenu(null);
           }
+        }}
+        onBlur={() => {
+          setNodeContextMenu(null);
         }}
       >
         <g transform={`translate(${translate.x}, ${translate.y}) scale(${scale})`}>
@@ -838,8 +161,25 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
               connection={conn}
               nodes={nodes}
               isSelected={selectedConnectionId === conn.id}
-              onSelect={handleConnectionSelect}
-              onContextMenu={handleConnectionContextMenu}
+              onSelect={(id: string) => {
+                if (menuType == "Layers") {
+                  setSelectedConnectionId(id);
+                } else {
+                  const genomeId = nodes.get(conn.fromNodeId)?.genomeId;
+                  if (!genomeId) return;
+                  setSelectedGenomeId(genomeId);
+                }
+              }}
+              onContextMenu={(id: string, e: React.MouseEvent) => {
+                e.preventDefault();
+                if (menuType == "Layers") {
+                  setConnectionContextMenu({ x: e.clientX, y: e.clientY, connectionId: id })
+                } else {
+                  const genomeId = nodes.get(conn.fromNodeId)?.genomeId;
+                  if (!genomeId) return;
+                  setGenomeContextMenu({ x: e.clientX, y: e.clientY, genomeId: genomeId })
+                }
+              }}
             />
           ))}
 
@@ -849,18 +189,37 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
               onClickCapture={(e) => {
                 if (e.shiftKey) {
                   e.stopPropagation();
-                  handleConnect(node.node.id);
-                } else if (connectingFrom !== null) {
-                  setConnectingFrom(null);
+                  if (menuType == "Layers") {
+                    connectNodes(node.node.id);
+                  } else {
+                    breedGenomes(node.genomeId);
+                  }
                 }
               }}
             >
-              <NodeCard
+              <Node
                 node={node}
                 isSelected={selectedNodeId === node.node.id}
-                onSelect={handleNodeSelect}
-                onDragStart={handleNodeDragStart}
-                onContextMenu={handleNodeContextMenu}
+                onSelect={(id: string) => {
+                  if (menuType == "Layers") {
+                    setSelectedNodeId(id);
+                  } else {
+                    const genomeId = node.genomeId;
+                    setSelectedGenomeId(genomeId);
+                  }
+
+                }
+                }
+                onDragStart={onDragStart}
+                onContextMenu={(id: string, e: React.MouseEvent) => {
+                  e.preventDefault();
+                  if (menuType == "Layers") {
+                    setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeId: id })
+                  } else {
+                    const genomeId = node.genomeId;
+                    setGenomeContextMenu({ x: e.clientX, y: e.clientY, genomeId: genomeId })
+                  }
+                }}
               />
             </g>
           ))}

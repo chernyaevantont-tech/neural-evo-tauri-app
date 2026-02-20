@@ -1,0 +1,30 @@
+import { Genome } from "./genome";
+import { BaseNode } from "./nodes/base_node";
+
+export type Position = {
+    x: number;
+    y: number;
+};
+
+export type VisualNode = {
+    node: BaseNode;
+    position: Position;
+    genomeId: string;
+    highlighted: boolean;
+};
+
+export type VisualGenome = {
+    id: string;
+    genome: Genome;
+    isValid: boolean;
+}
+
+export type Connection = {
+    id: string;
+    fromNodeId: string;
+    toNodeId: string;
+};
+
+export type NodeConfig = {
+    params: any;
+};

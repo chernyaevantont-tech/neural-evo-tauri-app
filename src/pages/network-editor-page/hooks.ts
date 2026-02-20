@@ -1,6 +1,6 @@
 import { Dispatch, SetStateAction, useCallback, useState } from "react";
-import { Connection, VisualGenome, VisualNode } from "../../components/types";
-import { Position } from "../../shared/types";
+import { Connection, VisualGenome, VisualNode } from "../../entities/canvas-genome/model/types";
+import { Position } from '../../entities/canvas-genome';
 
 export type NetworkStateType = {
   nodes: Map<string, VisualNode>,

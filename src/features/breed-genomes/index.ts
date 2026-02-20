@@ -1,0 +1,1 @@
+export {useCanvasSelectedBreed} from './model/useCanvasSelectedBreed';

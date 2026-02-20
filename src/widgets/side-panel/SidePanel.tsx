@@ -1,26 +1,38 @@
-import React, { useState } from 'react';
-import { VisualNode, VisualGenome } from '../../shared/types';
-import { NodeInfoCard } from '../../entities/node/ui';
-import { GenomeList } from '../../entities/genome/ui';
+import React from 'react';
+import { NodeInfoCard, useCanvasGenomeStore } from '../../entities/canvas-genome';
 import styles from './SidePanel.module.css';
 import { MenuType } from '../side-menu/SideMenu';
+import { GenomeCard } from '../../entities/canvas-genome/ui/GenomeCard/GenomeCard';
+import { useCanvasStateStore } from '../../entities/canvas-state';
+import { SaveGenomeButton } from '../../features/genome-save-load/ui/SaveGenomeButton';
 
 interface SidePanelProps {
-  selectedNode: VisualNode | null;
-  genomes: VisualGenome[];
   menuType: MenuType;
 }
 
-export const SidePanel: React.FC<SidePanelProps> = ({ selectedNode, genomes, menuType }) => {
+export const SidePanel: React.FC<SidePanelProps> = ({ menuType }) => {
+  const genomes = Array.from(useCanvasGenomeStore(state => state.genomes).values());
+  const nodes = useCanvasGenomeStore(state => state.nodes);
+
+  const selectedNodeId = useCanvasStateStore(state=> state.selectedNodeId);
+
+  const selectedNode = selectedNodeId ? nodes.get(selectedNodeId) : null;
 
   return (
     <div className={styles.container}>
       {
-        menuType == "Layers" && <NodeInfoCard node={selectedNode} />
+        menuType == "Layers" && selectedNode && <NodeInfoCard node={selectedNode} />
       }
       {/* <div className={styles.divider} /> */}
       {
-        menuType == "Genomes" && <GenomeList genomes={genomes} />
+        menuType == "Genomes" && <div className={styles.genomeListContainer}>
+          <h3 className={styles.title}>Genomes</h3>
+          <div className={styles.list}>
+            {genomes.map((genome) => (
+              <GenomeCard genomeId={genome.id} isValid={genome.isValid} actionSlot={<SaveGenomeButton genome={genome.genome}/>}/>
+            ))}
+          </div>
+        </div>
       }
     </div>
   );

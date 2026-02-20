@@ -15,3 +15,27 @@
   background-color: var(--color-border-primary);
   margin: var(--spacing-md) 0;
 }
+
+.genomeListContainer {
+  background-color: var(--color-bg-secondary);
+  padding: var(--spacing-lg);
+  border-radius: var(--border-radius-lg);
+  border: 1px solid var(--color-border-primary);
+}
+
+.title {
+  margin: 0 0 var(--spacing-lg) 0;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  font-family: var(--font-family);
+  border-bottom: 2px solid var(--color-accent-primary);
+  padding-bottom: var(--spacing-sm);
+  user-select: none;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}

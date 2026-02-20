@@ -1,45 +1,28 @@
-import { useCallback, useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
-import { VisualGenome, VisualNode } from '../../shared/types';
-import { BaseNode } from '../../evo/nodes/base_node';
-import { Genome } from '../../evo/genome';
-import { InputNode } from '../../evo/nodes/layers/input_node';
-import { OutputNode } from '../../evo/nodes/layers/output_node';
+import { useEffect, RefObject } from 'react';
 
-export const createNewGenomeWithNode = (node: BaseNode): VisualGenome => {
-  return {
-    id: uuidv4(),
-    genome: new Genome([node], [node]),
-    isValid: false,
-  };
-};
+type AnyEvent = MouseEvent | TouchEvent;
 
-export const updateGenomeValidity = (
-  genomeNodes: VisualNode[],
-  genome: Genome
-): { isValid: boolean; inputNodes: BaseNode[]; outputNodes: BaseNode[] } => {
-  let isValid = true;
-  const inputNodes: BaseNode[] = [];
-  const outputNodes: BaseNode[] = [];
+export const useOnClickOutside = <T extends HTMLElement | SVGElement>(
+  ref: RefObject<T | null>,
+  handler: (event: AnyEvent) => void
+) => {
+  useEffect(() => {
+    const listener = (event: AnyEvent) => {
+      const el = ref.current;
 
-  for (let visualNode of genomeNodes) {
-    const node = visualNode.node;
-    if (node.previous.length === 0) {
-      inputNodes.push(node);
-      if (!(node instanceof InputNode)) {
-        isValid = false;
+      if (!el || el.contains(event.target as Node)) {
+        return;
       }
-    }
-    if (node.next.length === 0) {
-      outputNodes.push(node);
-      if (!(node instanceof OutputNode)) {
-        isValid = false;
-      }
-    }
-  }
 
-  genome.inputNodes = inputNodes;
-  genome.outputNodes = outputNodes;
+      handler(event);
+    };
 
-  return { isValid, inputNodes, outputNodes };
+    document.addEventListener('mousedown', listener);
+    document.addEventListener('touchstart', listener);
+
+    return () => {
+      document.removeEventListener('mousedown', listener);
+      document.removeEventListener('touchstart', listener);
+    };
+  }, [ref, handler]);
 };

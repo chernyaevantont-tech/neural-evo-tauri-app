@@ -58,3 +58,31 @@
 .divider {
   border-bottom: 1px solid var(--color-border-primary);
 }
+
+.genomeToolbarContainer {
+  background-color: var(--color-bg-secondary);
+  padding: var(--spacing-lg);
+  user-select: none;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  font-family: var(--font-family);
+  letter-spacing: 0.5px;
+}
+
+.operations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}

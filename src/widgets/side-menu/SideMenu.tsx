@@ -1,26 +1,20 @@
 import { BsLayers } from "react-icons/bs";
 import styles from './SideMenu.module.css'
 import { Dispatch, SetStateAction, useState } from "react";
-import { NodeToolbar } from "../../features/node-toolbar";
 import { PiGraph } from "react-icons/pi";
-import { GenomeToolbar } from "../../features/genome-toolbar";
 import { HiOutlineMenu } from "react-icons/hi";
 import { RxCross1 } from "react-icons/rx";
+import { AddNodeToolbar } from "../../features/add-node";
+import { LoadGenomeButton } from "../../features/genome-save-load/ui/LoadGenomeButton";
 
 export type MenuType = "Layers" | "Genomes";
 
 interface SideMenuProps {
-    handleAddNode: (nodeType: string) => void;
-    handleGetSubgenome: () => void;
-    handleLoadGenome: () => void;
     menuType: MenuType;
     setMenuType: Dispatch<SetStateAction<MenuType>>;
 }
 
-export const SideMenu: React.FC<SideMenuProps> = ({ 
-    handleAddNode, 
-    handleLoadGenome, 
-    handleGetSubgenome,
+export const SideMenu: React.FC<SideMenuProps> = ({
     menuType,
     setMenuType
 }) => {
@@ -56,13 +50,17 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 {
                     menuIsOpen && <div className={styles.sideMenu}>
                         {
-                            menuType == "Layers" && <NodeToolbar onAddNode={handleAddNode} />
+                            menuType == "Layers" && <AddNodeToolbar />
                         }
                         {
-                            menuType == "Genomes" && <GenomeToolbar
-                                onLoadGenome={handleLoadGenome}
-                                onGetSubgenome={handleGetSubgenome}
-                            />
+                            menuType == "Genomes" && <div className={styles.genomeToolbarContainer}>
+                                <div className={styles.section}>
+                                    <h4 className={styles.sectionTitle}>Genome Operations</h4>
+                                    <div className={styles.operations}>
+                                        <LoadGenomeButton/>
+                                    </div>
+                                </div>
+                            </div>
                         }
                     </div>
                 }
