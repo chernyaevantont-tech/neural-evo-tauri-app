@@ -90,7 +90,7 @@ export const EditNodeModal: React.FC<EditNodeModalProps> = ({
       setKernelW(params.kernel_size.w);
       setStride(params.stride || 1);
       setPadding(params.padding);
-      setDilation(params.delation);
+      setDilation(params.dilation);
       setConvUseBias(params.use_bias);
     } else if (node instanceof PoolingNode) {
       setPoolType(params.pool_type);

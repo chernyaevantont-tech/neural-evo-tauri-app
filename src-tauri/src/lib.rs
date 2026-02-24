@@ -2,6 +2,9 @@ use std::fs;
 
 use rfd::AsyncFileDialog;
 
+pub mod dtos;
+pub mod entities;
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 async fn save_genome(genome_str: &str) -> Result<(), String> {

@@ -79,4 +79,6 @@ export class PoolingNode extends BaseNode {
         this.stride,
         this.padding,
     );
+
+    public GetIsMerging = (): boolean => false;
 }

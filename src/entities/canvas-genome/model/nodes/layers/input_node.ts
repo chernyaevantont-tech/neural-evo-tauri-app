@@ -36,4 +36,6 @@ export class InputNode extends BaseNode{
     public Clone = (): BaseNode  => new InputNode(
         [...this.outputShape]
     );
+
+    public GetIsMerging = (): boolean => false;
 }

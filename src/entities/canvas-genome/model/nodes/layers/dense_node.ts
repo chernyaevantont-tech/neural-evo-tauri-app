@@ -55,19 +55,23 @@ export class DenseNode extends BaseNode {
         }
     }
     CheckCompability(node: BaseNode): Boolean {
-        return this.previous.length == 0 && 
-        node.GetOutputShape().length == 1 &&
-        this.isAcyclic();
+        return node.previous.length == 0 &&
+            node.GetInputShape().length == 1 &&
+            this.isAcyclic();
     }
     CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return node.GetInputShape().length == 1;
+        return node.previous.length == 1 &&
+            node.GetInputShape().length == 1 &&
+            this.isAcyclic();
     }
 
     public GetNodeType = (): string => "Dense";
 
-    public Clone = (): BaseNode  => new DenseNode(
+    public Clone = (): BaseNode => new DenseNode(
         this.units,
         this.activation,
         this.useBias
     );
+
+    public GetIsMerging = (): boolean => false;
 }

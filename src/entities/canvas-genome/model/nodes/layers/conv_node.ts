@@ -91,13 +91,15 @@ export class Conv2DNode extends BaseNode {
     }
 
     CheckCompability(node: BaseNode): Boolean {
-        return this.previous.length == 0 &&
-            node.GetOutputShape().length == 3 &&
+        return (node.previous.length == 0 || node.GetIsMerging()) &&
+            node.GetInputShape().length == 3 &&
             this.isAcyclic();
     }
 
     CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return node.GetOutputShape().length == 3;
+        return (node.previous.length == 1 || node.GetIsMerging()) &&
+            node.GetInputShape().length == 3 &&
+            this.isAcyclic();
     }
 
     public GetNodeType = (): string => "Conv2D";
@@ -110,4 +112,6 @@ export class Conv2DNode extends BaseNode {
         this.dilation,
         this.useBias
     );
+
+    public GetIsMerging = (): boolean => false;
 }

@@ -40,4 +40,6 @@ export class OutputNode extends BaseNode {
     public Clone = (): BaseNode  => new OutputNode(
         [...this.inputShape],
     );
+
+    public GetIsMerging = (): boolean => false;
 }
