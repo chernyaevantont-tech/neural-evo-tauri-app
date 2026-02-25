@@ -64,12 +64,12 @@ export class PoolingNode extends BaseNode {
 
     CheckCompability(node: BaseNode): Boolean {
         return node.previous.length == 0 &&
-            node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging() &&
+            (node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging()) &&
             this.isAcyclic();
     }
 
     CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging();
+        return (node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging());
     }
 
     public GetNodeType = (): string => "Pooling";

@@ -2,7 +2,11 @@ import { BaseNode, ResourceCriteria } from "../base_node";
 
 export class AddNode extends BaseNode {
     protected CalculateOutputShape(): void {
-        this.outputShape = this.inputShape
+        if (this.previous.length > 0) {
+            this.outputShape = [...this.previous[0].GetOutputShape()]
+        } else {
+            this.outputShape = [...this.inputShape]
+        }
     }
 
     GetInfo(): string {
@@ -19,13 +23,29 @@ export class AddNode extends BaseNode {
     protected Mutate(_mutation_options: Map<string, number>): void { }
 
     CheckCompability(node: BaseNode): Boolean {
-        return this.inputShape.length == 0 ? true :
-            node.GetInputShape().every((val, index) => val == this.inputShape[index]) || node.GetNodeType() == "Output" || node.GetIsMerging()
-            && this.isAcyclic();
+        // If connecting `this(Add)` -> `node`
+        // AddNode doesn't have strict requirements for targets, target dictates requirements
+        return true && this.isAcyclic();
     }
 
     CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return this.previous.length == 1 ? true : node.GetOutputShape().every((val, index) => val == this.inputShape[index])
+        return true;
+    }
+
+    protected AddPrev(node: BaseNode): void {
+        // Enforce that incoming shape matches the first connected node exactly
+        if (this.previous.length > 0) {
+            const firstShape = this.previous[0].GetOutputShape();
+            const incShape = node.GetOutputShape();
+
+            if (firstShape.length !== incShape.length || !firstShape.every((val, index) => val === incShape[index])) {
+                throw new Error("AddNode: Cannot connect. Input shape mismatch!");
+            }
+        } else {
+            this.inputShape = [...node.GetOutputShape()];
+        }
+
+        super.AddPrev(node);
     }
 
     public GetNodeType = (): string => "Add";

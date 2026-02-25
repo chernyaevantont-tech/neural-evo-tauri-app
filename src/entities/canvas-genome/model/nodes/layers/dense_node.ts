@@ -57,12 +57,12 @@ export class DenseNode extends BaseNode {
     }
     CheckCompability(node: BaseNode): Boolean {
         return node.previous.length == 0 &&
-            node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging() &&
+            (node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging()) &&
             this.isAcyclic();
     }
     CheckCompabilityDisconnected(node: BaseNode): Boolean {
         return node.previous.length == 1 &&
-            node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging() &&
+            (node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging()) &&
             this.isAcyclic();
     }
 
