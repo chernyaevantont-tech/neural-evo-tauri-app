@@ -155,7 +155,7 @@ export class Genome {
 
             // Проверяем совместимость: fromNode -> subgenomeInputNode
             let inputAdapters: BaseNode[] = [];
-            const inputCompatible = subgenomeInputNode.CheckCompabilityDisconnected(fromNode);
+            const inputCompatible = fromNode.CheckCompability(subgenomeInputNode);
 
             if (!inputCompatible) {
                 // Пытаемся создать адаптер
@@ -169,7 +169,7 @@ export class Genome {
 
             // Проверяем совместимость: subgenomeOutputNode -> toNode
             let outputAdapters: BaseNode[] = [];
-            const outputCompatible = toNode.CheckCompabilityDisconnected(subgenomeOutputNode);
+            const outputCompatible = subgenomeOutputNode.CheckCompability(toNode);
 
             if (!outputCompatible) {
                 // Пытаемся создать адаптер
@@ -305,7 +305,7 @@ export class Genome {
         return null;
     }
 
-    public Breed(genome: Genome): { genome: Genome, nodes: BaseNode[], isValid: boolean} | null {
+    public Breed(genome: Genome): { genome: Genome, nodes: BaseNode[], isValid: boolean } | null {
         const fromSubgenome = genome.GetRandomSubgenome();
         if (fromSubgenome.length == 0) return null;
         const insertion = this.FindInsertionPoint(fromSubgenome[0], fromSubgenome[fromSubgenome.length - 1]);

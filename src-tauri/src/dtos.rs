@@ -1,11 +1,17 @@
 use serde::Deserialize;
 
 #[derive(Deserialize, Clone, Debug)]
+pub struct KernelSizeDto {
+    pub h: u8,
+    pub w: u8,
+}
+
+#[derive(Deserialize, Clone, Debug)]
 #[serde(tag = "node", content = "params")]
 pub enum NodeDtoJSON {
     Conv2D {
         filters: u64,
-        kernel_size: Vec<u8>,
+        kernel_size: KernelSizeDto,
         stride: u8,
         padding: u8,
         dilation: u8,
@@ -18,14 +24,14 @@ pub enum NodeDtoJSON {
     },
     Flatten {},
     Input {
-        output_shape: Vec<u64>
+        output_shape: Vec<u64>,
     },
     Output {
         input_shape: Vec<u64>,
     },
     Pooling {
         pool_type: String,
-        kernel_size: Vec<u8>,
+        kernel_size: KernelSizeDto,
         stride: u8,
         padding: u8,
     },

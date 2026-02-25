@@ -40,8 +40,11 @@ Modern visual SVG editor for creating and editing neural network architectures w
 - **GraphModel** — Universal directed-acyclic-graph neural network model compiled from a genome description
 - **Topological Execution** — Forward pass follows a BFS-sorted topological order with reference-counted tensor memory management
 - **Dynamic Tensor Support** — Supports both 2D (Dense) and 4D (Conv/Pooling) tensor paths within a single graph
-- **Training Pipeline** — Full training loop via burn's `SupervisedTraining` with `Adam` optimizer, `ConstantLr` scheduler, and `LossMetric` tracking
-- **Simple Training Loop** — Lightweight manual training loop (`train_simple`) for rapid prototyping without burn Learner infrastructure
+- **Weight Initialization** — Kaiming Normal initialization for `Dense` layers to prevent vanishing gradients
+- **Hardware Acceleration** — Configurable `Wgpu` backend for GPU-accelerated tensor operations
+- **Training Pipelines**:
+  - Full loop via burn's `SupervisedTraining` with `Adam` optimizer, `ConstantLr` scheduler, and `LossMetric` tracking
+  - Manual lightweight loop (`train_simple`) supporting Train/Validation/Test data splits, shuffling, and per-epoch metrics (Loss & Accuracy) logging
 - **Loss Functions** — Automatic loss selection: `CrossEntropyLoss` for classification (Dim2), `MseLoss` for regression/image tasks (Dim4)
 
 ### Interaction Features
@@ -297,7 +300,8 @@ cd src-tauri && cargo check
 
 ### Backend
 - **Tauri 2** — Desktop application framework (Rust ↔ JS IPC)
-- **burn 0.20** — ML framework (ndarray, CUDA, autodiff, train)
+- **burn 0.20** — ML framework (Wgpu, ndarray, autodiff, nn, train)
+- **rand 0.10** — Random number generation for dataset shuffling
 - **serde / serde_json** — JSON serialization
 - **rfd** — Native file dialogs (save/load genomes)
 

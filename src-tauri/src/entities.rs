@@ -243,11 +243,7 @@ impl<B: Backend> GraphModel<B> {
                     let prev_shape = &shape_cache[inputs_for_node[0]];
                     let d_input = prev_shape[0];
 
-                    let k = if kernel_size.len() == 1 {
-                        [kernel_size[0] as usize; 2]
-                    } else {
-                        [kernel_size[0] as usize, kernel_size[1] as usize]
-                    };
+                    let k = [kernel_size.h as usize, kernel_size.w as usize];
 
                     let conv = Conv2dConfig::new([d_input, *filters as usize], k)
                         .with_stride([*stride as usize; 2])
@@ -263,14 +259,14 @@ impl<B: Backend> GraphModel<B> {
 
                     let h_in = prev_shape[1];
                     let w_in = prev_shape[2];
-                    let h_out =
-                        (h_in + 2 * (*padding as usize) - (*dilation as usize) * (k[0] - 1) - 1)
-                            / (*stride as usize)
-                            + 1;
-                    let w_out =
-                        (w_in + 2 * (*padding as usize) - (*dilation as usize) * (k[1] - 1) - 1)
-                            / (*stride as usize)
-                            + 1;
+                    let h_out = (h_in + 2 * (*padding as usize))
+                        .saturating_sub((*dilation as usize) * (k[0] - 1) + 1)
+                        / (*stride as usize)
+                        + 1;
+                    let w_out = (w_in + 2 * (*padding as usize))
+                        .saturating_sub((*dilation as usize) * (k[1] - 1) + 1)
+                        / (*stride as usize)
+                        + 1;
 
                     (
                         Operation::Conv2D {
@@ -290,6 +286,10 @@ impl<B: Backend> GraphModel<B> {
 
                     let linear = LinearConfig::new(d_input, *units as usize)
                         .with_bias(*use_bias)
+                        .with_initializer(burn::nn::Initializer::KaimingNormal {
+                            gain: 1.0,
+                            fan_out_only: false,
+                        })
                         .init(device);
                     layers.push(Layer::Dense(linear));
                     (
@@ -312,7 +312,15 @@ impl<B: Backend> GraphModel<B> {
                     num_inputs += 1;
                     let shape: Vec<usize> = output_shape.iter().map(|&v| v as usize).collect();
                     input_shapes.push(shape.clone());
-                    (op, shape)
+
+                    // Convert frontend [H, W, C] to internal [C, H, W] for burn
+                    let internal_shape = if shape.len() == 3 {
+                        vec![shape[2], shape[0], shape[1]]
+                    } else {
+                        shape.clone()
+                    };
+
+                    (op, internal_shape)
                 }
 
                 NodeDtoJSON::Output { input_shape } => {
@@ -330,16 +338,15 @@ impl<B: Backend> GraphModel<B> {
                     padding,
                 } => {
                     let prev_shape = &shape_cache[inputs_for_node[0]];
-                    let k = if kernel_size.len() == 1 {
-                        [kernel_size[0] as usize; 2]
-                    } else {
-                        [kernel_size[0] as usize, kernel_size[1] as usize]
-                    };
 
-                    let h_out =
-                        (prev_shape[1] + 2 * (*padding as usize) - k[0]) / (*stride as usize) + 1;
-                    let w_out =
-                        (prev_shape[2] + 2 * (*padding as usize) - k[1]) / (*stride as usize) + 1;
+                    let k = [kernel_size.h as usize, kernel_size.w as usize];
+
+                    let h_out = (prev_shape[1] + 2 * (*padding as usize)).saturating_sub(k[0])
+                        / (*stride as usize)
+                        + 1;
+                    let w_out = (prev_shape[2] + 2 * (*padding as usize)).saturating_sub(k[1])
+                        / (*stride as usize)
+                        + 1;
                     let out_shape = vec![prev_shape[0], h_out, w_out];
 
                     let layer_idx = layers.len();
@@ -385,6 +392,10 @@ impl<B: Backend> GraphModel<B> {
                 }
             };
 
+            println!(
+                "Compiled Node {node_id}: {:?} -> Out Shape: {:?}",
+                op, out_shape
+            );
             shape_cache[node_id] = out_shape;
             execution_plan.push(Instruction {
                 node_id,
@@ -409,6 +420,14 @@ impl<B: Backend> GraphModel<B> {
     // -----------------------------------------------------------------------
 
     pub fn forward(&self, inputs: &[DynamicTensor<B>]) -> Vec<DynamicTensor<B>> {
+        self.forward_internal(inputs, false)
+    }
+
+    pub fn forward_internal(
+        &self,
+        inputs: &[DynamicTensor<B>],
+        debug: bool,
+    ) -> Vec<DynamicTensor<B>> {
         assert_eq!(inputs.len(), self.num_inputs);
 
         let mut memory: Vec<Option<DynamicTensor<B>>> = vec![None; self.use_counts.len()];
@@ -447,7 +466,9 @@ impl<B: Backend> GraphModel<B> {
                             "relu" => burn::tensor::activation::relu(out),
                             "leaky_relu" => burn::tensor::activation::leaky_relu(out, 0.01),
                             "softmax" => burn::tensor::activation::softmax(out, 1),
-                            _ => unreachable!("Неверная функция активации"),
+                            "sigmoid" => burn::tensor::activation::sigmoid(out),
+                            "linear" | "none" => out,
+                            _ => out,
                         };
                         DynamicTensor::Dim2(out)
                     } else {
@@ -551,6 +572,17 @@ impl<B: Backend> GraphModel<B> {
                 _ => unreachable!(),
             };
 
+            if debug {
+                let shape_str = match &out_tensor {
+                    DynamicTensor::Dim2(t) => format!("{:?}", t.dims()),
+                    DynamicTensor::Dim4(t) => format!("{:?}", t.dims()),
+                };
+                println!(
+                    "[DEBUG Step] Node {} | Op: {:?} | Generated Output Shape: {}",
+                    instr.node_id, instr.op, shape_str
+                );
+            }
+
             if remaining_uses[instr.node_id] > 0 {
                 memory[instr.node_id] = Some(out_tensor);
             }
@@ -578,12 +610,21 @@ impl<B: Backend> GraphModel<B> {
 
         for i in 0..predictions.len() {
             let current_loss = match (&predictions[i], &targets[i]) {
-                // Классификация (Dense → Dim2)
                 (DynamicTensor::Dim2(p), DynamicTensor::Dim2(t)) => {
                     let batch_size = p.dims()[0];
-                    let t_int: Tensor<B, 1, Int> = t.clone().reshape([batch_size]).int();
-                    let loss_func = CrossEntropyLossConfig::new().init(&p.device());
-                    loss_func.forward(p.clone(), t_int)
+                    let out_features = p.dims()[1];
+
+                    if out_features == 1 {
+                        // For a final node with 1 unit (binary classification or regression),
+                        // interpret floats and use MSE
+                        let loss_func = MseLoss::new();
+                        loss_func.forward(p.clone(), t.clone(), burn::nn::loss::Reduction::Mean)
+                    } else {
+                        // Multi-class classification via CrossEntropy (expects `out_features` > 1)
+                        let t_int: Tensor<B, 1, Int> = t.clone().reshape([batch_size]).int();
+                        let loss_func = CrossEntropyLossConfig::new().init(&p.device());
+                        loss_func.forward(p.clone(), t_int)
+                    }
                 }
                 // Регрессия / Image-to-Image (Dim4)
                 (DynamicTensor::Dim4(p), DynamicTensor::Dim4(t)) => {
@@ -756,6 +797,53 @@ pub fn train<B: AutodiffBackend>(
 // Простой цикл обучения (без burn Learner, для прототипирования)
 // ---------------------------------------------------------------------------
 
+fn compute_accuracy<B: AutodiffBackend>(
+    predictions: &[DynamicTensor<B>],
+    targets: &[DynamicTensor<B>],
+) -> (usize, usize) {
+    if predictions.is_empty() {
+        return (0, 0);
+    }
+
+    // Берем только первый выход для подсчета (обычно один output слой)
+    if let (DynamicTensor::Dim2(p), DynamicTensor::Dim2(t)) = (&predictions[0], &targets[0]) {
+        let (batch_size, out_features) = (p.dims()[0], p.dims()[1]);
+        if out_features > 1 {
+            // multiclass, use argmax
+            let preds_max = p.clone().argmax(1).into_data().to_vec::<i32>().unwrap();
+            let targets_int = t
+                .clone()
+                .into_data()
+                .to_vec::<f32>()
+                .unwrap()
+                .into_iter()
+                .map(|f| f as i32)
+                .collect::<Vec<_>>();
+            let mut correct = 0;
+            for i in 0..batch_size {
+                if preds_max[i] == targets_int[i] {
+                    correct += 1;
+                }
+            }
+            return (correct, batch_size);
+        } else {
+            // binary or regression map to 0.5 threshold
+            let preds_vals = p.clone().into_data().to_vec::<f32>().unwrap();
+            let targets_vals = t.clone().into_data().to_vec::<f32>().unwrap();
+            let mut correct = 0;
+            for i in 0..batch_size {
+                let p_class = if preds_vals[i] > 0.5 { 1.0 } else { 0.0 };
+                if (p_class - targets_vals[i]).abs() < 0.1 {
+                    // Match!
+                    correct += 1;
+                }
+            }
+            return (correct, batch_size);
+        }
+    }
+    (0, 0)
+}
+
 /// Простой тренировочный цикл «вручную» — без SupervisedTraining.
 ///
 /// Полезен для быстрого прототипирования и когда не нужны все
@@ -763,21 +851,33 @@ pub fn train<B: AutodiffBackend>(
 pub fn train_simple<B: AutodiffBackend>(
     mut model: GraphModel<B>,
     train_batches: &[DynamicBatch<B>],
+    valid_batches: &[DynamicBatch<B>],
+    test_batches: &[DynamicBatch<B>],
     num_epochs: usize,
     learning_rate: f64,
 ) -> GraphModel<B> {
     let mut optim = AdamConfig::new().init::<B, GraphModel<B>>();
 
     for epoch in 0..num_epochs {
-        let mut epoch_loss = 0.0f32;
-        let mut batch_count = 0;
+        // --- TRAIN PHASE ---
+        let mut train_loss_sum = 0.0f32;
+        let mut train_correct = 0;
+        let mut train_total = 0;
 
-        for batch in train_batches {
+        for (batch_idx, batch) in train_batches.iter().enumerate() {
+            let is_first_step = epoch == 0 && batch_idx == 0;
+            if is_first_step {
+                println!("=== Starting first forward pass with debug logs ===");
+            }
             // Прямой проход
-            let predictions = model.forward(&batch.inputs);
+            let predictions = model.forward_internal(&batch.inputs, is_first_step);
 
             // Вычисление loss
             let loss = model.compute_loss(&predictions, &batch.targets);
+            if is_first_step {
+                let loss_val = loss.clone().into_data().to_vec::<f32>().unwrap()[0];
+                println!("=== First pass complete. Loss: {:.6} ===", loss_val);
+            }
 
             // Обратный проход
             let grads = loss.backward();
@@ -786,17 +886,72 @@ pub fn train_simple<B: AutodiffBackend>(
             // Обновление весов
             model = optim.step(learning_rate, model, grads_params);
 
-            epoch_loss += loss.into_data().to_vec::<f32>().unwrap()[0];
-            batch_count += 1;
+            train_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];
+
+            // Расчет Accuracy (если классификация, 1D вектор out_features > 1)
+            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets);
+            train_correct += batch_correct;
+            train_total += batch_total;
         }
 
-        let avg_loss = epoch_loss / batch_count as f32;
+        let train_avg_loss = train_loss_sum / train_batches.len().max(1) as f32;
+        let train_acc = if train_total > 0 {
+            (train_correct as f32 / train_total as f32) * 100.0
+        } else {
+            0.0
+        };
+
+        // --- VALIDATION PHASE ---
+        let mut valid_loss_sum = 0.0f32;
+        let mut valid_correct = 0;
+        let mut valid_total = 0;
+
+        for batch in valid_batches {
+            let predictions = model.forward_internal(&batch.inputs, false);
+            let loss = model.compute_loss(&predictions, &batch.targets);
+            valid_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];
+
+            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets);
+            valid_correct += batch_correct;
+            valid_total += batch_total;
+        }
+
+        let valid_avg_loss = valid_loss_sum / valid_batches.len().max(1) as f32;
+        let valid_acc = if valid_total > 0 {
+            (valid_correct as f32 / valid_total as f32) * 100.0
+        } else {
+            0.0
+        };
+
         println!(
-            "Epoch {}/{}: avg loss = {:.6}",
+            "Epoch {:>3}/{}: Train Loss: {:.4}, Train Acc: {:>6.2}% | Valid Loss: {:.4}, Valid Acc: {:>6.2}%",
             epoch + 1,
             num_epochs,
-            avg_loss
+            train_avg_loss,
+            train_acc,
+            valid_avg_loss,
+            valid_acc
         );
+    }
+
+    // --- TEST PHASE ---
+    if !test_batches.is_empty() {
+        let mut test_correct = 0;
+        let mut test_total = 0;
+        for batch in test_batches {
+            let predictions = model.forward_internal(&batch.inputs, false);
+            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets);
+            test_correct += batch_correct;
+            test_total += batch_total;
+        }
+        let test_acc = if test_total > 0 {
+            (test_correct as f32 / test_total as f32) * 100.0
+        } else {
+            0.0
+        };
+        println!("========================================");
+        println!("Test Evaluation Complete. Test Acc: {:.2}%", test_acc);
+        println!("========================================");
     }
 
     model

@@ -93,7 +93,7 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
 
                         inConnections.forEach(fromId => {
                             const fromNode = state.nodes.get(fromId);
-                            if (fromNode && node.CheckCompabilityDisconnected(fromNode.node as BaseNode)) {
+                            if (fromNode && fromNode.node.CheckCompability(node as BaseNode)) {
                                 fromNode.node.AddNext(node);
                                 const connId = v4();
                                 newConns.set(connId, { id: connId, fromNodeId: fromId, toNodeId: node.id });
@@ -104,7 +104,7 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
 
                         outConnections.forEach(toId => {
                             const toNode = state.nodes.get(toId);
-                            if (toNode && toNode.node.CheckCompabilityDisconnected(node)) {
+                            if (toNode && node.CheckCompability(toNode.node as BaseNode)) {
                                 node.AddNext(toNode.node as BaseNode);
                                 const connId = v4();
                                 newConns.set(connId, { id: connId, fromNodeId: node.id, toNodeId: toId });
@@ -169,10 +169,12 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
                                     }
                                 }
                                 const currentNodeId = currentNode.id;
-                                const currentVisualNode = state.nodes.get(currentNodeId)!;
+                                const currentVisualNode = state.nodes.get(currentNodeId);
                                 currentConnectedNodes.add(currentNode.id);
-                                connectedVisualNodes.push({ ...state.nodes.get(currentNodeId)! as VisualNode, genomeId: newGenomeId });
-                                state.nodes.set(currentNodeId, { ...currentVisualNode, genomeId: newGenomeId });
+                                if (currentVisualNode) {
+                                    connectedVisualNodes.push({ ...(currentVisualNode as VisualNode), genomeId: newGenomeId });
+                                    state.nodes.set(currentNodeId, { ...currentVisualNode, genomeId: newGenomeId });
+                                }
                                 nodesToCheck.push(...currentNode.previous, ...currentNode.next);
                             }
                         }
@@ -192,15 +194,19 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
         moveNodes: (nodePositions: { nodeId: string, position: Position }[]) =>
             set(state => {
                 nodePositions.forEach(nodePos => {
-                    const currentNode = state.nodes.get(nodePos.nodeId)!;
-                    state.nodes.set(nodePos.nodeId, { ...currentNode, position: nodePos.position });
+                    const currentNode = state.nodes.get(nodePos.nodeId);
+                    if (currentNode) {
+                        state.nodes.set(nodePos.nodeId, { ...currentNode, position: nodePos.position });
+                    }
                 });
             }),
         highlightNodes: (nodesHighlight: { nodeId: string, isHighlighted: boolean }[]) =>
             set(state => {
                 nodesHighlight.forEach(nodeHighlight => {
-                    const currentNode = state.nodes.get(nodeHighlight.nodeId)!;
-                    state.nodes.set(nodeHighlight.nodeId, { ...currentNode, highlighted: nodeHighlight.isHighlighted });
+                    const currentNode = state.nodes.get(nodeHighlight.nodeId);
+                    if (currentNode) {
+                        state.nodes.set(nodeHighlight.nodeId, { ...currentNode, highlighted: nodeHighlight.isHighlighted });
+                    }
                 })
             }),
         connectNodes: (fromNodeId, toNodeId) =>
@@ -210,7 +216,12 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
 
                 if (fromNode && toNode) {
 
-                    if (toNode.node.CheckCompability(fromNode.node as BaseNode)) {
+                    console.log("from node:\n", fromNode.node.GetInfo(), fromNode.node.GetInputShape());
+                    console.log("to node:\n", toNode.node.GetInfo(), toNode.node.GetInputShape());
+
+                    if (fromNode.node.CheckCompability(toNode.node as BaseNode)) {
+                        console.log("a");
+
                         fromNode.node.AddNext(toNode.node as BaseNode);
 
                         const connectionId = v4().toString();
@@ -322,8 +333,11 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
                         }
                         toConnectedNodesCheck.add(currentNode.id);
                         toNodesToCheck.push(...currentNode.previous, ...currentNode.next);
-                        toNodeConnectedNodes.push({ ...state.nodes.get(currentNode.id)!, node: currentNode });
-                        state.nodes.set(currentNode.id, { ...state.nodes.get(currentNode.id)!, genomeId: toGenomeId });
+                        const visualNode = state.nodes.get(currentNode.id);
+                        if (visualNode) {
+                            toNodeConnectedNodes.push({ ...visualNode, node: currentNode });
+                            state.nodes.set(currentNode.id, { ...visualNode, genomeId: toGenomeId });
+                        }
                     }
                 }
 
@@ -354,8 +368,11 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
                             }
                             fromConnectedNodesCheck.add(currentNode.id);
                             fromNodesToCheck.push(...currentNode.previous, ...currentNode.next);
-                            fromNodeConnectedNodes.push({ ...state.nodes.get(currentNode.id)!, node: currentNode });
-                            state.nodes.set(currentNode.id, { ...state.nodes.get(currentNode.id)!, genomeId: fromGenomeId });
+                            const visualNode = state.nodes.get(currentNode.id);
+                            if (visualNode) {
+                                fromNodeConnectedNodes.push({ ...visualNode, node: currentNode });
+                                state.nodes.set(currentNode.id, { ...visualNode, genomeId: fromGenomeId });
+                            }
                         }
                     }
 

@@ -12,11 +12,12 @@ export class DenseNode extends BaseNode {
     constructor(units: number, activation: ActivationFunction, useBias: Boolean) {
         super()
         if (!(Number.isInteger(units) && units >= 0)) {
-            throw Error("units must be a positive number")
+            throw Error("units must be a positive number");
         }
-        this.units = units
-        this.activation = activation
-        this.useBias = useBias
+        this.units = units;
+        this.activation = activation;
+        this.useBias = useBias;
+        this.inputShape = new Array<number>(1);
     }
 
     protected CalculateOutputShape(): void {
@@ -56,12 +57,12 @@ export class DenseNode extends BaseNode {
     }
     CheckCompability(node: BaseNode): Boolean {
         return node.previous.length == 0 &&
-            node.GetInputShape().length == 1 &&
+            node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging() &&
             this.isAcyclic();
     }
     CheckCompabilityDisconnected(node: BaseNode): Boolean {
         return node.previous.length == 1 &&
-            node.GetInputShape().length == 1 &&
+            node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging() &&
             this.isAcyclic();
     }
 

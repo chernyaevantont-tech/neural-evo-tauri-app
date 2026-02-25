@@ -23,4 +23,10 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rfd = "0.17.2"
-burn = { version = "0.20", features = ["ndarray", "cuda", "train", "autodiff"] }
+burn = { version = "0.20", features = ["ndarray", "cuda", "train", "autodiff", "wgpu"] }
+burn-dataset = { version = "0.20.1", features = ["vision"] }
+image = "0.25.9"
+reqwest = "0.13.2"
+futures = "0.3.32"
+tokio-stream = "0.1.18"
+rand = "0.10.0"

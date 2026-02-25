@@ -20,14 +20,15 @@ export class Conv2DNode extends BaseNode {
         dilation: number,
         useBias: boolean
     ) {
-        super()
+        super();
 
-        this.filters = filters
-        this.kernelSize = kernelSize
-        this.stride = stride
-        this.padding = padding
-        this.dilation = dilation
-        this.useBias = useBias
+        this.filters = filters;
+        this.kernelSize = kernelSize;
+        this.stride = stride;
+        this.padding = padding;
+        this.dilation = dilation;
+        this.useBias = useBias;
+        this.inputShape = new Array<number>(3);
     }
 
     protected CalculateOutputShape(): void {
@@ -92,13 +93,13 @@ export class Conv2DNode extends BaseNode {
 
     CheckCompability(node: BaseNode): Boolean {
         return (node.previous.length == 0 || node.GetIsMerging()) &&
-            node.GetInputShape().length == 3 &&
+            node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging() &&
             this.isAcyclic();
     }
 
     CheckCompabilityDisconnected(node: BaseNode): Boolean {
         return (node.previous.length == 1 || node.GetIsMerging()) &&
-            node.GetInputShape().length == 3 &&
+            node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging() &&
             this.isAcyclic();
     }
 

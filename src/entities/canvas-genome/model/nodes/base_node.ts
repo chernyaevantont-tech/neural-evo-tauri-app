@@ -52,8 +52,8 @@ export abstract class BaseNode {
     }
 
     public ClearAllConnections() {
-        this.next.forEach(n => this.RemoveNext(n));
-        this.previous.forEach(n => n.RemoveNext(this));
+        [...this.next].forEach(n => this.RemoveNext(n));
+        [...this.previous].forEach(n => n.RemovePrev(this));
     }
 
     public isAcyclic(): boolean {
@@ -85,7 +85,7 @@ export abstract class BaseNode {
         return dfs(this);
     }
 
-    public abstract GetNodeType(): string; 
+    public abstract GetNodeType(): string;
 
     public abstract Clone(): BaseNode;
 

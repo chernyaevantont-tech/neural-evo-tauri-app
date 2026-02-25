@@ -1,6 +1,11 @@
 import { BaseNode, ResourceCriteria } from "../base_node";
 
 export class FlattenNode extends BaseNode {
+    constructor() {
+        super();
+        this.inputShape = new Array<number>(3);
+    }
+
     protected CalculateOutputShape(): void {
         this.outputShape = [this.inputShape[0] * this.inputShape[1] * this.inputShape[2]]
     }
@@ -11,25 +16,25 @@ export class FlattenNode extends BaseNode {
         })
     }
     GetResources(dtype: number): ResourceCriteria {
-       return {flash: 0, ram: 0, macs: 0}
+        return { flash: 0, ram: 0, macs: 0 }
     }
-    protected Mutate(mutation_options: Map<string, number>): void {}
+    protected Mutate(mutation_options: Map<string, number>): void { }
 
     CheckCompability(node: BaseNode): Boolean {
-        return node.previous.length == 0 && 
-        node.GetOutputShape().length == 3 &&
-        this.isAcyclic();
+        return node.previous.length == 0 &&
+            node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging() &&
+            this.isAcyclic();
     }
 
     CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return this.previous.length == 1 && 
-        node.GetOutputShape().length == 3 &&
-        this.isAcyclic();
+        return this.previous.length == 1 &&
+            node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging() &&
+            this.isAcyclic();
     }
 
     public GetNodeType = (): string => "Flatten";
 
-    public Clone = (): BaseNode  => new FlattenNode();
+    public Clone = (): BaseNode => new FlattenNode();
 
     public GetIsMerging = (): boolean => false;
 }

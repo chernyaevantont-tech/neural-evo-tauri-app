@@ -1,13 +1,13 @@
 import { BaseNode, ResourceCriteria } from "../base_node";
 
-export class InputNode extends BaseNode{
-    
-    constructor (outputShape: number[]) {
+export class InputNode extends BaseNode {
+
+    constructor(outputShape: number[]) {
         super()
         this.outputShape = [...outputShape]
     }
 
-    protected CalculateOutputShape(): void {}
+    protected CalculateOutputShape(): void { }
 
     GetInfo(): string {
         return JSON.stringify({
@@ -19,21 +19,21 @@ export class InputNode extends BaseNode{
     }
 
     GetResources(_dtype: Number): ResourceCriteria {
-        return {flash: 0, ram: 0, macs: 0}
+        return { flash: 0, ram: 0, macs: 0 }
     }
-    protected Mutate(_mutation_options: Map<string, number>): void {}
+    protected Mutate(_mutation_options: Map<string, number>): void { }
 
     CheckCompability(_node: BaseNode): Boolean {
-        return false;
+        return true;
     }
 
     CheckCompabilityDisconnected(_node: BaseNode): Boolean {
-        return false;
+        return true;
     }
 
     public GetNodeType = (): string => "Input";
 
-    public Clone = (): BaseNode  => new InputNode(
+    public Clone = (): BaseNode => new InputNode(
         [...this.outputShape]
     );
 

@@ -16,11 +16,12 @@ export class PoolingNode extends BaseNode {
         stride: number,
         padding: number
     ) {
-        super()
-        this.poolType = poolType
-        this.kernelSize = {...kernelSize}
-        this.stride = stride
-        this.padding = padding
+        super();
+        this.poolType = poolType;
+        this.kernelSize = { ...kernelSize };
+        this.stride = stride;
+        this.padding = padding;
+        this.inputShape = new Array(3);
     }
 
     protected CalculateOutputShape(): void {
@@ -47,7 +48,7 @@ export class PoolingNode extends BaseNode {
         const macs = (this.outputShape[0] * this.outputShape[1] * this.outputShape[2] *
             (this.kernelSize.h * this.kernelSize.w - 1));
 
-        return {flash: 0, ram: ram, macs: macs};
+        return { flash: 0, ram: ram, macs: macs };
     }
 
     protected Mutate(mutation_options: Map<string, number>): void {
@@ -57,25 +58,25 @@ export class PoolingNode extends BaseNode {
 
         if (Math.random() <= (mutation_options.get("pooling_kernel_size") || -1)) {
             const kernel_size = 1 * 2 * RandomizeInteger(0, 3);
-            this.kernelSize = {h: kernel_size, w: kernel_size};
+            this.kernelSize = { h: kernel_size, w: kernel_size };
         }
     }
 
     CheckCompability(node: BaseNode): Boolean {
-        return this.previous.length == 0 && 
-            node.GetOutputShape().length == 3 &&
+        return node.previous.length == 0 &&
+            node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging() &&
             this.isAcyclic();
     }
 
     CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return node.GetOutputShape().length == 3;
+        return node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging();
     }
-    
+
     public GetNodeType = (): string => "Pooling";
 
-    public Clone = (): BaseNode  => new PoolingNode(
+    public Clone = (): BaseNode => new PoolingNode(
         this.poolType,
-        {...this.kernelSize},
+        { ...this.kernelSize },
         this.stride,
         this.padding,
     );

@@ -20,7 +20,7 @@ export class AddNode extends BaseNode {
 
     CheckCompability(node: BaseNode): Boolean {
         return this.inputShape.length == 0 ? true :
-            node.GetOutputShape().every((val, index) => val == this.inputShape[index])
+            node.GetInputShape().every((val, index) => val == this.inputShape[index]) || node.GetNodeType() == "Output" || node.GetIsMerging()
             && this.isAcyclic();
     }
 
