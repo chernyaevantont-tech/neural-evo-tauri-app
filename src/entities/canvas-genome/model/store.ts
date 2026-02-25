@@ -1,5 +1,8 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
+import { enableMapSet } from 'immer';
+
+enableMapSet();
 import { Connection, Position, VisualGenome, VisualNode } from './types';
 import { Genome } from './genome';
 import { v4 } from 'uuid';
@@ -171,6 +174,7 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
                                 const currentNodeId = currentNode.id;
                                 const currentVisualNode = state.nodes.get(currentNodeId);
                                 currentConnectedNodes.add(currentNode.id);
+                                checkedNodes.add(currentNode.id);
                                 if (currentVisualNode) {
                                     connectedVisualNodes.push({ ...(currentVisualNode as VisualNode), genomeId: newGenomeId });
                                     state.nodes.set(currentNodeId, { ...currentVisualNode, genomeId: newGenomeId });

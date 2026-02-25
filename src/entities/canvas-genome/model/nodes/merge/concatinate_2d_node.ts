@@ -6,10 +6,11 @@ export class Concat2DNode extends BaseNode {
             return
         }
 
-        const h = this.inputShape[0]
-        const w = this.inputShape[1]
+        const h = this.previous[0].GetOutputShape()[0]
+        const w = this.previous[0].GetOutputShape()[1]
         const c = this.previous.reduce((result, current) => result + current.GetOutputShape()[2], 0)
 
+        this.inputShape = [h, w, 0];
         this.outputShape = [h, w, c]
     }
 
@@ -61,13 +62,7 @@ export class Concat2DNode extends BaseNode {
         return true;
     }
 
-    protected AddPrev(node: BaseNode): void {
-        if (this.previous.length == 0) {
-            this.inputShape = [node.GetOutputShape()[0], node.GetOutputShape()[1], 0]
-        }
 
-        this.previous.push(node)
-    }
 
     public GetNodeType = () => "Concat";
 

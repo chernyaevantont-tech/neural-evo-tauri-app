@@ -43,17 +43,17 @@ export abstract class BaseNode {
     }
 
     protected RemovePrev(node: BaseNode) {
-        this.previous = this.previous.filter(n => n != node);
+        this.previous = this.previous.filter(n => n.id !== node.id);
     }
 
     public RemoveNext(node: BaseNode) {
-        this.next = this.next = this.next.filter(n => n != node);
+        this.next = this.next.filter(n => n.id !== node.id);
         node.RemovePrev(this);
     }
 
     public ClearAllConnections() {
         [...this.next].forEach(n => this.RemoveNext(n));
-        [...this.previous].forEach(n => n.RemovePrev(this));
+        [...this.previous].forEach(n => n.RemoveNext(this));
     }
 
     public isAcyclic(): boolean {
