@@ -1,0 +1,17 @@
+﻿cargo :     Finished `dev` pro
+file [unoptimized + debuginfo]
+ target(s) in 0.49s
+строка:1 знак:1
++ cargo check --color never 2>
+&1 | Out-File -Encoding utf8 e
+rrors.txt
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo          : 
+    NotSpecified: (    Finis  
+  hed `d...get(s) in 0.49s:   
+ String) [], RemoteExcepti    
+on
+    + FullyQualifiedErrorId : 
+    NativeCommandError
+ 

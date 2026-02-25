@@ -8,7 +8,7 @@ interface DeleteGenomeContextMenuItemProps {
     cancelContextMenu: () => void;
 }
 
-export const DeleteGenomeContextMenuItem: React.FC<DeleteGenomeContextMenuItemProps> = ({cancelContextMenu}) => {
+export const DeleteGenomeContextMenuItem: React.FC<DeleteGenomeContextMenuItemProps> = ({ cancelContextMenu }) => {
     const contextMenuGenomeId = useCanvasStateStore(state => state.genomeContextMenu?.genomeId);
 
     const deleteGenome = useDeleteGenome();
@@ -18,5 +18,5 @@ export const DeleteGenomeContextMenuItem: React.FC<DeleteGenomeContextMenuItemPr
         deleteGenome(contextMenuGenomeId);
     }
 
-    return <ContextMenu.MenuItem icon={<TrashIcon size={14}/>} label="Delete Genome" danger cancelContextMenu={cancelContextMenu} onClick={onClick}/>
+    return <ContextMenu.MenuItem icon={<TrashIcon size={14} />} label="Delete Genome" danger cancelContextMenu={cancelContextMenu} onClick={onClick} />
 }
