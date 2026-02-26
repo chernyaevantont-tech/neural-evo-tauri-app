@@ -23,18 +23,18 @@ export class InputNode extends BaseNode {
     }
     protected Mutate(_mutation_options: Map<string, number>): void { }
 
-    CheckCompability(_node: BaseNode): Boolean {
-        return true;
+    public GetExpectedInputDimensions(): number | "any" {
+        return "any";
     }
 
-    CheckCompabilityDisconnected(_node: BaseNode): Boolean {
-        return true;
+    public GetOutputDimensions(): number | "any" {
+        return this.outputShape.length;
     }
 
     public GetNodeType = (): string => "Input";
 
-    public Clone = (): BaseNode => new InputNode(
-        [...this.outputShape]
+    protected _CloneImpl = (): BaseNode => new InputNode(
+        [...this.outputShape],
     );
 
     public GetIsMerging = (): boolean => false;

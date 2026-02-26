@@ -30,6 +30,13 @@ export interface EvolutionSettingsState {
 
     useResourceAwareFitness: boolean;
     setUseResourceAwareFitness: (val: boolean) => void;
+
+    resourceTargets: {
+        flash: number;
+        ram: number;
+        macs: number;
+    };
+    setResourceTarget: (key: keyof EvolutionSettingsState['resourceTargets'], value: number) => void;
 }
 
 export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) => ({
@@ -67,4 +74,13 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
 
     useResourceAwareFitness: false,
     setUseResourceAwareFitness: (val) => set({ useResourceAwareFitness: val }),
+
+    resourceTargets: {
+        flash: 1024 * 1024, // 1MB default
+        ram: 256 * 1024,    // 256KB default
+        macs: 1000000       // 1M MACs default
+    },
+    setResourceTarget: (key, value) => set((state) => ({
+        resourceTargets: { ...state.resourceTargets, [key]: value }
+    })),
 }));

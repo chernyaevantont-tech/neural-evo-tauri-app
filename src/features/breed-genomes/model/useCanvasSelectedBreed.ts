@@ -22,13 +22,33 @@ export const useCanvasSelectedBreed = () => {
 
             const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
 
-            const newGenome = fromGenome.genome.Breed(toGenome.genome, maxNodes);
-            if (!newGenome) {
+            let breedResult;
+
+            // Determine active strategy (randomly picking one of the selected ones, default to subgraph-insertion)
+            const activeStrategies = settings.selectedCrossovers.filter(s =>
+                s === 'subgraph-insertion' || s === 'subgraph-replacement' || s === 'neat-style' || s === 'multi-point'
+            );
+
+            const chosenStrategy = activeStrategies.length > 0
+                ? activeStrategies[Math.floor(Math.random() * activeStrategies.length)]
+                : 'subgraph-insertion';
+
+            if (chosenStrategy === 'subgraph-replacement') {
+                breedResult = fromGenome.genome.BreedByReplacement(toGenome.genome, maxNodes);
+            } else if (chosenStrategy === 'neat-style') {
+                breedResult = fromGenome.genome.BreedNeatStyle(toGenome.genome, maxNodes);
+            } else if (chosenStrategy === 'multi-point') {
+                breedResult = fromGenome.genome.BreedMultiPoint(toGenome.genome, maxNodes);
+            } else {
+                breedResult = fromGenome.genome.Breed(toGenome.genome, maxNodes);
+            }
+
+            if (!breedResult) {
                 alert("Breed failed: exceeded node limit or no valid insertion point found.");
                 setBreedingStartGenomeId(null);
                 return;
             }
-            addGenome(newGenome.nodes, newGenome.genome, canvasWidth, canvasHeight, translate.x, translate.y, scale, 300);
+            addGenome(breedResult.nodes, breedResult.genome, canvasWidth, canvasHeight, translate.x, translate.y, scale, 300);
             setBreedingStartGenomeId(null);
         } else if (!breedingStartGenomeId) {
             setBreedingStartGenomeId(genomeId);

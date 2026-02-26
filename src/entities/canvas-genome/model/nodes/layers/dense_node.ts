@@ -55,20 +55,17 @@ export class DenseNode extends BaseNode {
             this.useBias = !this.useBias
         }
     }
-    CheckCompability(node: BaseNode): Boolean {
-        return node.previous.length == 0 &&
-            (node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging()) &&
-            this.isAcyclic();
+    public GetExpectedInputDimensions(): number | "any" {
+        return 1;
     }
-    CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return node.previous.length == 1 &&
-            (node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging()) &&
-            this.isAcyclic();
+
+    public GetOutputDimensions(): number | "any" {
+        return 1;
     }
 
     public GetNodeType = (): string => "Dense";
 
-    public Clone = (): BaseNode => new DenseNode(
+    protected _CloneImpl = (): BaseNode => new DenseNode(
         this.units,
         this.activation,
         this.useBias

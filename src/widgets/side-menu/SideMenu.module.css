@@ -1,58 +1,58 @@
 .container {
-    width: 40px;
-    height: 100%;
-    background-color: var(--color-bg-secondary);
-    border-right: 1px solid var(--color-border-primary);
-    display: flex;
-    flex-direction: column;
-    position: relative;
-    flex-shrink: 0;
+  width: 40px;
+  height: 100%;
+  background-color: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border-primary);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  flex-shrink: 0;
 }
 
 .iconContainer {
-    display: flex;
-    width: 100%;
-    aspect-ratio: 1/1;
-    justify-content: center;
-    align-items: center;
-    cursor: pointer;
-    transition: var(--transition-fast);
-    position: relative;
+  display: flex;
+  width: 100%;
+  aspect-ratio: 1/1;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  position: relative;
 }
 
 .iconContainer:hover {
-    background-color: var(--color-bg-hover);
+  background-color: var(--color-bg-hover);
 }
 
 .icon {
-    width: 22px;
-    height: 22px;
-    color: var(--color-text-primary);
+  width: 22px;
+  height: 22px;
+  color: var(--color-text-primary);
 }
 
 .icon path {
-    fill: var(--color-text-primary);
+  fill: var(--color-text-primary);
 }
 
 
 .selectedIcon::before {
-    content: " ";
-    position: absolute;
-    display: block;
-    left: 0;
-    width: 2px;
-    height: 100%;
-    background-color: var(--color-accent-primary);
+  content: " ";
+  position: absolute;
+  display: block;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background-color: var(--color-accent-primary);
 }
 
 .sideMenu {
-    width: 200px;
-    background-color: var(--color-bg-secondary);
-    border-right: 1px solid var(--color-border-primary);
-    position: absolute;
-    height: 100%;
-    left: 40px;
-    z-index: 1000;
+  width: 280px;
+  background-color: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border-primary);
+  position: absolute;
+  height: 100%;
+  left: 40px;
+  z-index: 1000;
 }
 
 .divider {

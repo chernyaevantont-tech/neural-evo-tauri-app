@@ -22,14 +22,13 @@ export class AddNode extends BaseNode {
 
     protected Mutate(_mutation_options: Map<string, number>): void { }
 
-    CheckCompability(node: BaseNode): Boolean {
-        // If connecting `this(Add)` -> `node`
-        // AddNode doesn't have strict requirements for targets, target dictates requirements
-        return true && this.isAcyclic();
+    public GetExpectedInputDimensions(): number | "any" {
+        return "any";
     }
 
-    CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return true;
+    public GetOutputDimensions(): number | "any" {
+        const checkShape = (this.outputShape && this.outputShape.length > 0) ? this.outputShape : this.inputShape;
+        return (checkShape && checkShape.length > 0) ? checkShape.length : "any";
     }
 
     protected AddPrev(node: BaseNode): void {
@@ -50,7 +49,7 @@ export class AddNode extends BaseNode {
 
     public GetNodeType = (): string => "Add";
 
-    public Clone = (): BaseNode => new AddNode();
+    protected _CloneImpl = (): BaseNode => new AddNode();
 
     public GetIsMerging = (): boolean => true;
 }

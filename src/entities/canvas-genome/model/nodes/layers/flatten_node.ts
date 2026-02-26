@@ -20,21 +20,17 @@ export class FlattenNode extends BaseNode {
     }
     protected Mutate(mutation_options: Map<string, number>): void { }
 
-    CheckCompability(node: BaseNode): Boolean {
-        return node.previous.length == 0 &&
-            (node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging()) &&
-            this.isAcyclic();
+    public GetExpectedInputDimensions(): number | "any" {
+        return 3;
     }
 
-    CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return this.previous.length == 1 &&
-            (node.GetInputShape().length == 1 || node.GetNodeType() == "Output" || node.GetIsMerging()) &&
-            this.isAcyclic();
+    public GetOutputDimensions(): number | "any" {
+        return 1;
     }
 
     public GetNodeType = (): string => "Flatten";
 
-    public Clone = (): BaseNode => new FlattenNode();
+    protected _CloneImpl = (): BaseNode => new FlattenNode();
 
     public GetIsMerging = (): boolean => false;
 }

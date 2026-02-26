@@ -40,9 +40,6 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
         genomeNode: new Map(),
         genomes: new Map(),
         connections: new Map(),
-        selectedNodeId: null,
-        selectedGenomeId: null,
-        selectedConnectionId: null,
         addNode: (node, position) =>
             set(state => {
                 const newGenome = new Genome([node], [node])

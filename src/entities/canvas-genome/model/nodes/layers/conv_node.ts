@@ -91,23 +91,19 @@ export class Conv2DNode extends BaseNode {
         this.CalculateOutputShape()
     }
 
-    CheckCompability(node: BaseNode): Boolean {
-        return (node.previous.length == 0 || node.GetIsMerging()) &&
-            (node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging()) &&
-            this.isAcyclic();
+    public GetExpectedInputDimensions(): number | "any" {
+        return 3;
     }
 
-    CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return (node.previous.length == 1 || node.GetIsMerging()) &&
-            (node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging()) &&
-            this.isAcyclic();
+    public GetOutputDimensions(): number | "any" {
+        return 3;
     }
 
     public GetNodeType = (): string => "Conv2D";
 
-    public Clone = (): BaseNode => new Conv2DNode(
+    protected _CloneImpl = (): BaseNode => new Conv2DNode(
         this.filters,
-        this.kernelSize,
+        { ...this.kernelSize },
         this.stride,
         this.padding,
         this.dilation,

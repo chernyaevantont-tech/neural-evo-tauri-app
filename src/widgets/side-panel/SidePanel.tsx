@@ -1,5 +1,5 @@
 import React from 'react';
-import { NodeInfoCard, useCanvasGenomeStore } from '../../entities/canvas-genome';
+import { NodeInfoCard, GenomeInfoCard, useCanvasGenomeStore } from '../../entities/canvas-genome';
 import styles from './SidePanel.module.css';
 import { MenuType } from '../side-menu/SideMenu';
 import { GenomeCard } from '../../entities/canvas-genome/ui/GenomeCard/GenomeCard';
@@ -10,15 +10,22 @@ interface SidePanelProps {
   menuType: MenuType;
 }
 
-import { EvolutionManager } from '../../features/evolution-manager';
 
 export const SidePanel: React.FC<SidePanelProps> = ({ menuType }) => {
   const genomes = Array.from(useCanvasGenomeStore(state => state.genomes).values());
   const nodes = useCanvasGenomeStore(state => state.nodes);
 
   const selectedNodeId = useCanvasStateStore(state => state.selectedNodeId);
-
   const selectedNode = selectedNodeId ? nodes.get(selectedNodeId) : null;
+
+  const selectedGenomeIdRaw = useCanvasStateStore(state => state.selectedGenomeId);
+
+  const activeGenomeId = selectedGenomeIdRaw
+    ? selectedGenomeIdRaw
+    : (selectedNodeId ? nodes.get(selectedNodeId)?.genomeId || null : null);
+
+  const selectedGenomeEntry = useCanvasGenomeStore(state => activeGenomeId ? state.genomes.get(activeGenomeId) : null);
+  const activeGenome = selectedGenomeEntry?.genome;
 
   return (
     <div className={styles.container}>
@@ -29,6 +36,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({ menuType }) => {
       {
         menuType == "Genomes" && (
           <>
+            <GenomeInfoCard genome={activeGenome || null} />
             <div className={styles.genomeListContainer}>
               <h3 className={styles.title}>Genomes</h3>
               <div className={styles.list}>
@@ -37,7 +45,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({ menuType }) => {
                 ))}
               </div>
             </div>
-            <EvolutionManager />
           </>
         )
       }

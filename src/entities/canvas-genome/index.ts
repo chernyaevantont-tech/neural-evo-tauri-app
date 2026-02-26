@@ -1,5 +1,6 @@
 export { ConnectionLine } from './ui/ConnectionLine/ConnectionLine'
 export { NodeInfoCard } from './ui/NodeInfoCard/NodeInfoCard';
+export { GenomeInfoCard } from './ui/GenomeInfoCard/GenomeInfoCard';
 export { Node } from './ui/Node/Node';
 export type { ActivationFunction, KernelSize, PoolType } from './model/nodes/types';
 export { BaseNode } from './model/nodes/base_node';
@@ -15,4 +16,4 @@ export { Genome } from './model/genome';
 export type { Position, VisualNode, VisualGenome, Connection } from './model/types';
 export { deserializeGenome } from './lib/deserializeGenome';
 export { serializeGenome } from './lib/serializeGenome';
-export {useCanvasGenomeStore} from './model/store';
+export { useCanvasGenomeStore } from './model/store';

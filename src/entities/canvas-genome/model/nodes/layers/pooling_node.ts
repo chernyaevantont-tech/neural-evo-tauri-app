@@ -62,19 +62,17 @@ export class PoolingNode extends BaseNode {
         }
     }
 
-    CheckCompability(node: BaseNode): Boolean {
-        return node.previous.length == 0 &&
-            (node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging()) &&
-            this.isAcyclic();
+    public GetExpectedInputDimensions(): number | "any" {
+        return 3;
     }
 
-    CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return (node.GetInputShape().length == 3 || node.GetNodeType() == "Output" || node.GetIsMerging());
+    public GetOutputDimensions(): number | "any" {
+        return 3;
     }
 
     public GetNodeType = (): string => "Pooling";
 
-    public Clone = (): BaseNode => new PoolingNode(
+    protected _CloneImpl = (): BaseNode => new PoolingNode(
         this.poolType,
         { ...this.kernelSize },
         this.stride,

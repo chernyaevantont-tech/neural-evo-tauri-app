@@ -8,6 +8,18 @@ export const EvolutionManager: React.FC = () => {
     const settings = useEvolutionSettingsStore();
     const canvasNodesCount = useCanvasGenomeStore(state => state.nodes.size);
 
+    const selectedGenomeIdRaw = useCanvasStateStore(state => state.selectedGenomeId);
+    const selectedNodeId = useCanvasStateStore(state => state.selectedNodeId);
+
+    const activeGenomeId = useCanvasGenomeStore(state => {
+        if (selectedGenomeIdRaw) return selectedGenomeIdRaw;
+        if (selectedNodeId) return state.nodes.get(selectedNodeId)?.genomeId || null;
+        return null;
+    });
+
+    const selectedGenomeEntry = useCanvasGenomeStore(state => activeGenomeId ? state.genomes.get(activeGenomeId) : null);
+    const selectedGenomeResources = selectedGenomeEntry ? selectedGenomeEntry.genome.GetGenomeResources() : null;
+
     const handleCrossoverChange = (strategy: CrossoverStrategy) => {
         settings.toggleCrossover(strategy);
     };
@@ -34,6 +46,8 @@ export const EvolutionManager: React.FC = () => {
         const nodesInGenomeCount = useCanvasGenomeStore.getState().genomeNode.get(targetGenomeEntry.id)?.length || "?";
         console.log(`[Mutate Current] Selected genome ${targetGenomeEntry.id} with ${nodesInGenomeCount} nodes to undergo mutation.`);
 
+        const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
+
         // Roll probabilities
         const rRemove = Math.random();
         const rAdd = Math.random();
@@ -51,13 +65,32 @@ export const EvolutionManager: React.FC = () => {
         if (!mutatedResult && rAdd < settings.mutationRates.addNode) {
             console.log(`[Mutate Current] Rolled ${rAdd.toFixed(2)} < ${settings.mutationRates.addNode}. Firing AddNode mutation...`);
             try {
-                mutatedResult = targetGenome.MutateAddNode();
+                mutatedResult = targetGenome.MutateAddNode(maxNodes);
             } catch (e) {
                 console.error("Add Node Mutation failed:", e);
             }
         }
 
-        // TODO: add bypass connections & type changes later!
+        const rSkip = Math.random();
+        const rChange = Math.random();
+
+        if (!mutatedResult && rSkip < settings.mutationRates.addSkipConnection) {
+            console.log(`[Mutate Current] Rolled ${rSkip.toFixed(2)} < ${settings.mutationRates.addSkipConnection}. Firing AddSkipConnection mutation...`);
+            try {
+                mutatedResult = targetGenome.MutateAddSkipConnection(maxNodes);
+            } catch (e) {
+                console.error("Add Skip Connection Mutation failed:", e);
+            }
+        }
+
+        if (!mutatedResult && rChange < settings.mutationRates.changeLayerType) {
+            console.log(`[Mutate Current] Rolled ${rChange.toFixed(2)} < ${settings.mutationRates.changeLayerType}. Firing ChangeLayerType mutation...`);
+            try {
+                mutatedResult = targetGenome.MutateChangeLayerType(maxNodes);
+            } catch (e) {
+                console.error("Change Layer Type Mutation failed:", e);
+            }
+        }
 
         if (mutatedResult) {
             console.log(`[Mutate Current] Mutation successful. Spawning new genome descendant!`);
@@ -99,12 +132,35 @@ export const EvolutionManager: React.FC = () => {
 
         const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
 
-        // Try breed 10 times to find valid insertion
+        // Determine which active CrossoverStrategy to use
+        const activeStrategies = settings.selectedCrossovers.filter(s =>
+            s === 'subgraph-insertion' || s === 'subgraph-replacement' || s === 'neat-style' || s === 'multi-point'
+        );
+
+        if (activeStrategies.length === 0) {
+            alert("Please enable at least one Crossover Strategy (Subgraph Insertion or Replacement).");
+            return;
+        }
+
+        const chosenStrategy = activeStrategies[Math.floor(Math.random() * activeStrategies.length)];
+        console.log(`[Breed Current] Selected strategy: ${chosenStrategy} between ${recipientIdx} and ${donorIdx}`);
+
+        // Try breed 10 times to find valid insertion or replacement
         let result = null;
         for (let i = 0; i < 10; i++) {
             try {
-                // Assuming Subgraph Insertion is selected since it's the only one inside Genome.Breed currently
-                let breedResult = recipient.Breed(donor, maxNodes);
+                let breedResult = null;
+
+                if (chosenStrategy === 'subgraph-replacement') {
+                    breedResult = recipient.BreedByReplacement(donor, maxNodes);
+                } else if (chosenStrategy === 'neat-style') {
+                    breedResult = recipient.BreedNeatStyle(donor, maxNodes);
+                } else if (chosenStrategy === 'multi-point') {
+                    breedResult = recipient.BreedMultiPoint(donor, maxNodes);
+                } else {
+                    breedResult = recipient.Breed(donor, maxNodes);
+                }
+
                 if (breedResult) {
                     result = breedResult;
                     break;
@@ -181,18 +237,34 @@ export const EvolutionManager: React.FC = () => {
                     )}
                 </label>
 
-                <label className={styles.label}>
-                    <input type="checkbox" checked={settings.useParsimonyPressure} onChange={e => settings.setUseParsimonyPressure(e.target.checked)} />
+                <label className={styles.label} style={{ opacity: 0.5, cursor: 'not-allowed' }}>
+                    <input type="checkbox" disabled checked={settings.useParsimonyPressure} onChange={e => settings.setUseParsimonyPressure(e.target.checked)} />
                     Parsimony Pressure (α)
                     {settings.useParsimonyPressure && (
-                        <input type="number" step="0.001" className={styles.input} style={{ width: 60 }} value={settings.parsimonyAlpha} onChange={e => settings.setParsimonyAlpha(parseFloat(e.target.value) || 0)} />
+                        <input type="number" step="0.001" className={styles.input} style={{ width: 60 }} value={settings.parsimonyAlpha} onChange={e => settings.setParsimonyAlpha(parseFloat(e.target.value) || 0)} disabled />
                     )}
                 </label>
 
-                <label className={styles.label}>
-                    <input type="checkbox" checked={settings.useResourceAwareFitness} onChange={e => settings.setUseResourceAwareFitness(e.target.checked)} />
+                <label className={styles.label} style={{ opacity: 0.5, cursor: 'not-allowed' }}>
+                    <input type="checkbox" disabled checked={settings.useResourceAwareFitness} onChange={e => settings.setUseResourceAwareFitness(e.target.checked)} />
                     Resource-Aware Fitness
                 </label>
+                {settings.useResourceAwareFitness && (
+                    <div style={{ marginLeft: 20, display: 'flex', flexDirection: 'column', gap: 4, opacity: 0.5, pointerEvents: 'none' }}>
+                        <label className={styles.label} style={{ fontSize: '0.8em' }}>
+                            Max Flash (bytes):
+                            <input type="number" className={styles.input} style={{ width: 80, marginLeft: 8 }} value={settings.resourceTargets.flash} onChange={e => settings.setResourceTarget('flash', parseInt(e.target.value) || 0)} disabled />
+                        </label>
+                        <label className={styles.label} style={{ fontSize: '0.8em' }}>
+                            Max RAM (bytes):
+                            <input type="number" className={styles.input} style={{ width: 80, marginLeft: 8 }} value={settings.resourceTargets.ram} onChange={e => settings.setResourceTarget('ram', parseInt(e.target.value) || 0)} disabled />
+                        </label>
+                        <label className={styles.label} style={{ fontSize: '0.8em' }}>
+                            Max MACs:
+                            <input type="number" className={styles.input} style={{ width: 80, marginLeft: 8 }} value={settings.resourceTargets.macs} onChange={e => settings.setResourceTarget('macs', parseInt(e.target.value) || 0)} disabled />
+                        </label>
+                    </div>
+                )}
             </div>
 
             <div className={styles.section}>
@@ -202,7 +274,16 @@ export const EvolutionManager: React.FC = () => {
                     <button className={styles.button} onClick={handleBreed}>Breed Random</button>
                 </div>
                 <div className={styles.metrics}>
-                    <span>Current Nodes on Canvas: {canvasNodesCount}</span>
+                    <div>Current Nodes on Canvas: {canvasNodesCount}</div>
+                    {selectedGenomeResources && (
+                        <div style={{ marginTop: 10, fontSize: '0.85em', color: '#aaa' }}>
+                            <strong>Selected Genome Metrics:</strong>
+                            <div style={{ paddingLeft: 10 }}>Nodes: {selectedGenomeResources.totalNodes}</div>
+                            <div style={{ paddingLeft: 10 }}>Flash: {selectedGenomeResources.totalFlash} bytes</div>
+                            <div style={{ paddingLeft: 10 }}>RAM: {selectedGenomeResources.totalRam} bytes</div>
+                            <div style={{ paddingLeft: 10 }}>MACs: {selectedGenomeResources.totalMacs.toLocaleString()}</div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

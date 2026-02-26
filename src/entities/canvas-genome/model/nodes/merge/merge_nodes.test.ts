@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { AddNode } from './add_node';
 import { Concat2DNode } from './concatinate_2d_node';
 import { InputNode } from '../layers/input_node';
+import { OutputNode } from '../layers/output_node';
 
 describe('AddNode', () => {
     it('adopts shape of the first connected node', () => {
@@ -65,6 +66,6 @@ describe('Concat2DNode', () => {
         // Wait, Concat's check logic: fromNode.CheckCompability(Concat).
         // input2 checks if Concat is valid. Input checks target.
         // What about when Concat connects to output?
-        expect(concat.CheckCompability(new InputNode([28, 28, 48]))).toBe(true);
+        expect(concat.CheckCompability(new OutputNode([28, 28, 48]))).toBe(true);
     });
 });

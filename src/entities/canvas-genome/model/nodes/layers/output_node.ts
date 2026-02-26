@@ -6,7 +6,7 @@ export class OutputNode extends BaseNode {
         this.inputShape = [...inputShape];
     }
 
-    protected CalculateOutputShape(): void {}
+    protected CalculateOutputShape(): void { }
 
     GetInfo(): string {
         return JSON.stringify({
@@ -16,28 +16,25 @@ export class OutputNode extends BaseNode {
             }
         })
     }
-    
+
     GetResources(_dtype: number): ResourceCriteria {
-        return {flash: 0, ram: 0, macs: 0}
+        return { flash: 0, ram: 0, macs: 0 }
     }
 
-    protected Mutate(_mutation_options: Map<string, number>): void {}
+    protected Mutate(_mutation_options: Map<string, number>): void { }
 
-    CheckCompability(node: BaseNode): Boolean {
-        return this.previous.length == 0 && node.GetOutputShape().every((val, index) => val == this.inputShape[index]);
+    public GetExpectedInputDimensions(): number | "any" {
+        return this.inputShape.length;
     }
 
-    CheckCompabilityDisconnected(node: BaseNode): Boolean {
-        return node.GetOutputShape().every((val, index) => val == this.inputShape[index]);
+    public GetOutputDimensions(): number | "any" {
+        return "any";
     }
 
-    protected AddPrev(node: BaseNode): void {
-        this.previous.push(node)
-    }
 
     public GetNodeType = (): string => "Output";
 
-    public Clone = (): BaseNode  => new OutputNode(
+    protected _CloneImpl = (): BaseNode => new OutputNode(
         [...this.inputShape],
     );
 
