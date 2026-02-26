@@ -1,0 +1,106 @@
+.container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    background-color: var(--color-background-secondary, #2d2d2d);
+    border-radius: 8px;
+    color: var(--color-text-primary, #ffffff);
+    font-size: 13px;
+    margin-top: 12px;
+}
+
+.title {
+    font-size: 14px;
+    font-weight: bold;
+    margin: 0 0 8px 0;
+    color: var(--color-accent, #3b82f6);
+}
+
+.section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-bottom: 1px solid var(--color-border, #404040);
+    padding-bottom: 10px;
+}
+
+.sectionTitle {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-secondary, #a3a3a3);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0;
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.input {
+    width: 50px;
+    background: var(--color-background-input, #1f1f1f);
+    border: 1px solid var(--color-border, #404040);
+    color: white;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.slider {
+    width: 80px;
+}
+
+.sliderValue {
+    font-family: monospace;
+    font-size: 11px;
+    width: 28px;
+    text-align: right;
+    color: var(--color-text-secondary, #a3a3a3);
+}
+
+.buttonGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.button {
+    background: var(--color-accent, #2563eb);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+.button:hover {
+    background: var(--color-accent-hover, #1d4ed8);
+}
+
+.button:active {
+    background: var(--color-accent-active, #1e40af);
+}
+
+.metrics {
+    font-size: 11px;
+    color: var(--color-text-secondary, #a3a3a3);
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
