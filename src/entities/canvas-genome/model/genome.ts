@@ -185,7 +185,7 @@ export class Genome {
 
             if (!inputCompatible) {
                 // Пытаемся создать адаптер
-                const adapter = this.createAdapter(fromNode.GetOutputShape(), subgenomeInputNode.GetOutputShape());
+                const adapter = this.createAdapter(fromNode.GetOutputShape(), subgenomeInputNode.GetInputShape());
                 if (adapter) {
                     inputAdapters = adapter;
                 } else {
@@ -199,7 +199,7 @@ export class Genome {
 
             if (!outputCompatible) {
                 // Пытаемся создать адаптер
-                const adapter = this.createAdapter(subgenomeOutputNode.GetOutputShape(), toNode.GetOutputShape());
+                const adapter = this.createAdapter(subgenomeOutputNode.GetOutputShape(), toNode.GetInputShape());
                 if (adapter) {
                     outputAdapters = adapter;
                 } else {
