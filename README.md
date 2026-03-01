@@ -32,9 +32,23 @@ Modern visual SVG editor for creating and editing neural network architectures w
 - **Concat2D** — Channel-wise concatenation
 
 ### Evolutionary Operations
-- **Genome Breeding**: Cross two genomes by extracting a random subgraph from one genome and splicing it into a compatible insertion point in another
-- **Random Subgenome Extraction**: Highlight a random connected subgraph within a genome for evolutionary analysis
-- **Automatic Adapter Creation**: When shapes are incompatible during breeding, the system creates adapter layers (Dense, Conv2D, Pooling) to bridge the gap
+- **Structural Mutations**:
+  - **Add Node**: Splices a random edge and inserts a new valid layer with automatic shape adapters.
+  - **Remove Node**: Deletes a randomly selected hidden layer and patches the topological hole.
+  - **Remove Subgraph (Macro-pruning)**: Identifies and removes entire linear chains of layers to aggressively strip network bloat.
+- **Genome Breeding (Crossover)**:
+  - **Subgraph Insertion**: Extracts a random subgraph from one genome and inserts it into another.
+  - **Subgraph Replacement**: Swaps similarly-sized linear sub-paths between parents to maintain graph stability.
+  - **NEAT / Multi-point**: Supports alignment-based and multi-point disjoint crossovers.
+- **Bloat Control**:
+  - **Global Node Limits**: Enforces a hard cap on the maximum number of layers allowed during search.
+  - **Parsimony Pressure ($\alpha$)**: Penalizes the fitness score of unnecessarily complex architectures to promote efficiency.
+- **Automatic Adapters**: When tensor shapes become incompatible during structural mutations or crossover, the system automatically creates adapter layers (Dense, Conv2D, Pooling) to bridge the dimensional gap.
+
+### Evolution Studio & Orchestration
+- **TS Orchestrator**: Fully asynchronous TypeScript loop (`useEvolutionLoop`) that manages population spawning, generational evaluation via Rust, fitness assignment, elitism, and tournament selection.
+- **Dataset Manager**: Configure and manage custom folder-based datasets used to evaluate the fitness of the population.
+- **Live Dashboard**: Real-time SVG charts tracking fitness and node counts over time, system event logs, and a dynamic "Hall of Fame" showcasing the top topologies discovered.
 
 ### Rust Backend (burn ML framework)
 - **GraphModel** — Universal directed-acyclic-graph neural network model compiled from a genome description
@@ -120,10 +134,9 @@ src/
 │   └── App.module.css          # App-level CSS modules
 │
 ├── pages/                      # Page-level components
-│   └── network-editor-page/
-│       ├── NetworkEditorPage.tsx   # Main page layout (TitleBar + SideMenu + Canvas + SidePanel)
-│       ├── NetworkEditorPage.module.css
-│       └── hooks.ts            # Page-level hooks (keyboard events, window resize)
+│   ├── network-editor-page/    # Sandbox page layout (Canvas + Evolution Manager)
+│   ├── dataset-manager-page/   # Dataset configuration UI
+│   └── evolution-studio-page/  # Generational loop dashboard (Charts, Logs, Hall of Fame)
 │
 ├── widgets/                    # Composite UI blocks
 │   ├── network-canvas/         # SVG canvas with node/connection rendering
@@ -140,6 +153,10 @@ src/
 │       └── TitleBar.tsx
 │
 ├── features/                   # Feature-specific logic (FSD features)
+│   ├── dataset-manager/        # Store and logic for dataset profiles
+│   ├── evolution-manager/      # Sandbox UI for configuring mutation rates and crossover types
+│   ├── evolution-studio/       # TS Orchestrator loop (useEvolutionLoop) and stats tracking
+│   ├── train-genome/           # API integrations for evaluating models on the rust backend
 │   ├── add-node/               # Node creation toolbar + config modal
 │   ├── edit-node/              # Node editing flow + modal
 │   ├── copy-node/              # Node duplication

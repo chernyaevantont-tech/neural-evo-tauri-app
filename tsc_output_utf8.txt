@@ -1,0 +1,45 @@
+﻿src/entities/canvas-genome/model/nodes/base_node.test.ts(4,7): error TS2654: Non-abstract class 'DummyNode' is missing implementations for the following members of 'BaseNode': 'GetExpectedInputDimensions', 'GetOutputDimensions', '_CloneImpl'.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(11,5): error TS2416: Property 'CheckCompability' in type 'DummyNode' is not assignable to the same property in base type 'BaseNode'.
+  Type '() => Boolean' is not assignable to type '(node: BaseNode) => boolean'.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(12,5): error TS2416: Property 'CheckCompabilityDisconnected' in type 'DummyNode' is not assignable to the same property in base type 'BaseNode'.
+  Type '() => Boolean' is not assignable to type '(node: BaseNode) => boolean'.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(14,36): error TS2322: Type 'DummyNode' is not assignable to type 'BaseNode'.
+  The types returned by 'CheckCompability(...)' are incompatible between these types.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(22,20): error TS2345: Argument of type 'DummyNode' is not assignable to parameter of type 'BaseNode'.
+  The types returned by 'CheckCompability(...)' are incompatible between these types.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(33,20): error TS2345: Argument of type 'DummyNode' is not assignable to parameter of type 'BaseNode'.
+  The types returned by 'CheckCompability(...)' are incompatible between these types.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(34,20): error TS2345: Argument of type 'DummyNode' is not assignable to parameter of type 'BaseNode'.
+  The types returned by 'CheckCompability(...)' are incompatible between these types.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(35,20): error TS2345: Argument of type 'DummyNode' is not assignable to parameter of type 'BaseNode'.
+  The types returned by 'CheckCompability(...)' are incompatible between these types.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(44,20): error TS2345: Argument of type 'DummyNode' is not assignable to parameter of type 'BaseNode'.
+  The types returned by 'CheckCompability(...)' are incompatible between these types.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(48,23): error TS2345: Argument of type 'DummyNode' is not assignable to parameter of type 'BaseNode'.
+  The types returned by 'CheckCompability(...)' are incompatible between these types.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(58,20): error TS2345: Argument of type 'DummyNode' is not assignable to parameter of type 'BaseNode'.
+  The types returned by 'CheckCompability(...)' are incompatible between these types.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.
+src/entities/canvas-genome/model/nodes/base_node.test.ts(59,20): error TS2345: Argument of type 'DummyNode' is not assignable to parameter of type 'BaseNode'.
+  The types returned by 'CheckCompability(...)' are incompatible between these types.
+    Type 'Boolean' is not assignable to type 'boolean'.
+      'boolean' is a primitive, but 'Boolean' is a wrapper object. Prefer using 'boolean' when possible.

@@ -557,6 +557,167 @@ export class Genome {
         return null;
     }
 
+    public MutateRemoveSubgraph(): { genome: Genome, nodes: BaseNode[], isValid: boolean } | null {
+        // 1. Get all linear subgraphs just like Breed MultiPoint
+        const visited = new Set<string>();
+        const linearChains: BaseNode[][] = [];
+
+        const allNodes = new Set<BaseNode>();
+        const queue: BaseNode[] = [...this.inputNodes];
+        const visitedBFS = new Set<string>();
+
+        this.inputNodes.forEach(node => visitedBFS.add(node.id));
+
+        while (queue.length > 0) {
+            const node = queue.shift()!;
+            allNodes.add(node);
+
+            node.next.forEach(nextNode => {
+                if (!visitedBFS.has(nextNode.id)) {
+                    visitedBFS.add(nextNode.id);
+                    queue.push(nextNode);
+                }
+            });
+        }
+
+        allNodes.forEach(node => {
+            if (!visited.has(node.id) && node.previous.length === 1 && node.next.length === 1 && node.GetNodeType() !== "Input" && node.GetNodeType() !== "Output" && node.GetNodeType() !== "Flatten") {
+                const chain: BaseNode[] = [];
+                let current: BaseNode | null = node;
+
+                while (current && current.previous.length === 1 && current.next.length === 1) {
+                    const prev: BaseNode = current.previous[0];
+                    if (visited.has(prev.id) || prev.previous.length !== 1 || prev.next.length !== 1 || prev.GetNodeType() === "Input" || prev.GetNodeType() === "Flatten") break;
+                    current = prev;
+                }
+
+                while (current && current.previous.length === 1 && current.next.length === 1 && current.GetNodeType() !== "Output" && current.GetNodeType() !== "Flatten" && !visited.has(current.id)) {
+                    visited.add(current.id);
+                    chain.push(current);
+                    current = current.next[0];
+                }
+
+                if (chain.length >= 1) {
+                    linearChains.push(chain);
+                }
+            }
+        });
+
+        if (linearChains.length === 0) return null;
+
+        // Shuffle chains
+        const shuffledChains = [...linearChains].sort(() => Math.random() - 0.5);
+
+        for (const chain of shuffledChains) {
+            // Take a random chunk from the chain (at least 1 node, up to entire chain)
+            const maxStart = chain.length - 1;
+            const start = maxStart > 0 ? Math.floor(Math.random() * maxStart) : 0;
+            const len = Math.floor(Math.random() * (chain.length - start)) + 1;
+
+            const chunkToRemove = chain.slice(start, start + len);
+            const firstNodeToRemove = chunkToRemove[0];
+            const lastNodeToRemove = chunkToRemove[chunkToRemove.length - 1];
+
+            const prevNodeOriginal = firstNodeToRemove.previous[0];
+            const nextNodeOriginal = lastNodeToRemove.next[0];
+
+            if (!prevNodeOriginal || !nextNodeOriginal) continue;
+
+            // Test compatibility between prev and next
+            let adapters: BaseNode[] = [];
+            const isCompatible = prevNodeOriginal.CheckCompability(nextNodeOriginal);
+
+            if (!isCompatible) {
+                const newAdapters = this.createAdapter(prevNodeOriginal.GetOutputShape(), nextNodeOriginal.GetInputShape());
+                if (newAdapters) {
+                    adapters = newAdapters;
+                } else {
+                    continue; // Cannot create valid adapter to close the gap, try next chunk
+                }
+            }
+
+            const chunkSet = new Set<string>();
+            chunkToRemove.forEach(n => chunkSet.add(n.id));
+
+            // Clone graph omitting the chunk
+            const nodesToCheck = [...this.inputNodes];
+            const nodesChecked = new Set<BaseNode>();
+            const oldNodes: BaseNode[] = [];
+            const newNodes: BaseNode[] = [];
+            const oldNewNode = new Map<BaseNode, BaseNode>();
+
+            const newInputNodes: BaseNode[] = [];
+            const newOutputNodes: BaseNode[] = [];
+            let isValidFlag = true;
+
+            while (nodesToCheck.length > 0) {
+                const currentNode = nodesToCheck.shift()!;
+                if (nodesChecked.has(currentNode)) continue;
+                nodesChecked.add(currentNode);
+
+                if (!chunkSet.has(currentNode.id)) {
+                    const newNode = currentNode.Clone();
+                    newNodes.push(newNode);
+
+                    if (currentNode.next.length === 0 || (currentNode.next.length === 1 && chunkSet.has(currentNode.next[0].id) && lastNodeToRemove.next.length === 0)) {
+                        if (currentNode.GetNodeType() !== "Output") isValidFlag = false;
+                        newOutputNodes.push(newNode);
+                    }
+
+                    if (currentNode.previous.length === 0) {
+                        if (currentNode.GetNodeType() !== "Input") isValidFlag = false;
+                        newInputNodes.push(newNode);
+                    }
+
+                    oldNodes.push(currentNode);
+                    oldNewNode.set(currentNode, newNode);
+                }
+
+                nodesToCheck.push(...currentNode.next);
+            }
+
+            // Restore connections
+            for (let i = 0; i < newNodes.length; i++) {
+                const oldNode = oldNodes[i];
+                const newNode = newNodes[i];
+
+                if (oldNode.id === prevNodeOriginal.id) {
+                    for (let oldNext of oldNode.next) {
+                        if (!chunkSet.has(oldNext.id)) {
+                            newNode.AddNext(oldNewNode.get(oldNext)!);
+                        }
+                    }
+
+                    if (adapters.length > 0) {
+                        newNode.AddNext(adapters[0]);
+                        for (let j = 1; j < adapters.length; j++) {
+                            adapters[j - 1].AddNext(adapters[j]);
+                        }
+                        adapters[adapters.length - 1].AddNext(oldNewNode.get(nextNodeOriginal)!);
+                    } else {
+                        newNode.AddNext(oldNewNode.get(nextNodeOriginal)!);
+                    }
+                } else {
+                    for (let oldNext of oldNode.next) {
+                        if (!chunkSet.has(oldNext.id)) {
+                            newNode.AddNext(oldNewNode.get(oldNext)!);
+                        }
+                    }
+                }
+            }
+
+            newNodes.push(...adapters);
+
+            return {
+                genome: new Genome(newInputNodes, newOutputNodes),
+                nodes: newNodes,
+                isValid: isValidFlag
+            };
+        }
+
+        return null;
+    }
+
     public MutateAddNode(maxNodes?: number): { genome: Genome, nodes: BaseNode[], isValid: boolean } | null {
         // 1. Gather all edges in the graph
         const allEdges: { from: BaseNode; to: BaseNode }[] = [];

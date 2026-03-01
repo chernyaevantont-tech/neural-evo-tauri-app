@@ -1,6 +1,6 @@
 import React from 'react';
 import styles from './EvolutionManager.module.css';
-import { useEvolutionSettingsStore, CrossoverStrategy } from '../model/store';
+import { useEvolutionSettingsStore, CrossoverStrategy, getAdaptiveMutationRates } from '../model/store';
 import { useCanvasGenomeStore } from '../../../entities/canvas-genome';
 import { useCanvasStateStore } from '../../../entities/canvas-state';
 
@@ -50,10 +50,29 @@ export const EvolutionManager: React.FC = () => {
 
         // Roll probabilities
         const rRemove = Math.random();
+        const rRemoveSubgraph = Math.random();
         const rAdd = Math.random();
 
-        if (rRemove < settings.mutationRates.removeNode) {
-            console.log(`[Mutate Current] Rolled ${rRemove.toFixed(2)} < ${settings.mutationRates.removeNode}. Firing RemoveNode mutation...`);
+        const currentNodesLength = typeof nodesInGenomeCount === 'number' ? nodesInGenomeCount : targetGenome.getAllNodes().length;
+        const dynamicRates = settings.useAdaptiveMutation
+            ? getAdaptiveMutationRates(currentNodesLength)
+            : {
+                addNode: settings.mutationRates.addNode,
+                removeNode: settings.mutationRates.removeNode,
+                removeSubgraph: settings.mutationRates.removeSubgraph
+            };
+
+        if (rRemoveSubgraph < dynamicRates.removeSubgraph) {
+            console.log(`[Mutate Current] Rolled ${rRemoveSubgraph.toFixed(2)} < ${dynamicRates.removeSubgraph.toFixed(2)}. Firing RemoveSubgraph mutation...`);
+            try {
+                mutatedResult = targetGenome.MutateRemoveSubgraph();
+            } catch (e) {
+                console.error("Remove Subgraph Mutation failed:", e);
+            }
+        }
+
+        if (!mutatedResult && rRemove < dynamicRates.removeNode) {
+            console.log(`[Mutate Current] Rolled ${rRemove.toFixed(2)} < ${dynamicRates.removeNode.toFixed(2)}. Firing RemoveNode mutation...`);
             try {
                 mutatedResult = targetGenome.MutateRemoveNode();
             } catch (e) {
@@ -62,8 +81,8 @@ export const EvolutionManager: React.FC = () => {
         }
 
         // If remove didn't trigger or failed, maybe add node triggers
-        if (!mutatedResult && rAdd < settings.mutationRates.addNode) {
-            console.log(`[Mutate Current] Rolled ${rAdd.toFixed(2)} < ${settings.mutationRates.addNode}. Firing AddNode mutation...`);
+        if (!mutatedResult && rAdd < dynamicRates.addNode) {
+            console.log(`[Mutate Current] Rolled ${rAdd.toFixed(2)} < ${dynamicRates.addNode.toFixed(2)}. Firing AddNode mutation...`);
             try {
                 mutatedResult = targetGenome.MutateAddNode(maxNodes);
             } catch (e) {
@@ -209,21 +228,73 @@ export const EvolutionManager: React.FC = () => {
 
             <div className={styles.section}>
                 <h4 className={styles.sectionTitle}>Mutation Probabilities</h4>
-                {Object.entries(settings.mutationRates).map(([key, value]) => (
-                    <div key={key} className={styles.row}>
-                        <span className={styles.label}>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</span>
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                            <input
-                                type="range"
-                                min="0" max="1" step="0.05"
-                                value={value}
-                                onChange={(e) => handleRateChange(key as any, e)}
-                                className={styles.slider}
-                            />
-                            <span className={styles.sliderValue}>{Math.round(value * 100)}%</span>
+
+                <label className={styles.label} style={{ marginBottom: '8px' }}>
+                    <input
+                        type="checkbox"
+                        checked={settings.useAdaptiveMutation}
+                        onChange={e => settings.setUseAdaptiveMutation(e.target.checked)}
+                    />
+                    Adaptive Rates (Rubber)
+                </label>
+
+                {settings.useAdaptiveMutation && (
+                    <label className={styles.label} style={{ marginLeft: '20px', fontSize: '0.9em', color: 'var(--color-text-secondary)', marginBottom: '12px' }}>
+                        Ideal Node Count:
+                        <input
+                            type="number"
+                            className={styles.input}
+                            style={{ width: 60, marginLeft: 8 }}
+                            value={settings.adaptiveTargetNodes}
+                            onChange={e => settings.setAdaptiveTargetNodes(parseInt(e.target.value) || 0)}
+                        />
+                    </label>
+                )}
+
+                {Object.entries(settings.mutationRates).map(([key, value]) => {
+                    let displayValue = value;
+                    let isDisabled = false;
+
+                    if (settings.useAdaptiveMutation && selectedGenomeEntry?.genome) {
+                        if (key === 'addNode' || key === 'removeNode' || key === 'removeSubgraph') {
+                            const nodeCount = selectedGenomeEntry.genome.getAllNodes().length;
+                            const target = settings.adaptiveTargetNodes;
+
+                            if (nodeCount <= target) {
+                                const ratio = nodeCount / Math.max(1, target);
+                                if (key === 'addNode') displayValue = Math.max(0.1, 0.4 - 0.2 * ratio);
+                                else if (key === 'removeNode') displayValue = Math.max(0.01, 0.05 * ratio);
+                                else if (key === 'removeSubgraph') displayValue = Math.max(0.01, 0.02 * ratio);
+                            } else {
+                                const ratio = Math.min(2.0, nodeCount / target);
+                                if (key === 'addNode') displayValue = Math.max(0.01, 0.2 - 0.1 * ratio);
+                                else if (key === 'removeNode') displayValue = Math.min(0.8, 0.1 + 0.3 * (ratio - 1));
+                                else if (key === 'removeSubgraph') displayValue = Math.min(0.5, 0.05 + 0.2 * (ratio - 1));
+                            }
+                            isDisabled = true;
+                        }
+                    }
+
+                    return (
+                        <div key={key} className={styles.row}>
+                            <span className={styles.label}>
+                                {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                                {isDisabled && <span style={{ fontSize: '0.8em', color: 'var(--color-accent-primary)', marginLeft: 4 }}>(Auto)</span>}
+                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', opacity: isDisabled ? 0.6 : 1 }}>
+                                <input
+                                    type="range"
+                                    min="0" max="1" step="0.05"
+                                    value={displayValue}
+                                    onChange={(e) => handleRateChange(key as any, e)}
+                                    className={styles.slider}
+                                    disabled={isDisabled}
+                                />
+                                <span className={styles.sliderValue}>{Math.round(displayValue * 100)}%</span>
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
 
             <div className={styles.section}>

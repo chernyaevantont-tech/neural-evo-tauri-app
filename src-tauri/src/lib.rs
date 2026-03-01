@@ -1,4 +1,6 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::path::Path;
 
 use rfd::AsyncFileDialog;
 
@@ -36,6 +38,20 @@ async fn load_genome() -> Result<String, String> {
 
     if let Some(file_handle) = file {
         fs::read_to_string(file_handle.path()).or_else(|e| Err(e.to_string()))
+    } else {
+        Ok("".to_string())
+    }
+}
+
+#[tauri::command]
+async fn pick_folder() -> Result<String, String> {
+    let folder = AsyncFileDialog::new()
+        .set_title("Select Dataset Directory")
+        .pick_folder()
+        .await;
+
+    if let Some(folder_handle) = folder {
+        Ok(folder_handle.path().to_string_lossy().to_string())
     } else {
         Ok("".to_string())
     }
@@ -274,6 +290,254 @@ async fn test_train_on_image_folder(genome_str: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+pub struct EvaluationResult {
+    pub genome_id: String,
+    pub loss: f32,
+    pub accuracy: f32,
+}
+
+#[tauri::command]
+async fn evaluate_population(
+    genomes: Vec<String>,
+    dataset_profile: String,
+) -> Result<Vec<EvaluationResult>, String> {
+    // Phase 2 Step 2: Parse genomes and run short training epochs
+    // For now we will just successfully parse the genomes and return dummy fitness.
+    type Backend = Autodiff<Wgpu>;
+    let device = Default::default();
+
+    let mut results = Vec::new();
+
+    println!(
+        "Evaluating population of {} genomes on dataset: {}",
+        genomes.len(),
+        dataset_profile
+    );
+
+    for (i, genome_str) in genomes.iter().enumerate() {
+        // We will parse the ID out manually or assume they are passed with IDs.
+        // For simplicity now, let's just parse the GraphModel to ensure it builds
+        match std::panic::catch_unwind(|| GraphModel::<Backend>::build(genome_str, &device)) {
+            Ok(_model) => {
+                // Return dummy fitness scores simulating a quick evaluation pass
+                results.push(EvaluationResult {
+                    genome_id: format!("genome_{}", i),
+                    loss: 0.5 + (i as f32 * 0.1),
+                    accuracy: 0.8 - (i as f32 * 0.05),
+                });
+            }
+            Err(_) => {
+                println!("Failed to build model for genome {}", i);
+                results.push(EvaluationResult {
+                    genome_id: format!("genome_{}", i),
+                    loss: 999.0,
+                    accuracy: 0.0,
+                });
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+// --- Scan Dataset ---
+
+#[derive(serde::Deserialize)]
+pub struct StreamLocatorConfig {
+    pub stream_id: String,
+    pub alias: String,
+    pub locator_type: String, // "GlobPattern" | "FolderMapping" | "CompanionFile" | "None"
+    pub pattern: Option<String>, // for GlobPattern
+    pub path_template: Option<String>, // for CompanionFile
+}
+
+#[derive(serde::Serialize)]
+pub struct StreamScanReport {
+    pub stream_id: String,
+    pub alias: String,
+    pub found_count: usize,
+    pub missing_sample_ids: Vec<String>,
+    pub discovered_classes: Option<HashMap<String, usize>>, // class_name -> count
+}
+
+#[derive(serde::Serialize)]
+pub struct ScanDatasetResult {
+    pub total_matched: usize,
+    pub dropped_count: usize,
+    pub stream_reports: Vec<StreamScanReport>,
+}
+
+fn collect_glob_ids(root: &Path, pattern: &str) -> HashMap<String, std::path::PathBuf> {
+    let full_pattern = root.join(pattern).to_string_lossy().to_string();
+    let full_pattern = full_pattern.replace('\\', "/");
+    let mut map = HashMap::new();
+    if let Ok(paths) = glob::glob(&full_pattern) {
+        for entry in paths.flatten() {
+            if entry.is_file() {
+                // Use relative path from root (without extension) as SampleID
+                // e.g. root=D:\PetImages, file=D:\PetImages\Cat\123.jpg => id="Cat/123"
+                if let Ok(relative) = entry.strip_prefix(root) {
+                    let id = relative
+                        .with_extension("")
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    map.insert(id, entry);
+                }
+            }
+        }
+    }
+    map
+}
+
+fn collect_folder_mapping_ids(
+    anchor_ids: &HashMap<String, std::path::PathBuf>,
+) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for (id, path) in anchor_ids {
+        if let Some(parent) = path.parent() {
+            if let Some(folder_name) = parent.file_name() {
+                map.insert(id.clone(), folder_name.to_string_lossy().to_string());
+            }
+        }
+    }
+    map
+}
+
+fn collect_companion_ids(
+    root: &Path,
+    anchor_ids: &HashSet<String>,
+    path_template: &str,
+) -> HashSet<String> {
+    let mut found = HashSet::new();
+    for id in anchor_ids {
+        let relative = path_template.replace("{id}", id);
+        let full_path = root.join(&relative);
+        if full_path.exists() {
+            found.insert(id.clone());
+        }
+    }
+    found
+}
+
+#[tauri::command]
+async fn scan_dataset(
+    root_path: String,
+    stream_configs: Vec<StreamLocatorConfig>,
+) -> Result<ScanDatasetResult, String> {
+    let root = Path::new(&root_path);
+    if !root.exists() {
+        return Err(format!("Root path does not exist: {}", root_path));
+    }
+
+    // Step 1: Build the anchor — a HashMap<SampleID, PathBuf> from the first
+    // GlobPattern OR FolderMapping stream. FolderMapping auto-globs for common
+    // image extensions so it works standalone (ImageNet-style datasets).
+    let mut anchor_ids: HashMap<String, std::path::PathBuf> = HashMap::new();
+
+    for cfg in &stream_configs {
+        match cfg.locator_type.as_str() {
+            "GlobPattern" => {
+                let pattern = cfg.pattern.as_deref().unwrap_or("**/*.jpg");
+                anchor_ids = collect_glob_ids(root, pattern);
+                break;
+            }
+            "FolderMapping" => {
+                // Auto-glob for common image/data files in subfolders
+                let extensions = ["jpg", "jpeg", "png", "bmp", "webp", "tiff", "csv", "txt"];
+                for ext in &extensions {
+                    let pattern = format!("**/*.{}", ext);
+                    let found = collect_glob_ids(root, &pattern);
+                    for (id, path) in found {
+                        anchor_ids.entry(id).or_insert(path);
+                    }
+                }
+                if !anchor_ids.is_empty() {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if anchor_ids.is_empty() {
+        return Err(
+            "No files found. Check your root directory and stream locator settings.".to_string(),
+        );
+    }
+
+    let all_sample_ids: HashSet<String> = anchor_ids.keys().cloned().collect();
+    let mut valid_ids = all_sample_ids.clone();
+
+    let mut reports = Vec::new();
+
+    for cfg in &stream_configs {
+        match cfg.locator_type.as_str() {
+            "GlobPattern" => {
+                let pattern = cfg.pattern.as_deref().unwrap_or("*.jpg");
+                let ids = collect_glob_ids(root, pattern);
+                let found_set: HashSet<String> = ids.keys().cloned().collect();
+                let missing: Vec<String> = all_sample_ids.difference(&found_set).cloned().collect();
+                valid_ids = valid_ids.intersection(&found_set).cloned().collect();
+                reports.push(StreamScanReport {
+                    stream_id: cfg.stream_id.clone(),
+                    alias: cfg.alias.clone(),
+                    found_count: found_set.len(),
+                    missing_sample_ids: missing,
+                    discovered_classes: None,
+                });
+            }
+            "FolderMapping" => {
+                let folder_map = collect_folder_mapping_ids(&anchor_ids);
+                // Count samples per class
+                let mut class_counts: HashMap<String, usize> = HashMap::new();
+                for class_name in folder_map.values() {
+                    *class_counts.entry(class_name.clone()).or_insert(0) += 1;
+                }
+                reports.push(StreamScanReport {
+                    stream_id: cfg.stream_id.clone(),
+                    alias: cfg.alias.clone(),
+                    found_count: folder_map.len(),
+                    missing_sample_ids: vec![],
+                    discovered_classes: Some(class_counts),
+                });
+            }
+            "CompanionFile" => {
+                let template = cfg.path_template.as_deref().unwrap_or("{id}.txt");
+                let found = collect_companion_ids(root, &all_sample_ids, template);
+                let missing: Vec<String> = all_sample_ids.difference(&found).cloned().collect();
+                valid_ids = valid_ids.intersection(&found).cloned().collect();
+                reports.push(StreamScanReport {
+                    stream_id: cfg.stream_id.clone(),
+                    alias: cfg.alias.clone(),
+                    found_count: found.len(),
+                    missing_sample_ids: missing,
+                    discovered_classes: None,
+                });
+            }
+            _ => {
+                // "None" or unknown - skip, don't filter
+                reports.push(StreamScanReport {
+                    stream_id: cfg.stream_id.clone(),
+                    alias: cfg.alias.clone(),
+                    found_count: 0,
+                    missing_sample_ids: vec![],
+                    discovered_classes: None,
+                });
+            }
+        }
+    }
+
+    let total_matched = valid_ids.len();
+    let dropped_count = all_sample_ids.len().saturating_sub(total_matched);
+
+    Ok(ScanDatasetResult {
+        total_matched,
+        dropped_count,
+        stream_reports: reports,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -281,8 +545,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             save_genome,
             load_genome,
+            pick_folder,
             test_neural_net_training,
-            test_train_on_image_folder
+            test_train_on_image_folder,
+            evaluate_population,
+            scan_dataset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

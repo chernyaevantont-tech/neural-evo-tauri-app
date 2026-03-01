@@ -8,11 +8,13 @@ class DummyNode extends BaseNode {
     GetInfo(): string { return ""; }
     GetResources(): ResourceCriteria { return { flash: 0, ram: 0, macs: 0 }; }
     protected Mutate(): void { }
-    CheckCompability(): Boolean { return true; }
-    CheckCompabilityDisconnected(): Boolean { return true; }
+    CheckCompability(node: BaseNode): boolean { return true; }
+    CheckCompabilityDisconnected(node: BaseNode): boolean { return true; }
     public GetNodeType = () => "Dummy";
-    public Clone = (): BaseNode => new DummyNode();
+    protected _CloneImpl = (): BaseNode => new DummyNode();
     public GetIsMerging = () => false;
+    public GetExpectedInputDimensions(): number | "any" { return "any"; }
+    public GetOutputDimensions(): number | "any" { return "any"; }
 }
 
 describe('BaseNode - Graph Topology', () => {

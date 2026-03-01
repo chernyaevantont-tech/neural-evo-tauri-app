@@ -12,10 +12,17 @@ export interface EvolutionSettingsState {
         params: number;
         addNode: number;
         removeNode: number;
+        removeSubgraph: number;
         addSkipConnection: number;
         changeLayerType: number;
     };
     setMutationRate: (key: keyof EvolutionSettingsState['mutationRates'], value: number) => void;
+
+    // Adaptive Mutations
+    useAdaptiveMutation: boolean;
+    setUseAdaptiveMutation: (val: boolean) => void;
+    adaptiveTargetNodes: number;
+    setAdaptiveTargetNodes: (val: number) => void;
 
     // Bloat Control
     maxNodesLimit: number;
@@ -55,9 +62,14 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
         params: 0.6,
         addNode: 0.2,
         removeNode: 0.1,
+        removeSubgraph: 0.05,
         addSkipConnection: 0.3,
         changeLayerType: 0.1,
     },
+    useAdaptiveMutation: false,
+    adaptiveTargetNodes: 20,
+    setUseAdaptiveMutation: (val) => set({ useAdaptiveMutation: val }),
+    setAdaptiveTargetNodes: (val) => set({ adaptiveTargetNodes: val }),
     setMutationRate: (key, value) => set((state) => ({
         mutationRates: { ...state.mutationRates, [key]: value }
     })),
@@ -84,3 +96,33 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
         resourceTargets: { ...state.resourceTargets, [key]: value }
     })),
 }));
+
+export function getAdaptiveMutationRates(currentNodes: number) {
+    const state = useEvolutionSettingsStore.getState();
+    if (!state.useAdaptiveMutation) {
+        return {
+            addNode: state.mutationRates.addNode,
+            removeNode: state.mutationRates.removeNode,
+            removeSubgraph: state.mutationRates.removeSubgraph
+        };
+    }
+
+    const target = state.adaptiveTargetNodes;
+    // If currentNodes < target, increase Add and decrease Remove
+    if (currentNodes <= target) {
+        const ratio = currentNodes / Math.max(1, target); // 0.0 -> 1.0
+        return {
+            addNode: Math.max(0.1, 0.4 - 0.2 * ratio),      // High when small, drops near target
+            removeNode: Math.max(0.01, 0.05 * ratio),       // Low when small, rises near target
+            removeSubgraph: Math.max(0.01, 0.02 * ratio)    // Very low when small
+        };
+    } else {
+        // If currentNodes > target, penalize Add and strictly boost Remove
+        const ratio = Math.min(2.0, currentNodes / target); // 1.0 -> 2.0+
+        return {
+            addNode: Math.max(0.01, 0.2 - 0.1 * ratio),     // Quickly drops to near zero
+            removeNode: Math.min(0.8, 0.1 + 0.3 * (ratio - 1)), // Approaches 40-80% as bloat increases
+            removeSubgraph: Math.min(0.5, 0.05 + 0.2 * (ratio - 1)) // Rises aggressively to 50% for bloat pruning
+        };
+    }
+}
