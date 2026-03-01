@@ -31,3 +31,5 @@ futures = "0.3.32"
 tokio-stream = "0.1.18"
 rand = "0.10.0"
 glob = "0.3.3"
+uuid = { version = "1.21.0", features = ["v4"] }
+chrono = { version = "0.4.44", features = ["serde"] }

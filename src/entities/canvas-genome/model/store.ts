@@ -32,6 +32,7 @@ interface CanvasGenomeState {
         iterations: number,
     ) => void;
     deleteGenome: (genomeId: string) => void;
+    reset: () => void;
 }
 
 export const useCanvasGenomeStore = create<CanvasGenomeState>()(
@@ -456,6 +457,12 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
                     if (nodesToDeleteSet.has(conn.fromNodeId))
                         state.connections.delete(id);
                 }
-            })
+            }),
+        reset: () => set(state => {
+            state.nodes = new Map();
+            state.genomeNode = new Map();
+            state.genomes = new Map();
+            state.connections = new Map();
+        }),
     }))
 )

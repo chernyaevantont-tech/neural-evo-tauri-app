@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import styles from './HomePage.module.css';
-import { BsLayers, BsDatabase, BsLightningCharge } from 'react-icons/bs';
+import { BsLayers, BsDatabase, BsLightningCharge, BsCollection } from 'react-icons/bs';
 
 import { TitleBar } from '../../widgets/title-bar/TitleBar';
 
@@ -73,6 +73,25 @@ export const HomePage: React.FC = () => {
                             </p>
                             <div className={styles.cardFooter}>
                                 <span style={{ color: 'var(--color-success)' }}>Launch Studio &rarr;</span>
+                            </div>
+                        </div>
+
+                        {/* Genome Library Tile */}
+                        <div
+                            className={styles.card}
+                            onClick={() => navigate('/genome-library')}
+                        >
+                            <div className={styles.cardHeader}>
+                                <div className={styles.iconWrapper} style={{ color: '#9b59b6' }}>
+                                    <BsCollection />
+                                </div>
+                                <h2 className={styles.cardTitle}>Genome Library</h2>
+                            </div>
+                            <p className={styles.cardDescription}>
+                                Browse, search, and manage saved neural network architectures. Preview graphs and check compatibility.
+                            </p>
+                            <div className={styles.cardFooter}>
+                                <span style={{ color: '#9b59b6' }}>Browse Genomes &rarr;</span>
                             </div>
                         </div>
                     </div>

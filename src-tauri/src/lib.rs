@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rfd::AsyncFileDialog;
 
@@ -538,6 +538,155 @@ async fn scan_dataset(
     })
 }
 
+// --- Genome Library ---
+
+fn get_genomes_dir() -> PathBuf {
+    let exe_dir = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    exe_dir.join("genomes")
+}
+
+fn get_meta_path() -> PathBuf {
+    get_genomes_dir().join("meta.json")
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct GenomeLibraryEntry {
+    pub id: String,
+    pub name: String,
+    pub tags: Vec<String>,
+    pub created_at: String,
+    pub input_dims: Vec<usize>, // dimensionality of each input, e.g. [3] for one 3D image
+    pub output_dims: Vec<usize>, // dimensionality of each output, e.g. [1] for one 1D vector
+    pub total_nodes: usize,
+    pub layer_types: Vec<String>,
+    pub best_loss: Option<f32>,
+    pub best_accuracy: Option<f32>,
+}
+
+fn read_meta() -> Vec<GenomeLibraryEntry> {
+    let path = get_meta_path();
+    if path.exists() {
+        let data = fs::read_to_string(&path).unwrap_or_default();
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        vec![]
+    }
+}
+
+fn write_meta(entries: &[GenomeLibraryEntry]) -> Result<(), String> {
+    let dir = get_genomes_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(entries).map_err(|e| e.to_string())?;
+    fs::write(get_meta_path(), json).map_err(|e| e.to_string())
+}
+
+/// Parse a serialized genome string to extract structural metadata.
+/// Format: lines of JSON nodes, then "CONNECTIONS" separator, then edges
+fn extract_genome_metadata(genome_str: &str) -> (Vec<usize>, Vec<usize>, usize, Vec<String>) {
+    let mut input_dims = Vec::new();
+    let mut output_dims = Vec::new();
+    let mut total_nodes = 0usize;
+    let mut layer_types_set = HashSet::new();
+
+    for line in genome_str.lines() {
+        if line == "CONNECTIONS" {
+            break;
+        }
+        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line) {
+            total_nodes += 1;
+            if let Some(node_type) = obj["node"].as_str() {
+                layer_types_set.insert(node_type.to_string());
+                match node_type {
+                    "Input" => {
+                        if let Some(shape) = obj["params"]["output_shape"].as_array() {
+                            input_dims.push(shape.len());
+                        }
+                    }
+                    "Output" => {
+                        if let Some(shape) = obj["params"]["input_shape"].as_array() {
+                            output_dims.push(shape.len());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let mut layer_types: Vec<String> = layer_types_set.into_iter().collect();
+    layer_types.sort();
+    (input_dims, output_dims, total_nodes, layer_types)
+}
+
+#[tauri::command]
+async fn list_library_genomes() -> Result<Vec<GenomeLibraryEntry>, String> {
+    Ok(read_meta())
+}
+
+#[tauri::command]
+async fn save_to_library(
+    genome_str: String,
+    name: String,
+    tags: Vec<String>,
+) -> Result<GenomeLibraryEntry, String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let dir = get_genomes_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    // Save .evog file
+    let file_path = dir.join(format!("{}.evog", id));
+    fs::write(&file_path, &genome_str).map_err(|e| e.to_string())?;
+
+    // Extract metadata from genome
+    let (input_dims, output_dims, total_nodes, layer_types) = extract_genome_metadata(&genome_str);
+
+    let entry = GenomeLibraryEntry {
+        id: id.clone(),
+        name,
+        tags,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        input_dims,
+        output_dims,
+        total_nodes,
+        layer_types,
+        best_loss: None,
+        best_accuracy: None,
+    };
+
+    // Update meta.json
+    let mut meta = read_meta();
+    meta.push(entry.clone());
+    write_meta(&meta)?;
+
+    Ok(entry)
+}
+
+#[tauri::command]
+async fn delete_from_library(id: String) -> Result<(), String> {
+    let dir = get_genomes_dir();
+    let file_path = dir.join(format!("{}.evog", id));
+    if file_path.exists() {
+        fs::remove_file(&file_path).map_err(|e| e.to_string())?;
+    }
+
+    let mut meta = read_meta();
+    meta.retain(|e| e.id != id);
+    write_meta(&meta)?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn load_library_genome(id: String) -> Result<String, String> {
+    let dir = get_genomes_dir();
+    let file_path = dir.join(format!("{}.evog", id));
+    fs::read_to_string(&file_path).map_err(|e| format!("Failed to load genome {}: {}", id, e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -549,7 +698,11 @@ pub fn run() {
             test_neural_net_training,
             test_train_on_image_folder,
             evaluate_population,
-            scan_dataset
+            scan_dataset,
+            list_library_genomes,
+            save_to_library,
+            delete_from_library,
+            load_library_genome
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

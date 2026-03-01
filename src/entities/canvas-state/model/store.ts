@@ -28,13 +28,14 @@ interface CanvasState {
     setScale: (scale: number) => void;
     setTranslate: (translate: { x: number, y: number }) => void;
     setIsPanning: (isPanning: boolean) => void;
-    setLastPanningPos: (position: {x: number, y: number }) => void;
+    setLastPanningPos: (position: { x: number, y: number }) => void;
     setZoom: (mouseX: number, mouseY: number, deltaY: number) => void;
     setNodeContextMenu: (contextMenu: { x: number, y: number, nodeId: string } | null) => void;
     setGenomeContextMenu: (contextMenu: { x: number, y: number, genomeId: string } | null) => void;
     setConnectionContextMenu: (contextMenu: { x: number, y: number, connectionId: string } | null) => void;
     setCanvasWidth: (width: number) => void;
     setCanvasHeight: (height: number) => void;
+    reset: () => void;
 }
 
 export const useCanvasStateStore = create<CanvasState>()(
@@ -73,14 +74,14 @@ export const useCanvasStateStore = create<CanvasState>()(
                 state.selectedGenomeId = null;
                 state.selectedConnectionId = connectionId;
             }),
-        setDraggingNodeId: (nodeId) => set(state => {state.draggingNodeId = nodeId}),
-        setConnectingFromNodeId: (nodeId) => set(state => {state.connectingFromNodeId = nodeId}),
-        setBreedingStartGenomeId: (genomeId) => set(state => {state.breedingStartGenomeId = genomeId}),
-        setDragOffset: (position) => set(state => {state.dragOffset = position}),
-        setScale: (scale) => set(state => {state.scale = scale}),
-        setTranslate: (translate) => set(state => {state.translate = translate}),
-        setIsPanning: (isPanning) => set(state => {state.isPanning = isPanning}),
-        setLastPanningPos: (position) => set(state => {state.lastPanningPos = position}),
+        setDraggingNodeId: (nodeId) => set(state => { state.draggingNodeId = nodeId }),
+        setConnectingFromNodeId: (nodeId) => set(state => { state.connectingFromNodeId = nodeId }),
+        setBreedingStartGenomeId: (genomeId) => set(state => { state.breedingStartGenomeId = genomeId }),
+        setDragOffset: (position) => set(state => { state.dragOffset = position }),
+        setScale: (scale) => set(state => { state.scale = scale }),
+        setTranslate: (translate) => set(state => { state.translate = translate }),
+        setIsPanning: (isPanning) => set(state => { state.isPanning = isPanning }),
+        setLastPanningPos: (position) => set(state => { state.lastPanningPos = position }),
         setZoom: (mouseX, mouseY, deltaY) =>
             set(state => {
                 const worldX = (mouseX - state.translate.x);
@@ -113,7 +114,23 @@ export const useCanvasStateStore = create<CanvasState>()(
                 state.genomeContextMenu = null;
                 state.connectionContextMenu = contextMenu;
             }),
-        setCanvasWidth: (width) => set(state => {state.canvasWidth = width}),
-        setCanvasHeight: (height) => set(state => {state.canvasHeight = height}),
+        setCanvasWidth: (width) => set(state => { state.canvasWidth = width }),
+        setCanvasHeight: (height) => set(state => { state.canvasHeight = height }),
+        reset: () => set(state => {
+            state.selectedNodeId = null;
+            state.selectedGenomeId = null;
+            state.selectedConnectionId = null;
+            state.draggingNodeId = null;
+            state.connectingFromNodeId = null;
+            state.breedingStartGenomeId = null;
+            state.dragOffset = { x: 0, y: 0 };
+            state.scale = 1;
+            state.translate = { x: 0, y: 0 };
+            state.isPanning = false;
+            state.lastPanningPos = { x: 0, y: 0 };
+            state.nodeContextMenu = null;
+            state.genomeContextMenu = null;
+            state.connectionContextMenu = null;
+        }),
     }))
 )

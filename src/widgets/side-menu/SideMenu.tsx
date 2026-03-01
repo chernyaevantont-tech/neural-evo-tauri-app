@@ -7,6 +7,7 @@ import { RxCross1 } from "react-icons/rx";
 import { AddNodeToolbar } from "../../features/add-node";
 import { LoadGenomeButton } from "../../features/genome-save-load/ui/LoadGenomeButton";
 import { EvolutionManager } from "../../features/evolution-manager";
+import { LoadFromLibraryButton } from "../../features/genome-library/ui/LibraryButtons";
 
 export type MenuType = "Layers" | "Genomes";
 
@@ -59,6 +60,12 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                                     <h4 className={styles.sectionTitle}>Genome Operations</h4>
                                     <div className={styles.operations}>
                                         <LoadGenomeButton />
+                                    </div>
+                                </div>
+                                <div className={styles.section}>
+                                    <h4 className={styles.sectionTitle}>Genome Library</h4>
+                                    <div className={styles.operations}>
+                                        <LoadFromLibraryButton />
                                     </div>
                                 </div>
                                 <EvolutionManager />
