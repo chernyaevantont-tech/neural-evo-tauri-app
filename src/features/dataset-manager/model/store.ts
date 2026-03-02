@@ -109,23 +109,59 @@ export const defaultAugmentation: AugmentationSettings = {
 
 const defaultProfiles: DatasetProfile[] = [];
 
-export const useDatasetManagerStore = create<DatasetManagerState>((set) => ({
-    profiles: defaultProfiles,
-    selectedProfileId: null,
+import { persist, StateStorage, createJSONStorage } from 'zustand/middleware';
+import { invoke } from '@tauri-apps/api/core';
 
-    addProfile: (profile) => set((state) => ({
-        profiles: [...state.profiles, profile],
-        selectedProfileId: profile.id
-    })),
+// Custom storage engine for Zustand persist using our Tauri commands
+const tauriStorage: StateStorage = {
+    getItem: async (name: string): Promise<string | null> => {
+        try {
+            // we only have one file, so we ignore 'name' but we could use it if needed
+            const data = await invoke<string>('load_dataset_profiles');
+            return data || null;
+        } catch (err) {
+            console.error('Failed to load dataset profiles:', err);
+            return null;
+        }
+    },
+    setItem: async (name: string, value: string): Promise<void> => {
+        try {
+            await invoke('save_dataset_profiles', { profilesJson: value });
+        } catch (err) {
+            console.error('Failed to save dataset profiles:', err);
+        }
+    },
+    removeItem: async (name: string): Promise<void> => {
+        // Not implemented / needed for this use case
+    },
+};
 
-    updateProfile: (id, updates) => set((state) => ({
-        profiles: state.profiles.map(p => p.id === id ? { ...p, ...updates } : p)
-    })),
+export const useDatasetManagerStore = create<DatasetManagerState>()(
+    persist(
+        (set) => ({
+            profiles: defaultProfiles,
+            selectedProfileId: null,
 
-    removeProfile: (id) => set((state) => ({
-        profiles: state.profiles.filter(p => p.id !== id),
-        selectedProfileId: state.selectedProfileId === id ? null : state.selectedProfileId
-    })),
+            addProfile: (profile) => set((state) => ({
+                profiles: [...state.profiles, profile],
+                selectedProfileId: profile.id
+            })),
 
-    setSelectedProfileId: (id) => set({ selectedProfileId: id })
-}));
+            updateProfile: (id, updates) => set((state) => ({
+                profiles: state.profiles.map(p => p.id === id ? { ...p, ...updates } : p)
+            })),
+
+            removeProfile: (id) => set((state) => ({
+                profiles: state.profiles.filter(p => p.id !== id),
+                selectedProfileId: state.selectedProfileId === id ? null : state.selectedProfileId
+            })),
+
+            setSelectedProfileId: (id) => set({ selectedProfileId: id })
+        }),
+        {
+            name: 'dataset-profiles-storage',
+            storage: createJSONStorage(() => tauriStorage),
+            partialize: (state) => ({ profiles: state.profiles }), // Only persist the profiles array
+        }
+    )
+);

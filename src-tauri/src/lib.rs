@@ -687,6 +687,35 @@ async fn load_library_genome(id: String) -> Result<String, String> {
     fs::read_to_string(&file_path).map_err(|e| format!("Failed to load genome {}: {}", id, e))
 }
 
+// --- Dataset Profiles Persistence ---
+
+fn get_dataset_profiles_path() -> PathBuf {
+    let exe_dir = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    exe_dir.join("dataset_profiles.json")
+}
+
+#[tauri::command]
+async fn save_dataset_profiles(profiles_json: String) -> Result<(), String> {
+    let path = get_dataset_profiles_path();
+    // Validate it's valid JSON before writing to avoid corrupting the file
+    let _: serde_json::Value = serde_json::from_str(&profiles_json).map_err(|e| e.to_string())?;
+    fs::write(path, profiles_json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn load_dataset_profiles() -> Result<String, String> {
+    let path = get_dataset_profiles_path();
+    if path.exists() {
+        fs::read_to_string(path).map_err(|e| e.to_string())
+    } else {
+        Ok("[]".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -702,7 +731,9 @@ pub fn run() {
             list_library_genomes,
             save_to_library,
             delete_from_library,
-            load_library_genome
+            load_library_genome,
+            save_dataset_profiles,
+            load_dataset_profiles
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
