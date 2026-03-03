@@ -8,6 +8,7 @@ import { useDatasetManagerStore } from '../../features/dataset-manager/model/sto
 import { useCanvasGenomeStore, serializeGenome } from '../../entities/canvas-genome';
 import { GenomeCatalogPicker } from '../../features/genome-library';
 import { useGenomeLibraryStore } from '../../features/genome-library/model/store';
+import { EvolutionSettingsPanel } from './EvolutionSettingsPanel';
 
 export const EvolutionStudioPage: React.FC = () => {
     const navigate = useNavigate();
@@ -103,6 +104,9 @@ export const EvolutionStudioPage: React.FC = () => {
             </div>
 
             <div className={styles.contentLayout}>
+                {/* Left Panel: Evolution Settings */}
+                <EvolutionSettingsPanel disabled={isRunning} />
+
                 {/* Main Dashboard Area */}
                 <div className={styles.mainArea}>
 

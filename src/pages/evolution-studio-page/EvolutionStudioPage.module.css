@@ -304,7 +304,7 @@
 
 /* Side Panel */
 .sidePanel {
-    width: 350px;
+    width: 300px;
     background-color: var(--color-bg-secondary);
     border-left: 1px solid var(--color-border-primary);
     padding: 2rem 1.5rem;
