@@ -295,10 +295,17 @@ export class Genome {
         }
 
         // Случай 2: 3D -> 1D (нужен Flatten)
-        // После Flatten форма становится 1D, а любой 1D узел (Dense) автоматически примет этот размер
-        // как свой input_shape. Дополнительный Dense слой в качестве адаптера не нужен.
         if (fromShape.length === 3 && toShape.length === 1) {
             adapters.push(new FlattenNode());
+
+            // Flatten makes the shape 1D with size H*W*C.
+            // If the target explicitly requires a different size (e.g. it's an AddNode),
+            // we must add a Dense layer to bridge the sizes.
+            const flattenedSize = fromShape[0] * fromShape[1] * fromShape[2];
+            if (flattenedSize !== toShape[0]) {
+                adapters.push(new DenseNode(toShape[0], 'relu', true));
+            }
+
             return adapters;
         }
 
@@ -468,90 +475,91 @@ export class Genome {
 
             // 5. Build the new Genome by cloning the graph but omitting nodeToRemove
             // and inserting adapters if any.
-            const nodesToCheck = [...this.inputNodes];
-            const nodesChecked = new Set<BaseNode>();
-            const oldNodes: BaseNode[] = [];
-            const newNodes: BaseNode[] = [];
-            const oldNewNode = new Map<BaseNode, BaseNode>();
+            try {
+                const nodesToCheck = [...this.inputNodes];
+                const nodesChecked = new Set<BaseNode>();
+                const oldNodes: BaseNode[] = [];
+                const newNodes: BaseNode[] = [];
+                const oldNewNode = new Map<BaseNode, BaseNode>();
 
-            const newInputNodes: BaseNode[] = [];
-            const newOutputNodes: BaseNode[] = [];
-            let isValidFlag = true;
+                const newInputNodes: BaseNode[] = [];
+                const newOutputNodes: BaseNode[] = [];
+                let isValidFlag = true;
 
-            // First pass: Clone all nodes EXCEPT the one being removed
-            while (nodesToCheck.length > 0) {
-                const currentNode = nodesToCheck.shift()!;
-                if (nodesChecked.has(currentNode)) continue;
-                nodesChecked.add(currentNode);
+                // First pass: Clone all nodes EXCEPT the one being removed
+                while (nodesToCheck.length > 0) {
+                    const currentNode = nodesToCheck.shift()!;
+                    if (nodesChecked.has(currentNode)) continue;
+                    nodesChecked.add(currentNode);
 
-                if (currentNode.id !== nodeToRemove.id) {
-                    const newNode = currentNode.Clone();
-                    newNodes.push(newNode);
+                    if (currentNode.id !== nodeToRemove.id) {
+                        const newNode = currentNode.Clone();
+                        newNodes.push(newNode);
 
-                    if (currentNode.next.length === 0 || (currentNode.next.length === 1 && currentNode.next[0].id === nodeToRemove.id && nodeToRemove.next.length === 0)) {
-                        // It's an output node or becomes an output node
-                        if (currentNode.GetNodeType() !== "Output") isValidFlag = false;
-                        newOutputNodes.push(newNode);
+                        if (currentNode.next.length === 0 || (currentNode.next.length === 1 && currentNode.next[0].id === nodeToRemove.id && nodeToRemove.next.length === 0)) {
+                            // It's an output node or becomes an output node
+                            if (currentNode.GetNodeType() !== "Output") isValidFlag = false;
+                            newOutputNodes.push(newNode);
+                        }
+
+                        if (currentNode.previous.length === 0) {
+                            if (currentNode.GetNodeType() !== "Input") isValidFlag = false;
+                            newInputNodes.push(newNode);
+                        }
+
+                        oldNodes.push(currentNode);
+                        oldNewNode.set(currentNode, newNode);
                     }
 
-                    if (currentNode.previous.length === 0) {
-                        if (currentNode.GetNodeType() !== "Input") isValidFlag = false;
-                        newInputNodes.push(newNode);
-                    }
-
-                    oldNodes.push(currentNode);
-                    oldNewNode.set(currentNode, newNode);
+                    nodesToCheck.push(...currentNode.next);
                 }
 
-                nodesToCheck.push(...currentNode.next);
-            }
+                // Second pass: Restore connections
+                for (let i = 0; i < newNodes.length; i++) {
+                    const oldNode = oldNodes[i];
+                    const newNode = newNodes[i];
 
-            // Second pass: Restore connections
-            for (let i = 0; i < newNodes.length; i++) {
-                const oldNode = oldNodes[i];
-                const newNode = newNodes[i];
+                    if (oldNode.id === prevNodeOriginal.id) {
+                        // This is the node BEFORE the removed node. 
+                        // We need to route it to the adapters, OR directly to nextNode.
 
-                if (oldNode.id === prevNodeOriginal.id) {
-                    // This is the node BEFORE the removed node. 
-                    // We need to route it to the adapters, OR directly to nextNode.
-
-                    // Add regular connections that aren't the removed node
-                    for (let oldNext of oldNode.next) {
-                        if (oldNext.id !== nodeToRemove.id) {
-                            newNode.AddNext(oldNewNode.get(oldNext)!);
+                        // Add regular connections that aren't the removed node
+                        for (let oldNext of oldNode.next) {
+                            if (oldNext.id !== nodeToRemove.id) {
+                                newNode.AddNext(oldNewNode.get(oldNext)!);
+                            }
                         }
-                    }
 
-                    if (adapters.length > 0) {
-                        newNode.AddNext(adapters[0]);
-                        for (let j = 1; j < adapters.length; j++) {
-                            adapters[j - 1].AddNext(adapters[j]);
+                        if (adapters.length > 0) {
+                            newNode.AddNext(adapters[0]);
+                            for (let j = 1; j < adapters.length; j++) {
+                                adapters[j - 1].AddNext(adapters[j]);
+                            }
+                            adapters[adapters.length - 1].AddNext(oldNewNode.get(nextNodeOriginal)!);
+                        } else {
+                            newNode.AddNext(oldNewNode.get(nextNodeOriginal)!);
                         }
-                        adapters[adapters.length - 1].AddNext(oldNewNode.get(nextNodeOriginal)!);
                     } else {
-                        newNode.AddNext(oldNewNode.get(nextNodeOriginal)!);
-                    }
-                } else {
-                    // Normal node
-                    for (let oldNext of oldNode.next) {
-                        if (oldNext.id !== nodeToRemove.id) {
-                            newNode.AddNext(oldNewNode.get(oldNext)!);
+                        // Normal node
+                        for (let oldNext of oldNode.next) {
+                            if (oldNext.id !== nodeToRemove.id) {
+                                newNode.AddNext(oldNewNode.get(oldNext)!);
+                            }
                         }
                     }
                 }
+
+                newNodes.push(...adapters);
+
+                return {
+                    genome: new Genome(newInputNodes, newOutputNodes),
+                    nodes: newNodes,
+                    isValid: isValidFlag
+                };
+            } catch (e) {
+                console.warn(`[MutateRemoveNode] Failed for candidate ${nodeToRemove.id}, trying next. Error:`, e);
+                continue;
             }
-
-            newNodes.push(...adapters);
-
-            console.log(`[MutateRemoveNode] Removed node ${nodeToRemove.id} (${nodeToRemove.GetNodeType()}).`);
-            console.log(`[MutateRemoveNode] Generated ${adapters.length} adapters: [${adapters.map(a => a.GetNodeType()).join(', ')}].`);
-            console.log(`[MutateRemoveNode] New graph size: ${newNodes.length} (Old: ${allNodes.length})`);
-
-            return {
-                genome: new Genome(newInputNodes, newOutputNodes),
-                nodes: newNodes,
-                isValid: isValidFlag
-            };
         }
 
         return null;
@@ -639,80 +647,85 @@ export class Genome {
             const chunkSet = new Set<string>();
             chunkToRemove.forEach(n => chunkSet.add(n.id));
 
-            // Clone graph omitting the chunk
-            const nodesToCheck = [...this.inputNodes];
-            const nodesChecked = new Set<BaseNode>();
-            const oldNodes: BaseNode[] = [];
-            const newNodes: BaseNode[] = [];
-            const oldNewNode = new Map<BaseNode, BaseNode>();
+            try {
+                // Clone graph omitting the chunk
+                const nodesToCheck = [...this.inputNodes];
+                const nodesChecked = new Set<BaseNode>();
+                const oldNodes: BaseNode[] = [];
+                const newNodes: BaseNode[] = [];
+                const oldNewNode = new Map<BaseNode, BaseNode>();
 
-            const newInputNodes: BaseNode[] = [];
-            const newOutputNodes: BaseNode[] = [];
-            let isValidFlag = true;
+                const newInputNodes: BaseNode[] = [];
+                const newOutputNodes: BaseNode[] = [];
+                let isValidFlag = true;
 
-            while (nodesToCheck.length > 0) {
-                const currentNode = nodesToCheck.shift()!;
-                if (nodesChecked.has(currentNode)) continue;
-                nodesChecked.add(currentNode);
+                while (nodesToCheck.length > 0) {
+                    const currentNode = nodesToCheck.shift()!;
+                    if (nodesChecked.has(currentNode)) continue;
+                    nodesChecked.add(currentNode);
 
-                if (!chunkSet.has(currentNode.id)) {
-                    const newNode = currentNode.Clone();
-                    newNodes.push(newNode);
+                    if (!chunkSet.has(currentNode.id)) {
+                        const newNode = currentNode.Clone();
+                        newNodes.push(newNode);
 
-                    if (currentNode.next.length === 0 || (currentNode.next.length === 1 && chunkSet.has(currentNode.next[0].id) && lastNodeToRemove.next.length === 0)) {
-                        if (currentNode.GetNodeType() !== "Output") isValidFlag = false;
-                        newOutputNodes.push(newNode);
+                        if (currentNode.next.length === 0 || (currentNode.next.length === 1 && chunkSet.has(currentNode.next[0].id) && lastNodeToRemove.next.length === 0)) {
+                            if (currentNode.GetNodeType() !== "Output") isValidFlag = false;
+                            newOutputNodes.push(newNode);
+                        }
+
+                        if (currentNode.previous.length === 0) {
+                            if (currentNode.GetNodeType() !== "Input") isValidFlag = false;
+                            newInputNodes.push(newNode);
+                        }
+
+                        oldNodes.push(currentNode);
+                        oldNewNode.set(currentNode, newNode);
                     }
 
-                    if (currentNode.previous.length === 0) {
-                        if (currentNode.GetNodeType() !== "Input") isValidFlag = false;
-                        newInputNodes.push(newNode);
-                    }
-
-                    oldNodes.push(currentNode);
-                    oldNewNode.set(currentNode, newNode);
+                    nodesToCheck.push(...currentNode.next);
                 }
 
-                nodesToCheck.push(...currentNode.next);
-            }
+                // Restore connections
+                for (let i = 0; i < newNodes.length; i++) {
+                    const oldNode = oldNodes[i];
+                    const newNode = newNodes[i];
 
-            // Restore connections
-            for (let i = 0; i < newNodes.length; i++) {
-                const oldNode = oldNodes[i];
-                const newNode = newNodes[i];
-
-                if (oldNode.id === prevNodeOriginal.id) {
-                    for (let oldNext of oldNode.next) {
-                        if (!chunkSet.has(oldNext.id)) {
-                            newNode.AddNext(oldNewNode.get(oldNext)!);
+                    if (oldNode.id === prevNodeOriginal.id) {
+                        for (let oldNext of oldNode.next) {
+                            if (!chunkSet.has(oldNext.id)) {
+                                newNode.AddNext(oldNewNode.get(oldNext)!);
+                            }
                         }
-                    }
 
-                    if (adapters.length > 0) {
-                        newNode.AddNext(adapters[0]);
-                        for (let j = 1; j < adapters.length; j++) {
-                            adapters[j - 1].AddNext(adapters[j]);
+                        if (adapters.length > 0) {
+                            newNode.AddNext(adapters[0]);
+                            for (let j = 1; j < adapters.length; j++) {
+                                adapters[j - 1].AddNext(adapters[j]);
+                            }
+                            adapters[adapters.length - 1].AddNext(oldNewNode.get(nextNodeOriginal)!);
+                        } else {
+                            newNode.AddNext(oldNewNode.get(nextNodeOriginal)!);
                         }
-                        adapters[adapters.length - 1].AddNext(oldNewNode.get(nextNodeOriginal)!);
                     } else {
-                        newNode.AddNext(oldNewNode.get(nextNodeOriginal)!);
-                    }
-                } else {
-                    for (let oldNext of oldNode.next) {
-                        if (!chunkSet.has(oldNext.id)) {
-                            newNode.AddNext(oldNewNode.get(oldNext)!);
+                        for (let oldNext of oldNode.next) {
+                            if (!chunkSet.has(oldNext.id)) {
+                                newNode.AddNext(oldNewNode.get(oldNext)!);
+                            }
                         }
                     }
                 }
+
+                newNodes.push(...adapters);
+
+                return {
+                    genome: new Genome(newInputNodes, newOutputNodes),
+                    nodes: newNodes,
+                    isValid: isValidFlag
+                };
+            } catch (e) {
+                console.warn(`[MutateRemoveSubgraph] Failed to rebuild subgraph, skipping edge. Error:`, e);
+                continue;
             }
-
-            newNodes.push(...adapters);
-
-            return {
-                genome: new Genome(newInputNodes, newOutputNodes),
-                nodes: newNodes,
-                isValid: isValidFlag
-            };
         }
 
         return null;
@@ -801,101 +814,105 @@ export class Genome {
             console.log(`[MutateAddNode] Breaking edge ${fromNodeOriginal.id} -> ${toNodeOriginal.id}`);
             console.log(`[MutateAddNode] Generated random layer: ${newLayer.GetNodeType()}`);
 
-            // 5. Build the new Genome by cloning the graph and routing the selected edge through the new nodes
-            const nodesToCheck = [...this.inputNodes];
-            const nodesChecked = new Set<BaseNode>();
-            const oldNodes: BaseNode[] = [];
-            const newNodes: BaseNode[] = [];
-            const oldNewNode = new Map<BaseNode, BaseNode>();
+            try {
+                // 5. Build the new Genome by cloning the graph and routing the selected edge through the new nodes
+                const nodesToCheck = [...this.inputNodes];
+                const nodesChecked = new Set<BaseNode>();
+                const oldNodes: BaseNode[] = [];
+                const newNodes: BaseNode[] = [];
+                const oldNewNode = new Map<BaseNode, BaseNode>();
 
-            const newInputNodes: BaseNode[] = [];
-            const newOutputNodes: BaseNode[] = [];
-            let isValidFlag = true;
+                const newInputNodes: BaseNode[] = [];
+                const newOutputNodes: BaseNode[] = [];
+                let isValidFlag = true;
 
-            // First pass: Clone all nodes
-            while (nodesToCheck.length > 0) {
-                const currentNode = nodesToCheck.shift()!;
-                if (nodesChecked.has(currentNode)) continue;
-                nodesChecked.add(currentNode);
+                // First pass: Clone all nodes
+                while (nodesToCheck.length > 0) {
+                    const currentNode = nodesToCheck.shift()!;
+                    if (nodesChecked.has(currentNode)) continue;
+                    nodesChecked.add(currentNode);
 
-                const newNode = currentNode.Clone();
-                newNodes.push(newNode);
+                    const newNode = currentNode.Clone();
+                    newNodes.push(newNode);
 
-                if (currentNode.next.length === 0) {
-                    if (currentNode.GetNodeType() !== "Output") isValidFlag = false;
-                    newOutputNodes.push(newNode);
+                    if (currentNode.next.length === 0) {
+                        if (currentNode.GetNodeType() !== "Output") isValidFlag = false;
+                        newOutputNodes.push(newNode);
+                    }
+
+                    if (currentNode.previous.length === 0) {
+                        if (currentNode.GetNodeType() !== "Input") isValidFlag = false;
+                        newInputNodes.push(newNode);
+                    }
+
+                    oldNodes.push(currentNode);
+                    oldNewNode.set(currentNode, newNode);
+                    nodesToCheck.push(...currentNode.next);
                 }
 
-                if (currentNode.previous.length === 0) {
-                    if (currentNode.GetNodeType() !== "Input") isValidFlag = false;
-                    newInputNodes.push(newNode);
-                }
+                // Second pass: Restore connections but break the selected edge and insert new nodes
+                for (let i = 0; i < newNodes.length; i++) {
+                    const oldNode = oldNodes[i];
+                    const newNode = newNodes[i];
 
-                oldNodes.push(currentNode);
-                oldNewNode.set(currentNode, newNode);
-                nodesToCheck.push(...currentNode.next);
-            }
+                    if (oldNode.id === fromNodeOriginal.id) {
+                        // Route all edges EXCEPT the broken one
+                        for (let oldNext of oldNode.next) {
+                            if (oldNext.id === toNodeOriginal.id) {
+                                // This is the broken edge. Replace `fromNode -> toNode` with
+                                // `fromNode -> inputAdapters -> newLayer -> outputAdapters -> toNode`
 
-            // Second pass: Restore connections but break the selected edge and insert new nodes
-            for (let i = 0; i < newNodes.length; i++) {
-                const oldNode = oldNodes[i];
-                const newNode = newNodes[i];
+                                let currentTail = newNode;
 
-                if (oldNode.id === fromNodeOriginal.id) {
-                    // Route all edges EXCEPT the broken one
-                    for (let oldNext of oldNode.next) {
-                        if (oldNext.id === toNodeOriginal.id) {
-                            // This is the broken edge. Replace `fromNode -> toNode` with
-                            // `fromNode -> inputAdapters -> newLayer -> outputAdapters -> toNode`
+                                // Append Input Adapters
+                                for (let adapter of inputAdapters) {
+                                    currentTail.AddNext(adapter);
+                                    currentTail = adapter;
+                                }
 
-                            let currentTail = newNode;
+                                // Append New Layer
+                                currentTail.AddNext(newLayer);
+                                currentTail = newLayer;
 
-                            // Append Input Adapters
-                            for (let adapter of inputAdapters) {
-                                currentTail.AddNext(adapter);
-                                currentTail = adapter;
+                                // Append Output Adapters
+                                for (let adapter of outputAdapters) {
+                                    currentTail.AddNext(adapter);
+                                    currentTail = adapter;
+                                }
+
+                                // Final connection to the original target Node
+                                currentTail.AddNext(oldNewNode.get(toNodeOriginal)!);
+                            } else {
+                                // Normal edge, just reconnect
+                                newNode.AddNext(oldNewNode.get(oldNext)!);
                             }
-
-                            // Append New Layer
-                            currentTail.AddNext(newLayer);
-                            currentTail = newLayer;
-
-                            // Append Output Adapters
-                            for (let adapter of outputAdapters) {
-                                currentTail.AddNext(adapter);
-                                currentTail = adapter;
-                            }
-
-                            // Final connection to the original target Node
-                            currentTail.AddNext(oldNewNode.get(toNodeOriginal)!);
-                        } else {
-                            // Normal edge, just reconnect
+                        }
+                    } else {
+                        // Normal node
+                        for (let oldNext of oldNode.next) {
                             newNode.AddNext(oldNewNode.get(oldNext)!);
                         }
                     }
-                } else {
-                    // Normal node
-                    for (let oldNext of oldNode.next) {
-                        newNode.AddNext(oldNewNode.get(oldNext)!);
-                    }
                 }
+
+                newNodes.push(...inputAdapters, newLayer, ...outputAdapters);
+
+                if (maxNodes !== undefined && newNodes.length > maxNodes) {
+                    return null;
+                }
+
+                console.log(`[MutateAddNode] Mutation successful. Inserted layer + ${inputAdapters.length + outputAdapters.length} adapters. New graph size: ${newNodes.length}`);
+
+                return {
+                    genome: new Genome(newInputNodes, newOutputNodes),
+                    nodes: newNodes,
+                    isValid: isValidFlag
+                };
+            } catch (e) {
+                console.warn(`[MutateAddNode] Failed to rebuild graph, skipping edge. Error:`, e);
+                continue;
             }
-
-            newNodes.push(...inputAdapters, newLayer, ...outputAdapters);
-
-            if (maxNodes !== undefined && newNodes.length > maxNodes) {
-                return null;
-            }
-
-            console.log(`[MutateAddNode] Mutation successful. Inserted layer + ${inputAdapters.length + outputAdapters.length} adapters. New graph size: ${newNodes.length}`);
-
-            return {
-                genome: new Genome(newInputNodes, newOutputNodes),
-                nodes: newNodes,
-                isValid: isValidFlag
-            };
         }
-
 
         return null;
     }

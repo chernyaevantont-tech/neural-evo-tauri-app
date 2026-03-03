@@ -1,11 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { TitleBar } from '../../widgets/title-bar/TitleBar';
 import styles from './EvolutionStudioPage.module.css';
 import { useNavigate } from 'react-router-dom';
-import { BsArrowLeft, BsPlayFill, BsStopFill, BsPauseFill } from 'react-icons/bs';
+import { BsArrowLeft, BsPlayFill, BsStopFill, BsPlus, BsX } from 'react-icons/bs';
 import { useEvolutionLoop } from '../../features/evolution-studio/model/useEvolutionLoop';
 import { useDatasetManagerStore } from '../../features/dataset-manager/model/store';
 import { useCanvasGenomeStore, serializeGenome } from '../../entities/canvas-genome';
+import { GenomeCatalogPicker } from '../../features/genome-library';
+import { useGenomeLibraryStore } from '../../features/genome-library/model/store';
 
 export const EvolutionStudioPage: React.FC = () => {
     const navigate = useNavigate();
@@ -23,19 +25,42 @@ export const EvolutionStudioPage: React.FC = () => {
     } = useEvolutionLoop(selectedProfileId);
 
     const genomes = useCanvasGenomeStore(state => state.genomes);
+    const { entries, loadGenomeContent } = useGenomeLibraryStore();
+    const profiles = useDatasetManagerStore(state => state.profiles);
+
+    const [showCatalogPicker, setShowCatalogPicker] = useState(false);
+    const [selectedSeedIds, setSelectedSeedIds] = useState<string[]>([]);
+
+    const activeProfile = profiles.find(p => p.id === selectedProfileId);
 
     const handleStart = async () => {
-        const activeGenomes = Array.from(genomes.values());
-        if (activeGenomes.length === 0) {
-            alert("Please create a starting architecture in the Sandbox first!");
-            navigate('/sandbox');
-            return;
+        const seedJsonList: string[] = [];
+
+        if (selectedSeedIds.length > 0) {
+            // Load selected seeds from library
+            for (const id of selectedSeedIds) {
+                try {
+                    const json = await loadGenomeContent(id);
+                    seedJsonList.push(json);
+                } catch (e) {
+                    console.error("Failed to load seed content for", id, e);
+                }
+            }
+        } else {
+            // Fallback to active sandbox genome
+            const activeGenomes = Array.from(genomes.values());
+            if (activeGenomes.length === 0) {
+                alert("Please add seeds from the Library or create a starting architecture in the Sandbox first!");
+                return;
+            }
+            const seedGenome = activeGenomes[0];
+            const seedJson = await serializeGenome(seedGenome.genome);
+            seedJsonList.push(seedJson);
         }
 
-        // Use the first available genome as the seed
-        const seedGenome = activeGenomes[0];
-        const seedJson = await serializeGenome(seedGenome.genome);
-        startEvolution(seedJson);
+        if (seedJsonList.length > 0) {
+            startEvolution(seedJsonList);
+        }
     };
 
     // Calculate Average Nodes
@@ -80,6 +105,58 @@ export const EvolutionStudioPage: React.FC = () => {
             <div className={styles.contentLayout}>
                 {/* Main Dashboard Area */}
                 <div className={styles.mainArea}>
+
+                    {/* Setup Section */}
+                    <div className={styles.setupSection}>
+                        <div className={styles.setupCard}>
+                            <h3 className={styles.setupTitle}>Dataset Profile</h3>
+                            {activeProfile ? (
+                                <div className={styles.datasetInfo}>
+                                    <span className={styles.datasetName}>{activeProfile.name}</span>
+                                    <span className={styles.datasetType}>{activeProfile.type}</span>
+                                </div>
+                            ) : (
+                                <div className={styles.warningAlert}>
+                                    No dataset selected. Go to Dataset Manager to configure one.
+                                </div>
+                            )}
+                        </div>
+
+                        <div className={styles.setupCard}>
+                            <h3 className={styles.setupTitle}>Initial Population Seeds</h3>
+                            <div className={styles.seedList}>
+                                {selectedSeedIds.map(id => {
+                                    const entry = entries.find(e => e.id === id);
+                                    return (
+                                        <div key={id} className={styles.seedTag}>
+                                            {entry ? entry.name : 'Unknown'}
+                                            {!isRunning && (
+                                                <button
+                                                    className={styles.removeSeedBtn}
+                                                    onClick={() => setSelectedSeedIds(prev => prev.filter(s => s !== id))}
+                                                >
+                                                    <BsX />
+                                                </button>
+                                            )}
+                                        </div>
+                                    )
+                                })}
+                                {!isRunning && (
+                                    <button
+                                        className={styles.addSeedBtn}
+                                        onClick={() => setShowCatalogPicker(true)}
+                                    >
+                                        <BsPlus /> Add Seeds from Library
+                                    </button>
+                                )}
+                            </div>
+                            {selectedSeedIds.length === 0 && !isRunning && (
+                                <p className={styles.setupHint}>
+                                    If empty, the current Sandbox architecture will be used as a single seed.
+                                </p>
+                            )}
+                        </div>
+                    </div>
 
                     {/* Metrics Strip */}
                     <div className={styles.metricsStrip}>
@@ -181,6 +258,18 @@ export const EvolutionStudioPage: React.FC = () => {
                 </div>
 
             </div>
+
+            {showCatalogPicker && (
+                <GenomeCatalogPicker
+                    onClose={() => setShowCatalogPicker(false)}
+                    onConfirm={(entries) => {
+                        const ids = entries.map(e => e.id);
+                        setSelectedSeedIds(prev => Array.from(new Set([...prev, ...ids])));
+                        setShowCatalogPicker(false);
+                    }}
+                    multi={true}
+                />
+            )}
         </div>
     );
 };

@@ -35,6 +35,23 @@ export class Concat2DNode extends BaseNode {
         return 3;
     }
 
+    public CanAcceptConnectionFrom(node: BaseNode, isDisconnectedCheck: boolean = false): boolean {
+        if (!super.CanAcceptConnectionFrom(node, isDisconnectedCheck)) return false;
+
+        const targetShape = this.GetInputShape();
+        const incShape = node.GetOutputShape();
+
+        // Concat2D concatenates on the channel axis (index 2)
+        // So H and W (indices 0 and 1) must match exactly
+        if (targetShape && targetShape.length === 3 && incShape && incShape.length === 3) {
+            if (targetShape[0] !== incShape[0] || targetShape[1] !== incShape[1]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
 
 
     public GetNodeType = () => "Concat";

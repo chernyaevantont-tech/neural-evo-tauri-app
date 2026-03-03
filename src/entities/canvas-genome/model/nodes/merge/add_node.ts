@@ -26,6 +26,21 @@ export class AddNode extends BaseNode {
         return "any";
     }
 
+    public CanAcceptConnectionFrom(node: BaseNode, isDisconnectedCheck: boolean = false): boolean {
+        if (!super.CanAcceptConnectionFrom(node, isDisconnectedCheck)) return false;
+
+        const targetShape = this.GetInputShape();
+        const incShape = node.GetOutputShape();
+
+        if (targetShape && targetShape.length > 0 && incShape && incShape.length > 0) {
+            if (targetShape.length !== incShape.length || !targetShape.every((val, index) => val === incShape[index])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public GetOutputDimensions(): number | "any" {
         const checkShape = (this.outputShape && this.outputShape.length > 0) ? this.outputShape : this.inputShape;
         return (checkShape && checkShape.length > 0) ? checkShape.length : "any";

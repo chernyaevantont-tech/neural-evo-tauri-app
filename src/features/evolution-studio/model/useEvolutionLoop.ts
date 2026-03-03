@@ -53,27 +53,87 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
         addLog("Evolution stopped by user.", "warn");
     }, [addLog]);
 
-    // Initial Spawning (from a base JSON or random)
-    const initPopulation = useCallback(async (baseGraphJSON: string, popSize: number = 20) => {
+    // Initial Spawning (from multiple library seeds or a fallback graph)
+    const initPopulation = useCallback(async (seedJSONs: string[], popSize: number = 20) => {
         const genomes: PopulatedGenome[] = [];
         try {
-            for (let i = 0; i < popSize; i++) {
-                // For now, duplicate the base graph.
-                const { genome: newGenome, nodes } = await deserializeGenome(baseGraphJSON);
+            // First pass: instantiate all selected seeds
+            const seedInstances = [];
+            for (const seedStr of seedJSONs) {
+                const { genome, nodes } = await deserializeGenome(seedStr);
+                seedInstances.push(genome);
                 genomes.push({
                     id: crypto.randomUUID(),
                     nodes: nodes,
-                    genome: newGenome
+                    genome: genome
                 });
             }
+
+            // Fallback if no seeds provided (shouldn't happen with UI checks, but just in case)
+            if (seedInstances.length === 0) {
+                addLog("No seeds provided, initialization aborted.", "error");
+                return;
+            }
+
+            // Fill the rest of the population up to popSize by mutating the seeds
+            while (genomes.length < popSize) {
+                // Pick a random seed
+                const baseSeed = seedInstances[Math.floor(Math.random() * seedInstances.length)];
+
+                // Clone the seed
+                const seedStr = await serializeGenome(baseSeed);
+                const { genome: clone } = await deserializeGenome(seedStr);
+
+                // Heavily mutate the clone to build initial diversity
+                // Use adaptive rates or base rates
+                const dynamicRates = settings.useAdaptiveMutation
+                    ? getAdaptiveMutationRates(clone.getAllNodes().length)
+                    : {
+                        addNode: settings.mutationRates.addNode,
+                        removeNode: settings.mutationRates.removeNode,
+                        removeSubgraph: settings.mutationRates.removeSubgraph
+                    };
+
+                // Apply a few rounds of mutation to drift away from the seed
+                const mutationRounds = Math.floor(Math.random() * 3) + 1;
+                const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
+
+                for (let r = 0; r < mutationRounds; r++) {
+                    let mutated = false;
+                    if (Math.random() < dynamicRates.removeSubgraph) {
+                        const res = clone.MutateRemoveSubgraph();
+                        if (res) mutated = true;
+                    }
+                    if (!mutated && Math.random() < dynamicRates.removeNode) {
+                        const res = clone.MutateRemoveNode();
+                        if (res) mutated = true;
+                    }
+                    if (!mutated && Math.random() < dynamicRates.addNode) {
+                        const res = clone.MutateAddNode(maxNodes);
+                        if (res) mutated = true;
+                    }
+                }
+
+                genomes.push({
+                    id: crypto.randomUUID(),
+                    genome: clone,
+                    nodes: clone.getAllNodes()
+                });
+            }
+
+            // If we have more seeds than popSize, truncate
+            if (genomes.length > popSize) {
+                genomes.length = popSize;
+            }
+
             setPopulation(genomes);
             setGeneration(0);
             setStats([]);
-            addLog(`Spawned Generation 0 with ${popSize} identical seeds.`, "info");
+            addLog(`Spawned Generation 0: ${seedJSONs.length} direct seeds, ${popSize - seedJSONs.length} mutated clones.`, "info");
         } catch (e) {
             addLog(`Failed to initialize population: ${String(e)}`, "error");
         }
-    }, [addLog]);
+    }, [addLog, settings]);
 
     // Main Async Loop
     const runGeneration = useCallback(async () => {
@@ -239,18 +299,22 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
 
     }, [datasetProfileId, generation, population, settings, addLog, stopEvolution]);
 
-    const startEvolution = useCallback((baseJSON?: string) => {
+    const startEvolution = useCallback((seedGenomes: string[]) => {
         if (!datasetProfileId) {
             addLog("Cannot start: No dataset selected!", "error");
             return;
         }
+
+        if (seedGenomes.length === 0) {
+            addLog("Cannot start: No seeds provided!", "error");
+            return;
+        }
+
         setIsRunning(true);
         isRunningRef.current = true;
 
-        if (baseJSON) {
-            initPopulation(baseJSON);
-            // The generation loop will trigger via a useEffect watching population/isRunning later
-        }
+        initPopulation(seedGenomes);
+        // The generation loop will trigger via a useEffect watching population/isRunning later
     }, [datasetProfileId, addLog, initPopulation]);
 
     return {
