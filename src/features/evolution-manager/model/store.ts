@@ -50,6 +50,8 @@ export interface EvolutionSettingsState {
     setBatchSize: (val: number) => void;
     evalEpochs: number;
     setEvalEpochs: (val: number) => void;
+    datasetPercent: number;
+    setDatasetPercent: (val: number) => void;
 }
 
 export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) => ({
@@ -106,6 +108,8 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
     setBatchSize: (val) => set({ batchSize: val }),
     evalEpochs: 1,
     setEvalEpochs: (val) => set({ evalEpochs: val }),
+    datasetPercent: 100,
+    setDatasetPercent: (val) => set({ datasetPercent: Math.max(1, Math.min(100, val)) }),
 }));
 
 export function getAdaptiveMutationRates(currentNodes: number) {

@@ -1,5 +1,9 @@
 use serde::Deserialize;
 
+fn default_relu() -> String {
+    "relu".to_string()
+}
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct KernelSizeDto {
     pub h: u8,
@@ -16,6 +20,8 @@ pub enum NodeDtoJSON {
         padding: u8,
         dilation: u8,
         use_bias: bool,
+        #[serde(default = "default_relu")]
+        activation: String,
     },
     Dense {
         units: u64,

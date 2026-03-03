@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-    BaseNode, 
-    Conv2DNode, 
-    DenseNode, 
-    FlattenNode, 
-    InputNode, 
-    OutputNode,
-    PoolingNode,
-    AddNode,
-    Concat2DNode,
-    ActivationFunction, 
-    KernelSize, 
-    PoolType
+import {
+  BaseNode,
+  Conv2DNode,
+  DenseNode,
+  FlattenNode,
+  InputNode,
+  OutputNode,
+  PoolingNode,
+  AddNode,
+  Concat2DNode,
+  ActivationFunction,
+  KernelSize,
+  PoolType
 } from "../../../../entities/canvas-genome";
 import { Modal, Button } from '../../../../shared';
 import styles from './EditNodeModal.module.css';
@@ -58,6 +58,7 @@ export const EditNodeModal: React.FC<EditNodeModalProps> = ({
   const [padding, setPadding] = useState<number>(0);
   const [dilation, setDilation] = useState<number>(1);
   const [convUseBias, setConvUseBias] = useState<boolean>(true);
+  const [convActivation, setConvActivation] = useState<ActivationFunction>('relu');
   const [poolType, setPoolType] = useState<PoolType>('max');
   const [poolKernelH, setPoolKernelH] = useState<number>(2);
   const [poolKernelW, setPoolKernelW] = useState<number>(2);
@@ -92,6 +93,7 @@ export const EditNodeModal: React.FC<EditNodeModalProps> = ({
       setPadding(params.padding);
       setDilation(params.dilation);
       setConvUseBias(params.use_bias);
+      setConvActivation(params.activation || 'relu');
     } else if (node instanceof PoolingNode) {
       setPoolType(params.pool_type);
       setPoolKernelH(params.kernel_size.h);
@@ -118,7 +120,7 @@ export const EditNodeModal: React.FC<EditNodeModalProps> = ({
           break;
         case 'Conv2D':
           const kernelSize: KernelSize = { h: kernelH, w: kernelW };
-          newNode = new Conv2DNode(filters, kernelSize, stride, padding, dilation, convUseBias);
+          newNode = new Conv2DNode(filters, kernelSize, stride, padding, dilation, convUseBias, convActivation);
           break;
         case 'Pooling':
           const poolKernelSize: KernelSize = { h: poolKernelH, w: poolKernelW };
@@ -269,6 +271,14 @@ export const EditNodeModal: React.FC<EditNodeModalProps> = ({
       </FormField>
       <FormField label="Use Bias">
         <input type="checkbox" checked={convUseBias} onChange={(e) => setConvUseBias(e.target.checked)} />
+      </FormField>
+      <FormField label="Activation">
+        <select className={styles.select} value={convActivation} onChange={(e) => setConvActivation(e.target.value as ActivationFunction)}>
+          <option value="relu">ReLU</option>
+          <option value="leaky_relu">Leaky ReLU</option>
+          <option value="sigmoid">Sigmoid</option>
+          <option value="linear">Linear (None)</option>
+        </select>
       </FormField>
     </>
   );

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useEvolutionSettingsStore, getAdaptiveMutationRates } from '../../evolution-manager/model/store';
+import { useDatasetManagerStore } from '../../../features/dataset-manager/model/store';
 import { Genome, BaseNode, serializeGenome, deserializeGenome } from '../../../entities/canvas-genome';
 
 export interface EvaluationResult {
@@ -173,12 +174,23 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
 
             addLog(`Sending ${serializedGenomes.length} genomes to Rust for evaluation...`);
 
+            // Look up dataset split percentages from the dataset manager
+            const profiles = useDatasetManagerStore.getState().profiles;
+            const currentProfile = profiles.find(p => p.id === datasetProfileId);
+            const trainSplit = currentProfile?.split?.train ?? 80;
+            const valSplit = currentProfile?.split?.val ?? 10;
+            const testSplit = currentProfile?.split?.test ?? 10;
+
             // 2. Call Rust Evaluator
             const results = await invoke<EvaluationResult[]>('evaluate_population', {
                 genomes: serializedGenomes,
                 datasetProfile: datasetProfileId,
-                batchSize: settings.batchSize || 32, // Grab from settings or default to 32
-                evalEpochs: settings.evalEpochs || 1   // Default to 1 epoch per generation
+                batchSize: settings.batchSize || 32,
+                evalEpochs: settings.evalEpochs || 1,
+                datasetPercent: settings.datasetPercent || 100,
+                trainSplit,
+                valSplit,
+                testSplit,
             });
 
             // 3. Map Results & Apply Parsimony Pressure (Bloat Control)
@@ -368,11 +380,47 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             return;
         }
 
+        // Validate dataset percentage vs splits
+        const profiles = useDatasetManagerStore.getState().profiles;
+        const profile = profiles.find(p => p.id === datasetProfileId);
+        if (profile) {
+            const totalSamples = profile.totalSamples || profile.scanResult?.totalMatched || 0;
+            const usedSamples = Math.floor((totalSamples * (settings.datasetPercent || 100)) / 100);
+            const { train, val, test } = profile.split;
+            const splitSum = train + val + test;
+
+            if (splitSum > 0 && usedSamples > 0) {
+                const trainCount = Math.floor((usedSamples * train) / splitSum);
+                const valCount = Math.floor((usedSamples * val) / splitSum);
+                const testCount = Math.floor((usedSamples * test) / splitSum);
+
+                const errors: string[] = [];
+                if (train > 0 && trainCount < 1) errors.push(`Train (${train}%): 0 samples`);
+                if (val > 0 && valCount < 1) errors.push(`Validation (${val}%): 0 samples`);
+                if (test > 0 && testCount < 1) errors.push(`Test (${test}%): 0 samples`);
+
+                if (errors.length > 0) {
+                    addLog(
+                        `Cannot start: Dataset percentage ${settings.datasetPercent}% (${usedSamples} samples) ` +
+                        `is too low for the configured splits. ${errors.join('; ')}. ` +
+                        `Increase Dataset Usage % or adjust splits in Dataset Manager.`,
+                        "error"
+                    );
+                    return;
+                }
+
+                addLog(
+                    `Dataset: ${usedSamples} samples → Train: ${trainCount}, Val: ${valCount}, Test: ${testCount}`,
+                    "info"
+                );
+            }
+        }
+
         setIsRunning(true);
         isRunningRef.current = true;
 
         initPopulation(seedGenomes);
-    }, [datasetProfileId, addLog, initPopulation]);
+    }, [datasetProfileId, addLog, initPopulation, settings]);
 
     useEffect(() => {
         if (isRunning && population.length > 0) {

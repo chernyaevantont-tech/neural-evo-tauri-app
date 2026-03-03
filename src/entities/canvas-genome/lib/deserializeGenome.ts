@@ -1,21 +1,21 @@
-import { 
-    Genome, 
-    BaseNode, 
-    Conv2DNode, 
-    DenseNode, 
-    FlattenNode, 
-    InputNode, 
+import {
+    Genome,
+    BaseNode,
+    Conv2DNode,
+    DenseNode,
+    FlattenNode,
+    InputNode,
     OutputNode,
     PoolingNode,
     AddNode,
     Concat2DNode
 } from "..";
 
-export type ConnectionIndexes = {fromIndex: number, toIndex: number}[];
+export type ConnectionIndexes = { fromIndex: number, toIndex: number }[];
 
 export const deserializeGenome = async (genomeStr: string): Promise<{
-    nodes: BaseNode[], 
-    genome: Genome, 
+    nodes: BaseNode[],
+    genome: Genome,
 }> => {
     const rows = genomeStr.split("\n");
 
@@ -47,7 +47,8 @@ export const deserializeGenome = async (genomeStr: string): Promise<{
                     const padding = obj.params.padding;
                     const dilation = obj.params.dilation;
                     const use_bias = obj.params.use_bias;
-                    nodes.push(new Conv2DNode(filters, kernel_size, stride, padding, dilation, use_bias));
+                    const activation = obj.params.activation || 'relu';
+                    nodes.push(new Conv2DNode(filters, kernel_size, stride, padding, dilation, use_bias, activation));
                     break;
                 }
             case "Pooling":
@@ -93,15 +94,15 @@ export const deserializeGenome = async (genomeStr: string): Promise<{
         const indexes = rows[rowIndex].split(" ");
         if (indexes.length != 2) {
             throw new Error("Wrong connections row");
-        }   
+        }
         const fromNodeIndex = Number.parseInt(indexes[0]);
         const toNodeIndex = Number.parseInt(indexes[1]);
-        
+
         nodes[fromNodeIndex].AddNext(nodes[toNodeIndex]);
     }
 
     const inputNodes: BaseNode[] = [];
-    const outputNodes: BaseNode[] = []; 
+    const outputNodes: BaseNode[] = [];
     for (let node of nodes) {
         if (node.previous.length == 0) {
             inputNodes.push(node);

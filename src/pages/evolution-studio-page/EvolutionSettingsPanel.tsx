@@ -210,6 +210,49 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
                     </div>
                 )}
             </div>
+
+            {/* Training Parameters */}
+            <div className={styles.section}>
+                <h4 className={styles.sectionTitle}>Training Parameters</h4>
+                <div className={styles.subSetting}>
+                    <span className={styles.subLabel}>Batch Size</span>
+                    <input
+                        type="number"
+                        min="1"
+                        max="512"
+                        className={styles.numberInput}
+                        value={settings.batchSize}
+                        onChange={e => settings.setBatchSize(parseInt(e.target.value) || 32)}
+                        disabled={disabled}
+                    />
+                </div>
+                <div className={styles.subSetting}>
+                    <span className={styles.subLabel}>Epochs per Genome</span>
+                    <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        className={styles.numberInput}
+                        value={settings.evalEpochs}
+                        onChange={e => settings.setEvalEpochs(parseInt(e.target.value) || 1)}
+                        disabled={disabled}
+                    />
+                </div>
+                <div className={styles.subSetting}>
+                    <span className={styles.subLabel}>Dataset Usage</span>
+                    <div className={styles.sliderControl}>
+                        <input
+                            type="range"
+                            min="1" max="100" step="1"
+                            value={settings.datasetPercent}
+                            onChange={e => settings.setDatasetPercent(parseInt(e.target.value))}
+                            className={styles.slider}
+                            disabled={disabled}
+                        />
+                        <span className={styles.sliderValue}>{settings.datasetPercent}%</span>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };

@@ -11,6 +11,7 @@ export class Conv2DNode extends BaseNode {
     private padding: number
     private dilation: number
     private useBias: boolean
+    private activation: string
 
     constructor(
         filters: number,
@@ -18,7 +19,8 @@ export class Conv2DNode extends BaseNode {
         stride: number,
         padding: number,
         dilation: number,
-        useBias: boolean
+        useBias: boolean,
+        activation: string = 'relu'
     ) {
         super();
 
@@ -28,6 +30,7 @@ export class Conv2DNode extends BaseNode {
         this.padding = padding;
         this.dilation = dilation;
         this.useBias = useBias;
+        this.activation = activation;
         this.inputShape = new Array<number>(3);
     }
 
@@ -46,7 +49,8 @@ export class Conv2DNode extends BaseNode {
                 stride: this.stride,
                 padding: this.padding,
                 dilation: this.dilation,
-                use_bias: this.useBias
+                use_bias: this.useBias,
+                activation: this.activation
             }
         })
     }
@@ -88,6 +92,11 @@ export class Conv2DNode extends BaseNode {
             this.useBias = !this.useBias
         }
 
+        if (Math.random() <= (mutation_options.get("conv2d_activation") || -1)) {
+            const activations = ['relu', 'leaky_relu', 'sigmoid', 'linear'];
+            this.activation = activations[RandomizeInteger(0, activations.length - 1)];
+        }
+
         this.CalculateOutputShape()
     }
 
@@ -107,7 +116,8 @@ export class Conv2DNode extends BaseNode {
         this.stride,
         this.padding,
         this.dilation,
-        this.useBias
+        this.useBias,
+        this.activation
     );
 
     public GetIsMerging = (): boolean => false;

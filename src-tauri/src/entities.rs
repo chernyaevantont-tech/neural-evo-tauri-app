@@ -61,6 +61,7 @@ pub enum Operation {
     },
     Conv2D {
         layer_idx: usize,
+        activation: String,
     },
     MaxPool {
         layer_idx: usize,
@@ -162,7 +163,12 @@ impl<B: Backend> GraphModel<B> {
     /// 1 2
     /// ...
     /// ```
-    pub fn build(raw_data: &str, device: &B::Device) -> Self {
+    pub fn build(
+        raw_data: &str,
+        device: &B::Device,
+        input_shape_overrides: Option<&[Vec<usize>]>,
+        output_shape_overrides: Option<&[Vec<usize>]>,
+    ) -> Self {
         let mut configs = Vec::new();
         let mut edges = Vec::new();
         let mut parsing_connections = false;
@@ -218,7 +224,7 @@ impl<B: Backend> GraphModel<B> {
         }
 
         let mut layers = Vec::new();
-        let mut execution_plan = Vec::new();
+        let mut execution_plan: Vec<Instruction> = Vec::new();
         let mut shape_cache = vec![vec![]; num_nodes];
 
         let mut num_inputs = 0;
@@ -239,6 +245,7 @@ impl<B: Backend> GraphModel<B> {
                     padding,
                     dilation,
                     use_bias,
+                    activation,
                 } => {
                     let prev_shape = &shape_cache[inputs_for_node[0]];
                     let d_input = prev_shape[0];
@@ -271,6 +278,7 @@ impl<B: Backend> GraphModel<B> {
                     (
                         Operation::Conv2D {
                             layer_idx: layers.len() - 1,
+                            activation: activation.clone(),
                         },
                         vec![*filters as usize, h_out, w_out],
                     )
@@ -309,15 +317,33 @@ impl<B: Backend> GraphModel<B> {
 
                 NodeDtoJSON::Input { output_shape } => {
                     let op = Operation::Input(num_inputs);
+                    let input_idx = num_inputs;
                     num_inputs += 1;
-                    let shape: Vec<usize> = output_shape.iter().map(|&v| v as usize).collect();
-                    input_shapes.push(shape.clone());
 
-                    // Convert frontend [H, W, C] to internal [C, H, W] for burn
-                    let internal_shape = if shape.len() == 3 {
-                        vec![shape[2], shape[0], shape[1]]
+                    // Use override if provided, otherwise fall back to genome JSON
+                    let internal_shape = if let Some(overrides) = input_shape_overrides {
+                        if input_idx < overrides.len() {
+                            let ov = &overrides[input_idx];
+                            input_shapes.push(ov.clone());
+                            ov.clone() // Already in [C, H, W] format from caller
+                        } else {
+                            let shape: Vec<usize> =
+                                output_shape.iter().map(|&v| v as usize).collect();
+                            input_shapes.push(shape.clone());
+                            if shape.len() == 3 {
+                                vec![shape[2], shape[0], shape[1]]
+                            } else {
+                                shape
+                            }
+                        }
                     } else {
-                        shape.clone()
+                        let shape: Vec<usize> = output_shape.iter().map(|&v| v as usize).collect();
+                        input_shapes.push(shape.clone());
+                        if shape.len() == 3 {
+                            vec![shape[2], shape[0], shape[1]]
+                        } else {
+                            shape
+                        }
                     };
 
                     (op, internal_shape)
@@ -325,9 +351,88 @@ impl<B: Backend> GraphModel<B> {
 
                 NodeDtoJSON::Output { input_shape } => {
                     let op = Operation::Output(num_outputs);
+                    let output_idx = num_outputs;
                     num_outputs += 1;
-                    let shape: Vec<usize> = input_shape.iter().map(|&v| v as usize).collect();
-                    output_shapes.push(shape.clone());
+
+                    let shape = if let Some(overrides) = output_shape_overrides {
+                        if output_idx < overrides.len() {
+                            let ov = overrides[output_idx].clone();
+
+                            // Format the predecessor Dense layer to match new output requirements
+                            if inputs_for_node.len() == 1 {
+                                let pred_id = inputs_for_node[0];
+                                let pred_shape = &shape_cache[pred_id];
+
+                                // Find the Dense layer for the predecessor
+                                if let Some(instr) =
+                                    execution_plan.iter().find(|i| i.node_id == pred_id)
+                                {
+                                    if let Operation::Dense { layer_idx, .. } = &instr.op {
+                                        let layer_idx_val = *layer_idx;
+                                        let pred_inputs = &node_inputs[pred_id];
+
+                                        // 1. Rebuild linear layer if units don't match dataset classes
+                                        if pred_shape.len() == 1
+                                            && ov.len() == 1
+                                            && pred_shape[0] != ov[0]
+                                        {
+                                            let d_input = if !pred_inputs.is_empty() {
+                                                shape_cache[pred_inputs[0]][0]
+                                            } else {
+                                                pred_shape[0] // Fallback
+                                            };
+                                            let new_linear =
+                                                burn::nn::LinearConfig::new(d_input, ov[0])
+                                                    .with_initializer(
+                                                        burn::nn::Initializer::KaimingNormal {
+                                                            gain: 1.0,
+                                                            fan_out_only: false,
+                                                        },
+                                                    )
+                                                    .init(device);
+                                            layers[layer_idx_val] = Layer::Dense(new_linear);
+                                            shape_cache[pred_id] = ov.clone();
+
+                                            eprintln!(
+                                                ">>> Overrode predecessor Dense (node {}) to {} units",
+                                                pred_id, ov[0]
+                                            );
+                                        }
+
+                                        // 2. ALWAYS force "linear" activation on pre-Output Dense
+                                        // CrossEntropyLoss applies log_softmax internally,
+                                        // so the last Dense must output raw logits.
+                                        if let Some(instr_mut) =
+                                            execution_plan.iter_mut().find(|i| i.node_id == pred_id)
+                                        {
+                                            if let Operation::Dense { activation, .. } =
+                                                &mut instr_mut.op
+                                            {
+                                                if activation != "linear" {
+                                                    eprintln!(
+                                                        ">>> Forcing pre-Output Dense (node {}) activation from '{}' to 'linear'",
+                                                        pred_id, activation
+                                                    );
+                                                    *activation = "linear".to_string();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            output_shapes.push(ov.clone());
+                            ov
+                        } else {
+                            let s: Vec<usize> = input_shape.iter().map(|&v| v as usize).collect();
+                            output_shapes.push(s.clone());
+                            s
+                        }
+                    } else {
+                        let s: Vec<usize> = input_shape.iter().map(|&v| v as usize).collect();
+                        output_shapes.push(s.clone());
+                        s
+                    };
                     (op, shape)
                 }
 
@@ -391,6 +496,18 @@ impl<B: Backend> GraphModel<B> {
                     (Operation::Concat, out_shape)
                 }
             };
+
+            // Polymorphic spatial validation: catch any dimension collapsing to 0
+            if out_shape.iter().any(|&d| d == 0) {
+                eprintln!(
+                    ">>> WARNING: Node {} ({:?}) produced a zero-dimension shape {:?}. Skipping genome.",
+                    node_id, op, out_shape
+                );
+                panic!(
+                    "Spatial dimension collapsed to 0 at node {} ({:?}), shape: {:?}",
+                    node_id, op, out_shape
+                );
+            }
 
             println!(
                 "Compiled Node {node_id}: {:?} -> Out Shape: {:?}",
@@ -476,11 +593,22 @@ impl<B: Backend> GraphModel<B> {
                     }
                 }
 
-                Operation::Conv2D { layer_idx } => {
+                Operation::Conv2D {
+                    layer_idx,
+                    activation,
+                } => {
                     if let (DynamicTensor::Dim4(x), Layer::Conv2d(conv)) =
                         (consume!(instr.input_ids[0]), &self.layers[*layer_idx])
                     {
-                        DynamicTensor::Dim4(conv.forward(x))
+                        let mut out = conv.forward(x);
+                        out = match activation.as_str() {
+                            "relu" => burn::tensor::activation::relu(out),
+                            "leaky_relu" => burn::tensor::activation::leaky_relu(out, 0.01),
+                            "sigmoid" => burn::tensor::activation::sigmoid(out),
+                            "linear" | "none" => out,
+                            _ => burn::tensor::activation::relu(out), // default to relu
+                        };
+                        DynamicTensor::Dim4(out)
                     } else {
                         unreachable!("Conv2D требует 4D тензор")
                     }
@@ -969,28 +1097,56 @@ pub fn run_eval_pass<B: AutodiffBackend>(
     let mut final_loss = 999.0;
     let mut final_acc = 0.0;
 
-    for _epoch in 0..num_epochs {
+    let total_batches = batches.len();
+    let log_interval = (total_batches / 10).max(1);
+
+    for epoch in 0..num_epochs {
         let mut train_loss_sum = 0.0f32;
         let mut train_correct = 0;
         let mut train_total = 0;
 
-        for batch in batches.iter() {
-            let predictions = model.forward_internal(&batch.inputs, false);
-            let loss = model.compute_loss(&predictions, &batch.targets);
+        for (batch_idx, batch) in batches.iter().enumerate() {
+            // Clone inputs/targets so the autodiff graph is fresh each pass
+            let cloned_inputs: Vec<DynamicTensor<B>> =
+                batch.inputs.iter().map(|t| t.clone()).collect();
+            let cloned_targets: Vec<DynamicTensor<B>> =
+                batch.targets.iter().map(|t| t.clone()).collect();
+
+            let predictions = model.forward_internal(&cloned_inputs, false);
+            let loss = model.compute_loss(&predictions, &cloned_targets);
 
             let grads = loss.backward();
             let grads_params = burn::optim::GradientsParams::from_grads(grads, model);
 
             *model = optim.step(learning_rate, model.clone(), grads_params);
 
-            train_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];
+            let loss_val = loss.into_data().to_vec::<f32>().unwrap()[0];
+            train_loss_sum += loss_val;
 
-            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets);
+            let (batch_correct, batch_total) = compute_accuracy(&predictions, &cloned_targets);
             train_correct += batch_correct;
             train_total += batch_total;
+
+            if batch_idx % log_interval == 0 || batch_idx == total_batches - 1 {
+                let current_avg_loss = train_loss_sum / (batch_idx + 1) as f32;
+                let current_acc = if train_total > 0 {
+                    (train_correct as f32 / train_total as f32) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "  [Epoch {}/{}] Batch {}/{}: Loss = {:.4}, Acc = {:>5.2}%",
+                    epoch + 1,
+                    num_epochs,
+                    batch_idx + 1,
+                    total_batches,
+                    current_avg_loss,
+                    current_acc
+                );
+            }
         }
 
-        final_loss = train_loss_sum / batches.len().max(1) as f32;
+        final_loss = train_loss_sum / total_batches.max(1) as f32;
         final_acc = if train_total > 0 {
             (train_correct as f32 / train_total as f32) * 100.0
         } else {
@@ -999,4 +1155,45 @@ pub fn run_eval_pass<B: AutodiffBackend>(
     }
 
     (final_loss, final_acc)
+}
+
+/// Inference-only pass on validation/test batches. No gradients, no weight updates.
+#[allow(clippy::type_complexity)]
+pub fn run_validation_pass<B: AutodiffBackend>(
+    model: &GraphModel<B>,
+    batches: &[DynamicBatch<B>],
+    split_name: &str,
+) -> (f32, f32) {
+    let mut val_loss_sum = 0.0f32;
+    let mut val_correct = 0usize;
+    let mut val_total = 0usize;
+
+    for batch in batches {
+        let cloned_inputs: Vec<DynamicTensor<B>> = batch.inputs.iter().map(|t| t.clone()).collect();
+        let cloned_targets: Vec<DynamicTensor<B>> =
+            batch.targets.iter().map(|t| t.clone()).collect();
+
+        let predictions = model.forward_internal(&cloned_inputs, false);
+        let loss = model.compute_loss(&predictions, &cloned_targets);
+
+        val_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];
+
+        let (batch_correct, batch_total) = compute_accuracy(&predictions, &cloned_targets);
+        val_correct += batch_correct;
+        val_total += batch_total;
+    }
+
+    let avg_loss = val_loss_sum / batches.len().max(1) as f32;
+    let acc = if val_total > 0 {
+        (val_correct as f32 / val_total as f32) * 100.0
+    } else {
+        0.0
+    };
+
+    eprintln!(
+        "  [{}] Loss = {:.4}, Acc = {:.2}%",
+        split_name, avg_loss, acc
+    );
+
+    (avg_loss, acc)
 }
