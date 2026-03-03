@@ -1012,38 +1012,54 @@ export class Genome {
                     nodesToCheck.push(...currentNode.next);
                 }
 
-                // Wiring
-                for (let i = 0; i < newNodes.length; i++) {
-                    const oldNode = oldNodes[i];
-                    const newNode = newNodes[i];
+                try {
+                    // Wiring main paths first
+                    for (let i = 0; i < newNodes.length; i++) {
+                        const oldNode = oldNodes[i];
+                        const newNode = newNodes[i];
 
-                    if (oldNode.id === prevOrig.id) {
-                        for (let oldNext of oldNode.next) {
-                            if (oldNext.id === targetOrig.id) {
-                                newNode.AddNext(addNode);
-                            } else {
+                        if (oldNode.id === prevOrig.id) {
+                            for (let oldNext of oldNode.next) {
+                                if (oldNext.id === targetOrig.id) {
+                                    // IMPORTANT: Connect the main path FIRST so AddNode establishes correct input shape
+                                    newNode.AddNext(addNode);
+                                } else {
+                                    newNode.AddNext(oldNewNode.get(oldNext)!);
+                                }
+                            }
+                        } else if (oldNode.id === sourceOrig.id) {
+                            for (let oldNext of oldNode.next) {
+                                newNode.AddNext(oldNewNode.get(oldNext)!);
+                            }
+                        } else {
+                            for (let oldNext of oldNode.next) {
                                 newNode.AddNext(oldNewNode.get(oldNext)!);
                             }
                         }
-                    } else if (oldNode.id === sourceOrig.id) {
-                        for (let oldNext of oldNode.next) {
-                            newNode.AddNext(oldNewNode.get(oldNext)!);
-                        }
+                    }
 
-                        let tail = newNode;
-                        for (const ad of adapters) {
-                            tail.AddNext(ad);
-                            tail = ad;
-                        }
-                        tail.AddNext(addNode);
-                    } else {
-                        for (let oldNext of oldNode.next) {
-                            newNode.AddNext(oldNewNode.get(oldNext)!);
+                    // Wiring skip connection (second phase adapter path)
+                    for (let i = 0; i < newNodes.length; i++) {
+                        const oldNode = oldNodes[i];
+                        const newNode = newNodes[i];
+
+                        if (oldNode.id === sourceOrig.id) {
+                            let tail = newNode;
+                            for (const ad of adapters) {
+                                tail.AddNext(ad);
+                                tail = ad;
+                            }
+                            // Now connect the skip connection to AddNode which already has its shape from the main path
+                            tail.AddNext(addNode);
+                            break;
                         }
                     }
-                }
 
-                addNode.AddNext(oldNewNode.get(targetOrig)!);
+                    addNode.AddNext(oldNewNode.get(targetOrig)!);
+                } catch (connectionError) {
+                    console.warn(`[MutateAddSkipConnection] Connection rejected due to shape mismatch:`, connectionError);
+                    continue; // Skip this pair and try another one
+                }
 
                 newNodes.push(addNode, ...adapters);
 

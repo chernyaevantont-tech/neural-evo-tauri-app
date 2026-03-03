@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useEvolutionSettingsStore, getAdaptiveMutationRates } from '../../evolution-manager/model/store';
 import { Genome, BaseNode, serializeGenome, deserializeGenome } from '../../../entities/canvas-genome';
@@ -76,49 +76,73 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             }
 
             // Fill the rest of the population up to popSize by mutating the seeds
-            while (genomes.length < popSize) {
-                // Pick a random seed
-                const baseSeed = seedInstances[Math.floor(Math.random() * seedInstances.length)];
+            let initAttempts = 0;
+            while (genomes.length < popSize && initAttempts < popSize * 10) {
+                initAttempts++;
+                try {
+                    // Pick a random seed
+                    const baseSeed = seedInstances[Math.floor(Math.random() * seedInstances.length)];
 
-                // Clone the seed
-                const seedStr = await serializeGenome(baseSeed);
-                const { genome: clone } = await deserializeGenome(seedStr);
+                    // Clone the seed
+                    const seedStr = await serializeGenome(baseSeed);
+                    let { genome: clone } = await deserializeGenome(seedStr);
 
-                // Heavily mutate the clone to build initial diversity
-                // Use adaptive rates or base rates
-                const dynamicRates = settings.useAdaptiveMutation
-                    ? getAdaptiveMutationRates(clone.getAllNodes().length)
-                    : {
-                        addNode: settings.mutationRates.addNode,
-                        removeNode: settings.mutationRates.removeNode,
-                        removeSubgraph: settings.mutationRates.removeSubgraph
-                    };
+                    // Heavily mutate the clone to build initial diversity
+                    // Apply a few rounds of mutation to drift away from the seed
+                    const mutationRounds = Math.floor(Math.random() * 3) + 1;
+                    const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
 
-                // Apply a few rounds of mutation to drift away from the seed
-                const mutationRounds = Math.floor(Math.random() * 3) + 1;
-                const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
+                    for (let r = 0; r < mutationRounds; r++) {
+                        const dynamicRates = settings.useAdaptiveMutation
+                            ? getAdaptiveMutationRates(clone.getAllNodes().length)
+                            : {
+                                addNode: settings.mutationRates.addNode,
+                                removeNode: settings.mutationRates.removeNode,
+                                removeSubgraph: settings.mutationRates.removeSubgraph
+                            };
 
-                for (let r = 0; r < mutationRounds; r++) {
-                    let mutated = false;
-                    if (Math.random() < dynamicRates.removeSubgraph) {
-                        const res = clone.MutateRemoveSubgraph();
-                        if (res) mutated = true;
+                        if (Math.random() < dynamicRates.removeSubgraph) {
+                            const res = clone.MutateRemoveSubgraph();
+                            if (res) clone = res.genome;
+                        }
+                        if (Math.random() < dynamicRates.removeNode) {
+                            const res = clone.MutateRemoveNode();
+                            if (res) clone = res.genome;
+                        }
+                        if (Math.random() < dynamicRates.addNode) {
+                            const res = clone.MutateAddNode(maxNodes);
+                            if (res) clone = res.genome;
+                        }
+                        if (settings.mutationRates.addSkipConnection && Math.random() < settings.mutationRates.addSkipConnection) {
+                            const res = clone.MutateAddSkipConnection(maxNodes);
+                            if (res) clone = res.genome;
+                        }
+                        if (settings.mutationRates.changeLayerType && Math.random() < settings.mutationRates.changeLayerType) {
+                            const res = clone.MutateChangeLayerType(maxNodes);
+                            if (res) clone = res.genome;
+                        }
+
+                        // Params mutation
+                        if (settings.mutationRates.params && Math.random() < settings.mutationRates.params) {
+                            const mutationOpts = new Map<string, number>();
+                            mutationOpts.set('params', settings.mutationRates.params);
+                            clone.getAllNodes().forEach(node => {
+                                if (typeof (node as any).Mutate === 'function') {
+                                    (node as any).Mutate(mutationOpts);
+                                }
+                            });
+                        }
                     }
-                    if (!mutated && Math.random() < dynamicRates.removeNode) {
-                        const res = clone.MutateRemoveNode();
-                        if (res) mutated = true;
-                    }
-                    if (!mutated && Math.random() < dynamicRates.addNode) {
-                        const res = clone.MutateAddNode(maxNodes);
-                        if (res) mutated = true;
-                    }
+
+                    genomes.push({
+                        id: crypto.randomUUID(),
+                        genome: clone,
+                        nodes: clone.getAllNodes()
+                    });
+                } catch (e) {
+                    console.warn(`[initPopulation] Seed mutation failed (likely shape mismatch). Attempt ${initAttempts}/${popSize * 10}`, e);
+                    continue;
                 }
-
-                genomes.push({
-                    id: crypto.randomUUID(),
-                    genome: clone,
-                    nodes: clone.getAllNodes()
-                });
             }
 
             // If we have more seeds than popSize, truncate
@@ -152,7 +176,9 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             // 2. Call Rust Evaluator
             const results = await invoke<EvaluationResult[]>('evaluate_population', {
                 genomes: serializedGenomes,
-                datasetProfile: datasetProfileId
+                datasetProfile: datasetProfileId,
+                batchSize: settings.batchSize || 32, // Grab from settings or default to 32
+                evalEpochs: settings.evalEpochs || 1   // Default to 1 epoch per generation
             });
 
             // 3. Map Results & Apply Parsimony Pressure (Bloat Control)
@@ -219,66 +245,98 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
 
             const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
 
-            while (nextGen.length < popSize) {
-                const parentA = tournamentSelect()!.genome;
-                const parentB = tournamentSelect()!.genome;
+            let breedAttempts = 0;
+            while (nextGen.length < popSize && breedAttempts < popSize * 10) {
+                breedAttempts++;
+                try {
+                    const parentA = tournamentSelect()!.genome;
+                    const parentB = tournamentSelect()!.genome;
 
-                // Crossover
-                let childGenome: Genome | null = null;
-                const activeStrategies = settings.selectedCrossovers.filter(s =>
-                    s === 'subgraph-insertion' || s === 'subgraph-replacement' || s === 'neat-style' || s === 'multi-point'
-                );
+                    // Crossover
+                    let childGenome: Genome | null = null;
+                    const activeStrategies = settings.selectedCrossovers.filter(s =>
+                        s === 'subgraph-insertion' || s === 'subgraph-replacement' || s === 'neat-style' || s === 'multi-point'
+                    );
 
-                if (activeStrategies.length > 0) {
-                    const strategy = activeStrategies[Math.floor(Math.random() * activeStrategies.length)];
-                    try {
-                        if (strategy === 'subgraph-replacement') {
-                            const res = parentA.BreedByReplacement(parentB, maxNodes);
-                            if (res) childGenome = res.genome;
-                        } else {
-                            const res = parentA.Breed(parentB, maxNodes);
-                            if (res) childGenome = res.genome;
+                    if (activeStrategies.length > 0) {
+                        const strategy = activeStrategies[Math.floor(Math.random() * activeStrategies.length)];
+                        try {
+                            if (strategy === 'subgraph-replacement') {
+                                const res = parentA.BreedByReplacement(parentB, maxNodes);
+                                if (res) childGenome = res.genome;
+                            } else if (strategy === 'neat-style') {
+                                const res = parentA.BreedNeatStyle(parentB, maxNodes);
+                                if (res) childGenome = res.genome;
+                            } else if (strategy === 'multi-point') {
+                                const res = parentA.BreedMultiPoint(parentB, maxNodes);
+                                if (res) childGenome = res.genome;
+                            } else {
+                                // Default 'subgraph-insertion'
+                                const res = parentA.Breed(parentB, maxNodes);
+                                if (res) childGenome = res.genome;
+                            }
+                        } catch (e) {
+                            // silently fail crossover and fallback
                         }
-                    } catch (e) {
-                        // silently fail crossover and fallback
                     }
-                }
 
-                // Fallback to clone if crossover failed
-                if (!childGenome) {
-                    const parentAStr = await serializeGenome(parentA);
-                    const { genome: clone } = await deserializeGenome(parentAStr);
-                    childGenome = clone;
-                }
+                    // Fallback to clone if crossover failed or was disabled
+                    if (!childGenome) {
+                        const parentAStr = await serializeGenome(parentA);
+                        const { genome: clone } = await deserializeGenome(parentAStr);
+                        childGenome = clone;
+                    }
 
-                // Mutation
-                let mutated = false;
-                const dynamicRates = settings.useAdaptiveMutation
-                    ? getAdaptiveMutationRates(childGenome.getAllNodes().length)
-                    : {
-                        addNode: settings.mutationRates.addNode,
-                        removeNode: settings.mutationRates.removeNode,
-                        removeSubgraph: settings.mutationRates.removeSubgraph
-                    };
+                    // Mutation
+                    const dynamicRates = settings.useAdaptiveMutation
+                        ? getAdaptiveMutationRates(childGenome.getAllNodes().length)
+                        : {
+                            addNode: settings.mutationRates.addNode,
+                            removeNode: settings.mutationRates.removeNode,
+                            removeSubgraph: settings.mutationRates.removeSubgraph
+                        };
 
-                if (Math.random() < dynamicRates.removeSubgraph) {
-                    const res = childGenome.MutateRemoveSubgraph();
-                    if (res) mutated = true;
-                }
-                if (!mutated && Math.random() < dynamicRates.removeNode) {
-                    const res = childGenome.MutateRemoveNode();
-                    if (res) mutated = true;
-                }
-                if (!mutated && Math.random() < dynamicRates.addNode) {
-                    const res = childGenome.MutateAddNode(maxNodes);
-                    if (res) mutated = true;
-                }
+                    if (Math.random() < dynamicRates.removeSubgraph) {
+                        const res = childGenome.MutateRemoveSubgraph();
+                        if (res) childGenome = res.genome;
+                    }
+                    if (Math.random() < dynamicRates.removeNode) {
+                        const res = childGenome.MutateRemoveNode();
+                        if (res) childGenome = res.genome;
+                    }
+                    if (Math.random() < dynamicRates.addNode) {
+                        const res = childGenome.MutateAddNode(maxNodes);
+                        if (res) childGenome = res.genome;
+                    }
+                    if (settings.mutationRates.addSkipConnection && Math.random() < settings.mutationRates.addSkipConnection) {
+                        const res = childGenome.MutateAddSkipConnection(maxNodes);
+                        if (res) childGenome = res.genome;
+                    }
+                    if (settings.mutationRates.changeLayerType && Math.random() < settings.mutationRates.changeLayerType) {
+                        const res = childGenome.MutateChangeLayerType(maxNodes);
+                        if (res) childGenome = res.genome;
+                    }
 
-                nextGen.push({
-                    id: crypto.randomUUID(),
-                    genome: childGenome,
-                    nodes: childGenome.getAllNodes()
-                });
+                    // Params mutation
+                    if (settings.mutationRates.params && Math.random() < settings.mutationRates.params) {
+                        const mutationOpts = new Map<string, number>();
+                        mutationOpts.set('params', settings.mutationRates.params);
+                        childGenome.getAllNodes().forEach(node => {
+                            if (typeof (node as any).Mutate === 'function') {
+                                (node as any).Mutate(mutationOpts);
+                            }
+                        });
+                    }
+
+                    nextGen.push({
+                        id: crypto.randomUUID(),
+                        genome: childGenome,
+                        nodes: childGenome.getAllNodes()
+                    });
+                } catch (e) {
+                    console.warn(`[Breed] Child generation failed (likely shape mismatch). Attempt ${breedAttempts}/${popSize * 10}`, e);
+                    continue;
+                }
             }
 
             setPopulation(nextGen);
@@ -314,8 +372,17 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
         isRunningRef.current = true;
 
         initPopulation(seedGenomes);
-        // The generation loop will trigger via a useEffect watching population/isRunning later
     }, [datasetProfileId, addLog, initPopulation]);
+
+    useEffect(() => {
+        if (isRunning && population.length > 0) {
+            // Need a slight delay to allow React rendering/logging to flush
+            const timer = setTimeout(() => {
+                runGeneration();
+            }, 100);
+            return () => clearTimeout(timer);
+        }
+    }, [isRunning, population, runGeneration]);
 
     return {
         isRunning,

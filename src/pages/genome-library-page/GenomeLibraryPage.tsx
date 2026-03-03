@@ -103,6 +103,8 @@ export const GenomeLibraryPage: React.FC = () => {
     const handleImport = async () => {
         try {
             const genomeStr = await loadGenomeApi();
+            if (!genomeStr) return; // User cancelled or file is empty
+
             const name = prompt('Genome name:', 'Imported Genome') || 'Imported Genome';
             const tagsStr = prompt('Tags (comma separated):', '') || '';
             const tags = tagsStr.split(',').map(t => t.trim()).filter(Boolean);

@@ -11,6 +11,8 @@ export const useLoadGenome = () => {
 
     return async () => {
         const genomeStr = await loadGenomeApi();
+        if (!genomeStr) return; // User cancelled
+
         const genome = await deserializeGenome(genomeStr);
         addNewGenome(
             genome.nodes,

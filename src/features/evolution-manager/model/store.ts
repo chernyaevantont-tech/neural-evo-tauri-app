@@ -44,6 +44,12 @@ export interface EvolutionSettingsState {
         macs: number;
     };
     setResourceTarget: (key: keyof EvolutionSettingsState['resourceTargets'], value: number) => void;
+
+    // Evaluation Settings
+    batchSize: number;
+    setBatchSize: (val: number) => void;
+    evalEpochs: number;
+    setEvalEpochs: (val: number) => void;
 }
 
 export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) => ({
@@ -95,6 +101,11 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
     setResourceTarget: (key, value) => set((state) => ({
         resourceTargets: { ...state.resourceTargets, [key]: value }
     })),
+
+    batchSize: 32,
+    setBatchSize: (val) => set({ batchSize: val }),
+    evalEpochs: 1,
+    setEvalEpochs: (val) => set({ evalEpochs: val }),
 }));
 
 export function getAdaptiveMutationRates(currentNodes: number) {

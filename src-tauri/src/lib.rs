@@ -301,30 +301,239 @@ pub struct EvaluationResult {
 async fn evaluate_population(
     genomes: Vec<String>,
     dataset_profile: String,
+    batch_size: usize,
+    eval_epochs: usize,
 ) -> Result<Vec<EvaluationResult>, String> {
-    // Phase 2 Step 2: Parse genomes and run short training epochs
-    // For now we will just successfully parse the genomes and return dummy fitness.
     type Backend = Autodiff<Wgpu>;
     let device = Default::default();
-
     let mut results = Vec::new();
 
+    // 1. Read dataset_profiles.json to find the requested profile
+    let profiles_json = load_dataset_profiles().await?;
+    let root: crate::dtos::DatasetProfilesRoot = serde_json::from_str(&profiles_json)
+        .map_err(|e| format!("Failed to parse dataset_profiles.json: {}", e))?;
+
+    let profile = root
+        .state
+        .profiles
+        .into_iter()
+        .find(|p| p.id == dataset_profile)
+        .ok_or_else(|| {
+            format!(
+                "Dataset profile '{}' not found in profiles JSON",
+                dataset_profile
+            )
+        })?;
+
+    let source_path_str = profile
+        .source_path
+        .ok_or_else(|| format!("Profile '{}' has no sourcePath defined", profile.name))?;
+    let source_dir = std::path::Path::new(&source_path_str);
+
+    if !source_dir.exists() {
+        return Err(format!(
+            "Source directory does not exist: {}",
+            source_path_str
+        ));
+    }
+
+    // Find the input stream to get resizing parameters
+    let input_stream = profile
+        .streams
+        .iter()
+        .find(|s| s.role == "Input" && s.alias.contains("Stream"))
+        // Fallback: just find the first input stream
+        .or_else(|| profile.streams.iter().find(|s| s.role == "Input"))
+        .ok_or_else(|| format!("Profile '{}' has no Input stream defined", profile.name))?;
+
+    let mut target_h = 64;
+    let mut target_w = 64;
+    let mut is_grayscale = false;
+
+    if let Some(prep) = &input_stream.preprocessing {
+        if let Some(vision) = &prep.vision {
+            if vision.resize.len() == 2 {
+                target_w = vision.resize[0];
+                target_h = vision.resize[1];
+            }
+            is_grayscale = vision.grayscale;
+        }
+    }
+
     println!(
-        "Evaluating population of {} genomes on dataset: {}",
+        "Evaluating population of {} genomes on dataset: {} ({})\nTarget Dims: {}x{}, Grayscale: {}, Batch Size: {}, Epochs: {}",
         genomes.len(),
-        dataset_profile
+        profile.name,
+        source_path_str,
+        target_w,
+        target_h,
+        is_grayscale,
+        batch_size,
+        eval_epochs
     );
 
+    // 2. Discover dataset structure (FolderMapping logic)
+    // Map class names (folder names) to integer labels
+    let mut class_to_id: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut all_images: Vec<(std::path::PathBuf, usize)> = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(source_dir) {
+        let mut class_id = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(folder_name) = path.file_name().and_then(|n| n.to_str()) {
+                    class_to_id.insert(folder_name.to_string(), class_id);
+                    // Read images in this class folder
+                    if let Ok(images) = std::fs::read_dir(&path) {
+                        for img_entry in images.flatten() {
+                            let img_path = img_entry.path();
+                            if img_path.is_file() {
+                                if let Some(ext) = img_path.extension().and_then(|e| e.to_str()) {
+                                    let ext = ext.to_lowercase();
+                                    if ext == "jpg"
+                                        || ext == "jpeg"
+                                        || ext == "png"
+                                        || ext == "webp"
+                                    {
+                                        all_images.push((img_path, class_id));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    class_id += 1;
+                }
+            }
+        }
+    }
+
+    if all_images.is_empty() {
+        return Err(format!(
+            "No images found in dataset directory: {}",
+            source_path_str
+        ));
+    }
+
+    println!(
+        "Discovered {} total images across {} classes.",
+        all_images.len(),
+        class_to_id.len()
+    );
+
+    // 3. Optional: Shuffle dataset
+    use rand::seq::SliceRandom;
+    let mut rng = rand::rng();
+    all_images.shuffle(&mut rng);
+
+    // 4. Evaluation Loop over each Genome
     for (i, genome_str) in genomes.iter().enumerate() {
-        // We will parse the ID out manually or assume they are passed with IDs.
-        // For simplicity now, let's just parse the GraphModel to ensure it builds
         match std::panic::catch_unwind(|| GraphModel::<Backend>::build(genome_str, &device)) {
-            Ok(_model) => {
-                // Return dummy fitness scores simulating a quick evaluation pass
+            Ok(mut model) => {
+                let channels = if is_grayscale { 1 } else { 3 };
+
+                let mut train_batches = Vec::new();
+                let mut current_inputs = Vec::new();
+                let mut current_targets = Vec::new();
+
+                // Lazily build batches to save RAM
+                for (img_path, label_id) in &all_images {
+                    if let Ok(img) = image::open(img_path) {
+                        // On the fly resize
+                        use image::imageops::FilterType;
+                        let img = img.resize_exact(target_w, target_h, FilterType::Triangle);
+
+                        let mut pixels = Vec::new();
+                        if is_grayscale {
+                            let img_gray = img.to_luma8();
+                            for y in 0..target_h {
+                                for x in 0..target_w {
+                                    let pixel = img_gray.get_pixel(x, y);
+                                    pixels.push(pixel[0] as f32 / 255.0);
+                                }
+                            }
+                        } else {
+                            let img_rgb = img.to_rgb8();
+                            // Burn format (NCHW): C, then H, then W
+                            for c_idx in 0..3 {
+                                for y in 0..target_h {
+                                    for x in 0..target_w {
+                                        let pixel = img_rgb.get_pixel(x, y);
+                                        pixels.push(pixel[c_idx] as f32 / 255.0);
+                                    }
+                                }
+                            }
+                        }
+
+                        let img_tensor_1d = burn::tensor::Tensor::<Backend, 1>::from_floats(
+                            pixels.as_slice(),
+                            &device,
+                        );
+                        let img_tensor_4d = img_tensor_1d.reshape([
+                            1,
+                            channels,
+                            target_h as usize,
+                            target_w as usize,
+                        ]);
+
+                        current_inputs.push(img_tensor_4d);
+                        current_targets.push(burn::tensor::Tensor::<Backend, 2>::from_data(
+                            [[*label_id as f32]],
+                            &device,
+                        ));
+
+                        if current_inputs.len() >= batch_size {
+                            use burn::tensor::Tensor;
+                            let batch =
+                                crate::entities::DynamicBatch {
+                                    inputs: vec![crate::entities::DynamicTensor::Dim4(
+                                        Tensor::cat(current_inputs.clone(), 0),
+                                    )],
+                                    targets: vec![crate::entities::DynamicTensor::Dim2(
+                                        Tensor::cat(current_targets.clone(), 0),
+                                    )],
+                                };
+                            train_batches.push(batch);
+                            current_inputs.clear();
+                            current_targets.clear();
+                        }
+                    }
+                }
+
+                // Add remaining partial batch
+                if !current_inputs.is_empty() {
+                    use burn::tensor::Tensor;
+                    let batch = crate::entities::DynamicBatch {
+                        inputs: vec![crate::entities::DynamicTensor::Dim4(Tensor::cat(
+                            current_inputs,
+                            0,
+                        ))],
+                        targets: vec![crate::entities::DynamicTensor::Dim2(Tensor::cat(
+                            current_targets,
+                            0,
+                        ))],
+                    };
+                    train_batches.push(batch);
+                }
+
+                if train_batches.is_empty() {
+                    results.push(EvaluationResult {
+                        genome_id: format!("genome_{}", i),
+                        loss: 999.0,
+                        accuracy: 0.0,
+                    });
+                    continue;
+                }
+
+                // Actually validate via training step
+                let (final_loss, final_acc) =
+                    crate::entities::run_eval_pass(&mut model, &train_batches, eval_epochs, 0.005);
+
                 results.push(EvaluationResult {
                     genome_id: format!("genome_{}", i),
-                    loss: 0.5 + (i as f32 * 0.1),
-                    accuracy: 0.8 - (i as f32 * 0.05),
+                    loss: final_loss,
+                    accuracy: final_acc,
                 });
             }
             Err(_) => {

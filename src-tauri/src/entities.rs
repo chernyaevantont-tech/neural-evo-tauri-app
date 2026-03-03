@@ -956,3 +956,47 @@ pub fn train_simple<B: AutodiffBackend>(
 
     model
 }
+
+#[allow(clippy::type_complexity)]
+pub fn run_eval_pass<B: AutodiffBackend>(
+    model: &mut GraphModel<B>,
+    batches: &[DynamicBatch<B>],
+    num_epochs: usize,
+    learning_rate: f64,
+) -> (f32, f32) {
+    let mut optim = burn::optim::AdamConfig::new().init::<B, GraphModel<B>>();
+
+    let mut final_loss = 999.0;
+    let mut final_acc = 0.0;
+
+    for _epoch in 0..num_epochs {
+        let mut train_loss_sum = 0.0f32;
+        let mut train_correct = 0;
+        let mut train_total = 0;
+
+        for batch in batches.iter() {
+            let predictions = model.forward_internal(&batch.inputs, false);
+            let loss = model.compute_loss(&predictions, &batch.targets);
+
+            let grads = loss.backward();
+            let grads_params = burn::optim::GradientsParams::from_grads(grads, model);
+
+            *model = optim.step(learning_rate, model.clone(), grads_params);
+
+            train_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];
+
+            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets);
+            train_correct += batch_correct;
+            train_total += batch_total;
+        }
+
+        final_loss = train_loss_sum / batches.len().max(1) as f32;
+        final_acc = if train_total > 0 {
+            (train_correct as f32 / train_total as f32) * 100.0
+        } else {
+            0.0
+        };
+    }
+
+    (final_loss, final_acc)
+}
