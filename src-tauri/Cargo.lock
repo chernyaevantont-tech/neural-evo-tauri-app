@@ -4989,6 +4989,7 @@ dependencies = [
  "burn",
  "burn-dataset",
  "chrono",
+ "csv",
  "futures",
  "glob",
  "image",

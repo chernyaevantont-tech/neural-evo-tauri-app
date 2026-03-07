@@ -30,7 +30,7 @@ export type DataLocatorDef =
     | { type: 'GlobPattern'; pattern: string }
     | { type: 'FolderMapping' } // Uses parent folder name
     | { type: 'CompanionFile'; pathTemplate: string; parser: 'YOLO' | 'Text' | 'COCO_Subset' }
-    | { type: 'MasterIndex'; indexPath: string; keyField: string; valueField: string }
+    | { type: 'MasterIndex'; indexPath: string; keyField: string; valueField: string; hasHeaders: boolean }
     | { type: 'None' }; // Fallback
 
 export interface DataStream {

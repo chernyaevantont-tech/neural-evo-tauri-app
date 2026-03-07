@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use rfd::AsyncFileDialog;
 
@@ -9,20 +8,9 @@ use burn::backend::{Autodiff, Wgpu};
 use burn::tensor::Distribution;
 use burn::tensor::Tensor;
 use entities::{DynamicBatch, DynamicTensor, GraphModel, train_simple};
+use serde::{Deserialize, Serialize};
 
-/// Global cache for preprocessed pixel data that persists across evaluate_population calls.
-/// Key: (dataset_profile_id, target_w, target_h, is_grayscale)
-/// Value: vector of (pixels_f32, label_id) grouped into batch-sized chunks
-static DATASET_CACHE: std::sync::LazyLock<Mutex<Option<DatasetCacheEntry>>> =
-    std::sync::LazyLock::new(|| Mutex::new(None));
-
-struct DatasetCacheEntry {
-    key: (String, u32, u32, bool, usize, usize, usize, usize), // (profile_id, w, h, grayscale, dataset_pct, train_split, val_split, test_split)
-    train_batches: Vec<Vec<(Vec<f32>, usize)>>, // chunks of (pixels, label) for training
-    val_batches: Vec<Vec<(Vec<f32>, usize)>>,   // chunks of (pixels, label) for validation
-    test_batches: Vec<Vec<(Vec<f32>, usize)>>,  // chunks of (pixels, label) for testing
-}
-
+pub mod data_loader;
 pub mod dtos;
 pub mod entities;
 
@@ -349,6 +337,7 @@ async fn evaluate_population(
 
     let source_path_str = profile
         .source_path
+        .clone()
         .ok_or_else(|| format!("Profile '{}' has no sourcePath defined", profile.name))?;
     let source_dir = std::path::Path::new(&source_path_str);
 
@@ -359,177 +348,179 @@ async fn evaluate_population(
         ));
     }
 
-    // Find the input stream to get resizing parameters
-    let input_stream = profile
-        .streams
-        .iter()
-        .find(|s| s.role == "Input" && s.alias.contains("Stream"))
-        // Fallback: just find the first input stream
-        .or_else(|| profile.streams.iter().find(|s| s.role == "Input"))
-        .ok_or_else(|| format!("Profile '{}' has no Input stream defined", profile.name))?;
-
-    let mut target_h = 64;
-    let mut target_w = 64;
-    let mut is_grayscale = false;
-
-    if let Some(prep) = &input_stream.preprocessing {
-        if let Some(vision) = &prep.vision {
-            if vision.resize.len() == 2 {
-                target_w = vision.resize[0];
-                target_h = vision.resize[1];
-            }
-            is_grayscale = vision.grayscale;
-        }
-    }
+    let loader = match crate::data_loader::DataLoader::new(profile.clone()) {
+        Ok(l) => l,
+        Err(e) => return Err(e),
+    };
 
     println!(
-        "Evaluating population of {} genomes on dataset: {} ({})\nTarget Dims: {}x{}, Grayscale: {}, Batch Size: {}, Epochs: {}",
+        "Evaluating population of {} genomes on dataset: {} ({})\nBatch Size: {}, Epochs: {}",
         genomes.len(),
         profile.name,
         source_path_str,
-        target_w,
-        target_h,
-        is_grayscale,
         batch_size,
         eval_epochs
     );
 
-    // 2. Discover dataset structure (FolderMapping logic)
-    // Map class names (folder names) to integer labels
-    let mut class_to_id: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    let mut all_images: Vec<(std::path::PathBuf, usize)> = Vec::new();
-
-    if let Ok(entries) = std::fs::read_dir(source_dir) {
-        let mut class_id = 0;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if let Some(folder_name) = path.file_name().and_then(|n| n.to_str()) {
-                    class_to_id.insert(folder_name.to_string(), class_id);
-                    // Read images in this class folder
-                    if let Ok(images) = std::fs::read_dir(&path) {
-                        for img_entry in images.flatten() {
-                            let img_path = img_entry.path();
-                            if img_path.is_file() {
-                                if let Some(ext) = img_path.extension().and_then(|e| e.to_str()) {
-                                    let ext = ext.to_lowercase();
-                                    if ext == "jpg"
-                                        || ext == "jpeg"
-                                        || ext == "png"
-                                        || ext == "webp"
-                                    {
-                                        all_images.push((img_path, class_id));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    class_id += 1;
-                }
-            }
-        }
-    }
-
-    if all_images.is_empty() {
+    let mut valid_ids = loader.valid_sample_ids.clone();
+    if valid_ids.is_empty() {
         return Err(format!(
-            "No images found in dataset directory: {}",
+            "No valid samples found matching all streams for dataset: {}",
             source_path_str
         ));
     }
 
-    println!(
-        "Discovered {} total images across {} classes.",
-        all_images.len(),
-        class_to_id.len()
-    );
-
-    // 3. Optional: Shuffle and Stratified Truncation
-    let pct = dataset_percent.clamp(1, 100);
     use rand::seq::SliceRandom;
     let mut rng = rand::rng();
+    valid_ids.shuffle(&mut rng);
 
-    // Group images by class
-    let mut class_groups: std::collections::HashMap<usize, Vec<(std::path::PathBuf, usize)>> =
-        std::collections::HashMap::new();
-    for img in all_images {
-        class_groups.entry(img.1).or_default().push(img);
-    }
+    // Apply pct
+    let pct = dataset_percent.clamp(1, 100);
+    let use_count = (valid_ids.len() * pct) / 100;
+    let use_count = use_count.max(1);
+    valid_ids.truncate(use_count);
 
-    // Shuffle within each class and take `pct` from each class
-    let mut stratified_images = Vec::new();
-    let mut total_original = 0;
-    for (_, mut group) in class_groups {
-        total_original += group.len();
-        group.shuffle(&mut rng);
-        let use_count = (group.len() * pct) / 100;
-        let use_count = use_count.max(1); // ensure at least 1 if >0 originally
-        stratified_images.extend(group.into_iter().take(use_count));
-    }
+    let total_split = (train_split + val_split + test_split).max(1) as f32;
+    let train_ratio = train_split as f32 / total_split;
+    let val_ratio = val_split as f32 / total_split;
 
-    // Shuffle the final stratified list so classes are mixed
-    stratified_images.shuffle(&mut rng);
-    let all_images = stratified_images;
+    let train_count = ((valid_ids.len() as f32) * train_ratio).round() as usize;
+    let val_count = ((valid_ids.len() as f32) * val_ratio).round() as usize;
 
-    println!(
-        "Using {}% of dataset: {} images (out of {} total)",
-        pct,
-        all_images.len(),
-        total_original
-    );
+    let train_count = train_count.min(valid_ids.len());
+    let val_count = val_count.min(valid_ids.len() - train_count);
 
-    // 3.5 Prepare shape overrides from the dataset profile
-    let channels = if is_grayscale { 1 } else { 3 };
-    let input_override = vec![channels, target_h as usize, target_w as usize]; // [C, H, W]
-    let output_override = vec![class_to_id.len()]; // number of classes
+    let train_ids: Vec<String> = valid_ids.iter().take(train_count).cloned().collect();
+    let val_ids: Vec<String> = valid_ids
+        .iter()
+        .skip(train_count)
+        .take(val_count)
+        .cloned()
+        .collect();
+    let test_ids: Vec<String> = valid_ids
+        .iter()
+        .skip(train_count + val_count)
+        .cloned()
+        .collect();
+
     eprintln!(
-        ">>> Dataset shape overrides: Input=[{}, {}, {}], Output=[{}]",
-        channels,
-        target_h,
-        target_w,
-        class_to_id.len()
+        ">>> Split: {} train samples, {} val samples, {} test samples",
+        train_ids.len(),
+        val_ids.len(),
+        test_ids.len()
     );
 
-    // 3.6 Prepare Batch Caching with global persistence
-    let cache_key = (
-        dataset_profile.clone(),
-        target_w,
-        target_h,
-        is_grayscale,
-        dataset_percent,
-        train_split,
-        val_split,
-        test_split,
-    );
+    // Filter streams by role
+    let input_stream_indices: Vec<usize> = profile
+        .streams
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.role == "Input")
+        .map(|(i, _)| i)
+        .collect();
+    let target_stream_indices: Vec<usize> = profile
+        .streams
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.role == "Target")
+        .map(|(i, _)| i)
+        .collect();
 
-    // Check if we already have cached pixel data from a previous generation
-    let cached_pixel_batches: (
-        Vec<Vec<(Vec<f32>, usize)>>,
-        Vec<Vec<(Vec<f32>, usize)>>,
-        Vec<Vec<(Vec<f32>, usize)>>,
-    );
-    {
-        let cache_guard = DATASET_CACHE.lock().unwrap();
-        if let Some(entry) = cache_guard.as_ref() {
-            if entry.key == cache_key {
-                eprintln!(
-                    ">>> Using cached dataset from previous generation ({} train batches, {} val batches, {} test batches)",
-                    entry.train_batches.len(),
-                    entry.val_batches.len(),
-                    entry.test_batches.len()
-                );
-                cached_pixel_batches = (
-                    entry.train_batches.clone(),
-                    entry.val_batches.clone(),
-                    entry.test_batches.clone(),
-                );
-            } else {
-                eprintln!(">>> Dataset parameters changed, cache invalidated. Will re-process.");
-                cached_pixel_batches = (Vec::new(), Vec::new(), Vec::new());
+    if input_stream_indices.is_empty() || target_stream_indices.is_empty() {
+        return Err(
+            "Dataset Profile must define at least one Input and one Target stream".to_string(),
+        );
+    }
+
+    // Determine expected input and output overrides based on the profile
+    let mut input_overrides = Vec::new();
+    for &idx in &input_stream_indices {
+        let stream = &profile.streams[idx];
+        match stream.data_type {
+            crate::dtos::DataType::Image => {
+                let mut channels = 3;
+                let mut h = 64;
+                let mut w = 64;
+                if let Some(prep) = &stream.preprocessing {
+                    if let Some(vision) = &prep.vision {
+                        if vision.resize.len() == 2 {
+                            w = vision.resize[0] as usize;
+                            h = vision.resize[1] as usize;
+                        }
+                        if vision.grayscale {
+                            channels = 1;
+                        }
+                    }
+                }
+                input_overrides.push(vec![channels, h, w]);
             }
-        } else {
-            cached_pixel_batches = (Vec::new(), Vec::new(), Vec::new());
+            crate::dtos::DataType::Vector => {
+                let dim = stream.tensor_shape.get(0).cloned().unwrap_or(1);
+                input_overrides.push(vec![dim]);
+            }
+            _ => input_overrides.push(vec![1]),
         }
+    }
+
+    let mut output_overrides = Vec::new();
+    let mut is_classification = false;
+    for &idx in &target_stream_indices {
+        let stream = &profile.streams[idx];
+        if let crate::dtos::DataType::Categorical = stream.data_type {
+            is_classification = true;
+            // Get the number of classes discovered by the loader
+            let num_classes = loader.stream_classes.get(&idx).cloned().unwrap_or(1);
+            output_overrides.push(vec![num_classes]);
+        } else {
+            let dim = stream.tensor_shape.get(0).cloned().unwrap_or(1);
+            output_overrides.push(vec![dim]);
+        }
+    }
+
+    // Helper macro to build batches
+    macro_rules! build_batches {
+        ($ids:expr, $loader:expr, $dev:expr) => {{
+            let mut assembled_batches: Vec<crate::entities::DynamicBatch<Backend>> = Vec::new();
+            for chunk in $ids.chunks(batch_size) {
+                let mut batch_inputs: Vec<Vec<crate::entities::DynamicTensor<Backend>>> = vec![Vec::new(); input_stream_indices.len()];
+                let mut batch_targets: Vec<Vec<crate::entities::DynamicTensor<Backend>>> = vec![Vec::new(); target_stream_indices.len()];
+
+                for id in chunk {
+                    if let Ok(sample) = $loader.load_sample(id, $dev) {
+                        for (i, &stream_idx) in input_stream_indices.iter().enumerate() {
+                            if let Some(t) = sample.stream_tensors.get(&stream_idx) {
+                                let t_clone: crate::entities::DynamicTensor<Backend> = t.clone();
+                                batch_inputs[i].push(t_clone);
+                            }
+                        }
+                        for (i, &stream_idx) in target_stream_indices.iter().enumerate() {
+                            if let Some(t) = sample.stream_tensors.get(&stream_idx) {
+                                let t_clone: crate::entities::DynamicTensor<Backend> = t.clone();
+                                batch_targets[i].push(t_clone);
+                            }
+                        }
+                    }
+                }
+
+                if batch_inputs.iter().all(|list| !list.is_empty()) && batch_targets.iter().all(|list| !list.is_empty()) {
+                    use crate::entities::concat_dynamic_tensors;
+                    let inputs: Vec<crate::entities::DynamicTensor<Backend>> = batch_inputs
+                        .into_iter()
+                        .map(|tensors| concat_dynamic_tensors::<Backend>(tensors))
+                        .collect();
+                    let targets: Vec<crate::entities::DynamicTensor<Backend>> = batch_targets
+                        .into_iter()
+                        .map(|tensors| concat_dynamic_tensors::<Backend>(tensors))
+                        .collect();
+
+                    assembled_batches.push(crate::entities::DynamicBatch {
+                        inputs,
+                        targets,
+                    });
+                }
+            }
+            assembled_batches
+        }};
     }
 
     // 4. Evaluation Loop over each Genome
@@ -541,10 +532,8 @@ async fn evaluate_population(
             i
         );
 
-        let input_overrides = vec![input_override.clone()];
-        let output_overrides = vec![output_override.clone()];
         match std::panic::catch_unwind(|| {
-            GraphModel::<Backend>::build(
+            crate::entities::GraphModel::<Backend>::build(
                 genome_str,
                 &device,
                 Some(&input_overrides),
@@ -552,291 +541,9 @@ async fn evaluate_population(
             )
         }) {
             Ok(mut model) => {
-                use burn::tensor::Tensor;
-
-                // If we have a global cache hit, use it directly
-                // Otherwise, process images with Rayon and save to global cache
-                let mut train_pixel_batches = Vec::new();
-                let mut val_pixel_batches = Vec::new();
-                let mut test_pixel_batches = Vec::new();
-
-                if !cached_pixel_batches.0.is_empty() {
-                    // Reuse cache from a previous generation
-                    train_pixel_batches = cached_pixel_batches.0.clone();
-                    val_pixel_batches = cached_pixel_batches.1.clone();
-                    test_pixel_batches = cached_pixel_batches.2.clone();
-                } else if i == 0 {
-                    // Cache Miss - need to load and process images
-                    eprintln!(
-                        ">>> [Genome 0] Parallel processing {} images into pixel batches...",
-                        all_images.len()
-                    );
-
-                    // 1. Perform stratified split into train, val, and test images FIRST
-                    let mut train_images = Vec::new();
-                    let mut val_images = Vec::new();
-                    let mut test_images = Vec::new();
-
-                    // Group again to split perfectly
-                    let mut class_groups: std::collections::HashMap<
-                        usize,
-                        Vec<&(std::path::PathBuf, usize)>,
-                    > = std::collections::HashMap::new();
-                    for img in &all_images {
-                        class_groups.entry(img.1).or_default().push(img);
-                    }
-
-                    let total_split = (train_split + val_split + test_split).max(1) as f32;
-                    let train_ratio = train_split as f32 / total_split;
-                    let val_ratio = val_split as f32 / total_split;
-
-                    let mut rng = rand::rng();
-                    for (_, mut group) in class_groups {
-                        use rand::seq::SliceRandom;
-                        group.shuffle(&mut rng);
-
-                        let train_count = ((group.len() as f32) * train_ratio).round() as usize;
-                        let val_count = ((group.len() as f32) * val_ratio).round() as usize;
-
-                        let train_count = train_count.min(group.len());
-                        let val_count = val_count.min(group.len() - train_count);
-                        let test_count = group.len() - train_count - val_count;
-
-                        train_images.extend(group.iter().take(train_count).cloned().cloned());
-                        val_images.extend(
-                            group
-                                .iter()
-                                .skip(train_count)
-                                .take(val_count)
-                                .cloned()
-                                .cloned(),
-                        );
-                        test_images.extend(
-                            group
-                                .iter()
-                                .skip(train_count + val_count)
-                                .take(test_count)
-                                .cloned()
-                                .cloned(),
-                        );
-                    }
-
-                    use rand::seq::SliceRandom;
-                    train_images.shuffle(&mut rng);
-                    val_images.shuffle(&mut rng);
-                    test_images.shuffle(&mut rng);
-
-                    eprintln!(
-                        ">>> Stratified split: {} train images, {} val images, {} test images",
-                        train_images.len(),
-                        val_images.len(),
-                        test_images.len()
-                    );
-
-                    use rayon::prelude::*;
-
-                    // Helper closure to process a chunk
-                    let process_chunk =
-                        |chunk: &[(std::path::PathBuf, usize)]| -> Vec<Vec<(Vec<f32>, usize)>> {
-                            let mut local_batches = Vec::new();
-                            for inner_chunk in chunk.chunks(batch_size) {
-                                let processed_items: Vec<_> = inner_chunk
-                                    .par_iter()
-                                    .filter_map(|(img_path, label_id)| {
-                                        if let Ok(img) = image::open(img_path) {
-                                            use image::imageops::FilterType;
-                                            let img = img.resize_exact(
-                                                target_w,
-                                                target_h,
-                                                FilterType::Triangle,
-                                            );
-
-                                            let mut pixels = Vec::with_capacity(
-                                                (target_w * target_h) as usize * channels,
-                                            );
-                                            if is_grayscale {
-                                                let img_gray = img.to_luma8();
-                                                for y in 0..target_h {
-                                                    for x in 0..target_w {
-                                                        pixels.push(
-                                                            img_gray.get_pixel(x, y)[0] as f32
-                                                                / 255.0,
-                                                        );
-                                                    }
-                                                }
-                                            } else {
-                                                let img_rgb = img.to_rgb8();
-                                                for c_idx in 0..3 {
-                                                    for y in 0..target_h {
-                                                        for x in 0..target_w {
-                                                            pixels.push(
-                                                                img_rgb.get_pixel(x, y)[c_idx]
-                                                                    as f32
-                                                                    / 255.0,
-                                                            );
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            Some((pixels, *label_id))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect();
-
-                                if !processed_items.is_empty() {
-                                    local_batches.push(processed_items);
-                                }
-                            }
-                            local_batches
-                        };
-
-                    train_pixel_batches = process_chunk(&train_images);
-                    val_pixel_batches = process_chunk(&val_images);
-                    test_pixel_batches = process_chunk(&test_images);
-
-                    eprintln!(
-                        ">>> Finished processing! {} train pixel batches, {} val pixel batches, {} test pixel batches ready.",
-                        train_pixel_batches.len(),
-                        val_pixel_batches.len(),
-                        test_pixel_batches.len()
-                    );
-
-                    // Save to global cache for future generations
-                    {
-                        let mut cache_guard = DATASET_CACHE.lock().unwrap();
-                        *cache_guard = Some(DatasetCacheEntry {
-                            key: cache_key.clone(),
-                            train_batches: train_pixel_batches.clone(),
-                            val_batches: val_pixel_batches.clone(),
-                            test_batches: test_pixel_batches.clone(),
-                        });
-                    }
-                } else {
-                    // Genome 1+ within the same generation: reuse what genome 0 cached
-                    let cache_guard = DATASET_CACHE.lock().unwrap();
-                    if let Some(entry) = cache_guard.as_ref() {
-                        train_pixel_batches = entry.train_batches.clone();
-                        val_pixel_batches = entry.val_batches.clone();
-                        test_pixel_batches = entry.test_batches.clone();
-                    }
-                }
-
-                eprintln!(
-                    ">>> Split: {} train batches, {} val batches, {} test batches (ratio {}/{}/{})",
-                    train_pixel_batches.len(),
-                    val_pixel_batches.len(),
-                    test_pixel_batches.len(),
-                    train_split,
-                    val_split,
-                    test_split
-                );
-
-                // Build train tensor batches
-                let mut train_batches = Vec::with_capacity(train_pixel_batches.len());
-                for chunk in &train_pixel_batches {
-                    let mut current_inputs = Vec::with_capacity(chunk.len());
-                    let mut current_targets = Vec::with_capacity(chunk.len());
-
-                    for (pixels, label_id) in chunk {
-                        let img_tensor_1d =
-                            Tensor::<Backend, 1>::from_floats(pixels.as_slice(), &device);
-                        let img_tensor_4d = img_tensor_1d.reshape([
-                            1,
-                            channels,
-                            target_h as usize,
-                            target_w as usize,
-                        ]);
-                        let target_tensor =
-                            Tensor::<Backend, 2>::from_data([[*label_id as f32]], &device);
-
-                        current_inputs.push(img_tensor_4d);
-                        current_targets.push(target_tensor);
-                    }
-
-                    let batch = crate::entities::DynamicBatch {
-                        inputs: vec![crate::entities::DynamicTensor::Dim4(Tensor::cat(
-                            current_inputs,
-                            0,
-                        ))],
-                        targets: vec![crate::entities::DynamicTensor::Dim2(Tensor::cat(
-                            current_targets,
-                            0,
-                        ))],
-                    };
-                    train_batches.push(batch);
-                }
-
-                // Build val tensor batches
-                let mut val_batches = Vec::with_capacity(val_pixel_batches.len());
-                for chunk in &val_pixel_batches {
-                    let mut current_inputs = Vec::with_capacity(chunk.len());
-                    let mut current_targets = Vec::with_capacity(chunk.len());
-
-                    for (pixels, label_id) in chunk {
-                        let img_tensor_1d =
-                            Tensor::<Backend, 1>::from_floats(pixels.as_slice(), &device);
-                        let img_tensor_4d = img_tensor_1d.reshape([
-                            1,
-                            channels,
-                            target_h as usize,
-                            target_w as usize,
-                        ]);
-                        let target_tensor =
-                            Tensor::<Backend, 2>::from_data([[*label_id as f32]], &device);
-
-                        current_inputs.push(img_tensor_4d);
-                        current_targets.push(target_tensor);
-                    }
-
-                    let batch = crate::entities::DynamicBatch {
-                        inputs: vec![crate::entities::DynamicTensor::Dim4(Tensor::cat(
-                            current_inputs,
-                            0,
-                        ))],
-                        targets: vec![crate::entities::DynamicTensor::Dim2(Tensor::cat(
-                            current_targets,
-                            0,
-                        ))],
-                    };
-                    val_batches.push(batch);
-                }
-
-                // Build test tensor batches
-                let mut test_batches = Vec::with_capacity(test_pixel_batches.len());
-                for chunk in &test_pixel_batches {
-                    let mut current_inputs = Vec::with_capacity(chunk.len());
-                    let mut current_targets = Vec::with_capacity(chunk.len());
-
-                    for (pixels, label_id) in chunk {
-                        let img_tensor_1d =
-                            Tensor::<Backend, 1>::from_floats(pixels.as_slice(), &device);
-                        let img_tensor_4d = img_tensor_1d.reshape([
-                            1,
-                            channels,
-                            target_h as usize,
-                            target_w as usize,
-                        ]);
-                        let target_tensor =
-                            Tensor::<Backend, 2>::from_data([[*label_id as f32]], &device);
-
-                        current_inputs.push(img_tensor_4d);
-                        current_targets.push(target_tensor);
-                    }
-
-                    let batch = crate::entities::DynamicBatch {
-                        inputs: vec![crate::entities::DynamicTensor::Dim4(Tensor::cat(
-                            current_inputs,
-                            0,
-                        ))],
-                        targets: vec![crate::entities::DynamicTensor::Dim2(Tensor::cat(
-                            current_targets,
-                            0,
-                        ))],
-                    };
-                    test_batches.push(batch);
-                }
+                let train_batches = build_batches!(train_ids.as_slice(), loader, &device);
+                let val_batches = build_batches!(val_ids.as_slice(), loader, &device);
+                let test_batches = build_batches!(test_ids.as_slice(), loader, &device);
 
                 if train_batches.is_empty() {
                     eprintln!(
@@ -860,23 +567,49 @@ async fn evaluate_population(
                 );
 
                 // Train on training set
-                crate::entities::run_eval_pass(&mut model, &train_batches, eval_epochs, 0.001);
+                crate::entities::run_eval_pass(
+                    &mut model,
+                    &train_batches,
+                    eval_epochs,
+                    0.001,
+                    is_classification,
+                );
 
-                crate::entities::run_validation_pass(&model, &val_batches, "Validation");
+                crate::entities::run_validation_pass(
+                    &model,
+                    &val_batches,
+                    "Validation",
+                    is_classification,
+                );
 
                 // Evaluate fitness on test set (or val if no test batches, or train)
                 let (final_loss, final_acc) = if !test_batches.is_empty() {
-                    crate::entities::run_validation_pass(&model, &test_batches, "Test")
+                    crate::entities::run_validation_pass(
+                        &model,
+                        &test_batches,
+                        "Test",
+                        is_classification,
+                    )
                 } else if !val_batches.is_empty() {
                     eprintln!(
                         ">>> WARNING: No test batches. Using validation metrics for fitness."
                     );
-                    crate::entities::run_validation_pass(&model, &val_batches, "Validation")
+                    crate::entities::run_validation_pass(
+                        &model,
+                        &val_batches,
+                        "Validation",
+                        is_classification,
+                    )
                 } else {
                     eprintln!(
                         ">>> WARNING: No validation/test batches. Using train metrics for fitness."
                     );
-                    crate::entities::run_validation_pass(&model, &train_batches, "Train")
+                    crate::entities::run_validation_pass(
+                        &model,
+                        &train_batches,
+                        "Train",
+                        is_classification,
+                    )
                 };
 
                 results.push(EvaluationResult {
@@ -1284,6 +1017,63 @@ async fn load_dataset_profiles() -> Result<String, String> {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct CsvPreview {
+    pub headers: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+}
+
+#[tauri::command]
+async fn preview_csv(
+    root_path: String,
+    index_path: String,
+    has_headers: bool,
+    rows: usize,
+) -> Result<CsvPreview, String> {
+    let full_path = Path::new(&root_path).join(index_path);
+
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(has_headers)
+        .from_path(full_path)
+        .map_err(|e| e.to_string())?;
+
+    let headers = if has_headers {
+        if let Ok(record) = rdr.headers() {
+            record.iter().map(|s| s.to_string()).collect()
+        } else {
+            vec![]
+        }
+    } else {
+        // Just generate "Column 0", "Column 1" based on first row length
+        vec![] // will populate below
+    };
+
+    let mut parsed_rows = Vec::new();
+    let mut actual_headers = headers;
+
+    for (i, result) in rdr.records().enumerate() {
+        if i >= rows {
+            break;
+        }
+        if let Ok(record) = result {
+            let row_data: Vec<String> = record.iter().map(|s| s.to_string()).collect();
+
+            // Generate dummy headers if missing and this is the first row
+            if !has_headers && actual_headers.is_empty() {
+                actual_headers = (0..record.len())
+                    .map(|idx| format!("Col {}", idx))
+                    .collect();
+            }
+            parsed_rows.push(row_data);
+        }
+    }
+
+    Ok(CsvPreview {
+        headers: actual_headers,
+        rows: parsed_rows,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1301,7 +1091,8 @@ pub fn run() {
             delete_from_library,
             load_library_genome,
             save_dataset_profiles,
-            load_dataset_profiles
+            load_dataset_profiles,
+            preview_csv
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

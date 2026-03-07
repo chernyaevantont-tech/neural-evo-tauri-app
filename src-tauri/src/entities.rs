@@ -36,6 +36,34 @@ pub enum DynamicTensor<B: Backend> {
     Dim4(Tensor<B, 4>),
 }
 
+pub fn concat_dynamic_tensors<B: Backend>(tensors: Vec<DynamicTensor<B>>) -> DynamicTensor<B> {
+    if tensors.is_empty() {
+        panic!("Cannot concatenate empty tensor list");
+    }
+    match &tensors[0] {
+        DynamicTensor::Dim2(_) => {
+            let t2_list: Vec<Tensor<B, 2>> = tensors
+                .into_iter()
+                .map(|t| match t {
+                    DynamicTensor::Dim2(t2) => t2,
+                    _ => panic!("Mixed tensor dimensions in concat!"),
+                })
+                .collect();
+            DynamicTensor::Dim2(Tensor::cat(t2_list, 0))
+        }
+        DynamicTensor::Dim4(_) => {
+            let t4_list: Vec<Tensor<B, 4>> = tensors
+                .into_iter()
+                .map(|t| match t {
+                    DynamicTensor::Dim4(t4) => t4,
+                    _ => panic!("Mixed tensor dimensions in concat!"),
+                })
+                .collect();
+            DynamicTensor::Dim4(Tensor::cat(t4_list, 0))
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Слои (обёртки для burn-слоёв)
 // ---------------------------------------------------------------------------
@@ -928,8 +956,9 @@ pub fn train<B: AutodiffBackend>(
 fn compute_accuracy<B: AutodiffBackend>(
     predictions: &[DynamicTensor<B>],
     targets: &[DynamicTensor<B>],
+    is_classification: bool,
 ) -> (usize, usize) {
-    if predictions.is_empty() {
+    if predictions.is_empty() || !is_classification {
         return (0, 0);
     }
 
@@ -1017,7 +1046,7 @@ pub fn train_simple<B: AutodiffBackend>(
             train_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];
 
             // Расчет Accuracy (если классификация, 1D вектор out_features > 1)
-            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets);
+            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets, true);
             train_correct += batch_correct;
             train_total += batch_total;
         }
@@ -1039,7 +1068,7 @@ pub fn train_simple<B: AutodiffBackend>(
             let loss = model.compute_loss(&predictions, &batch.targets);
             valid_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];
 
-            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets);
+            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets, true);
             valid_correct += batch_correct;
             valid_total += batch_total;
         }
@@ -1068,7 +1097,7 @@ pub fn train_simple<B: AutodiffBackend>(
         let mut test_total = 0;
         for batch in test_batches {
             let predictions = model.forward_internal(&batch.inputs, false);
-            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets);
+            let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets, true);
             test_correct += batch_correct;
             test_total += batch_total;
         }
@@ -1091,6 +1120,7 @@ pub fn run_eval_pass<B: AutodiffBackend>(
     batches: &[DynamicBatch<B>],
     num_epochs: usize,
     learning_rate: f64,
+    is_classification: bool,
 ) -> (f32, f32) {
     let mut optim = burn::optim::AdamConfig::new().init::<B, GraphModel<B>>();
 
@@ -1123,7 +1153,8 @@ pub fn run_eval_pass<B: AutodiffBackend>(
             let loss_val = loss.into_data().to_vec::<f32>().unwrap()[0];
             train_loss_sum += loss_val;
 
-            let (batch_correct, batch_total) = compute_accuracy(&predictions, &cloned_targets);
+            let (batch_correct, batch_total) =
+                compute_accuracy(&predictions, &cloned_targets, is_classification);
             train_correct += batch_correct;
             train_total += batch_total;
 
@@ -1163,6 +1194,7 @@ pub fn run_validation_pass<B: AutodiffBackend>(
     model: &GraphModel<B>,
     batches: &[DynamicBatch<B>],
     split_name: &str,
+    is_classification: bool,
 ) -> (f32, f32) {
     let mut val_loss_sum = 0.0f32;
     let mut val_correct = 0usize;
@@ -1178,7 +1210,8 @@ pub fn run_validation_pass<B: AutodiffBackend>(
 
         val_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];
 
-        let (batch_correct, batch_total) = compute_accuracy(&predictions, &cloned_targets);
+        let (batch_correct, batch_total) =
+            compute_accuracy(&predictions, &cloned_targets, is_classification);
         val_correct += batch_correct;
         val_total += batch_total;
     }

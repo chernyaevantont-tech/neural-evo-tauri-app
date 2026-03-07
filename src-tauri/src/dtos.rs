@@ -69,11 +69,21 @@ pub struct DatasetProfile {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+pub enum DataType {
+    Image,
+    Vector,
+    Categorical,
+    Text,
+}
+
+#[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DataStream {
     pub id: String,
     pub alias: String,
     pub role: String, // "Input" | "Target" | "Ignore"
+    pub data_type: DataType,
+    pub tensor_shape: Vec<usize>,
     pub locator: DataLocatorDef,
     pub preprocessing: Option<PreprocessingSettings>,
 }
@@ -81,7 +91,25 @@ pub struct DataStream {
 #[derive(Deserialize, Clone, Debug)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DataLocatorDef {
+    GlobPattern {
+        pattern: String,
+    },
     FolderMapping, // { "type": "FolderMapping" }
+    CompanionFile {
+        #[serde(rename = "pathTemplate")]
+        path_template: String,
+        parser: String, // "YOLO" | "Text" | "COCO_Subset"
+    },
+    MasterIndex {
+        #[serde(rename = "indexPath")]
+        index_path: String,
+        #[serde(rename = "keyField")]
+        key_field: String,
+        #[serde(rename = "valueField")]
+        value_field: String,
+        #[serde(rename = "hasHeaders")]
+        has_headers: bool,
+    },
     None,
     #[serde(other)]
     Other,
@@ -91,6 +119,7 @@ pub enum DataLocatorDef {
 #[serde(rename_all = "camelCase")]
 pub struct PreprocessingSettings {
     pub vision: Option<VisionSettings>,
+    pub tabular: Option<TabularSettings>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -98,4 +127,15 @@ pub struct PreprocessingSettings {
 pub struct VisionSettings {
     pub resize: Vec<u32>, // e.g. [256, 256]
     pub grayscale: bool,
+    pub normalization: String, // "0-1" | "imagenet" | "none"
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct TabularSettings {
+    pub normalization: String, // "min-max" | "z-score" | "none"
+    #[serde(rename = "oneHot")]
+    pub one_hot: bool,
+    #[serde(rename = "fillMissing")]
+    pub fill_missing: String, // "mean" | "median" | "mode" | "drop"
 }
