@@ -252,6 +252,43 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
                         <span className={styles.sliderValue}>{settings.datasetPercent}%</span>
                     </div>
                 </div>
+                <div className={styles.subSetting}>
+                    <span className={styles.subLabel}>Population Size</span>
+                    <input
+                        type="number"
+                        min="4"
+                        max="200"
+                        className={styles.numberInput}
+                        value={settings.populationSize}
+                        onChange={e => settings.setPopulationSize(parseInt(e.target.value) || 20)}
+                        disabled={disabled}
+                    />
+                </div>
+                <div className={styles.checkboxRow}>
+                    <label className={styles.checkboxLabel}>
+                        <input
+                            type="checkbox"
+                            checked={settings.useMaxGenerations}
+                            onChange={e => settings.setUseMaxGenerations(e.target.checked)}
+                            disabled={disabled}
+                        />
+                        Max Generations
+                    </label>
+                </div>
+                {settings.useMaxGenerations && (
+                    <div className={styles.subSetting} style={{ marginLeft: '1.2rem' }}>
+                        <span className={styles.subLabel}>Limit</span>
+                        <input
+                            type="number"
+                            min="1"
+                            max="10000"
+                            className={styles.numberInput}
+                            value={settings.maxGenerations}
+                            onChange={e => settings.setMaxGenerations(parseInt(e.target.value) || 100)}
+                            disabled={disabled}
+                        />
+                    </div>
+                )}
             </div>
         </div>
     );

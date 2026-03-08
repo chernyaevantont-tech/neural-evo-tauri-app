@@ -16,7 +16,9 @@ export interface PopulatedGenome {
     nodes: BaseNode[];
     loss?: number;
     accuracy?: number;
-    adjustedFitness?: number; // Base fitness penalized by bloat
+    adjustedFitness?: number;
+    trainingMetrics?: BatchMetrics[];
+    resources?: { totalFlash: number; totalRam: number; totalMacs: number; totalNodes: number };
 }
 
 export interface LogEntry {
@@ -31,6 +33,29 @@ export interface GenerationStat {
     avgNodes: number;
 }
 
+export interface BatchMetrics {
+    epoch: number;
+    batch: number;
+    total_batches: number;
+    loss: number;
+    accuracy: number;
+}
+
+export interface GenomeResultEvent {
+    index: number;
+    loss: number;
+    accuracy: number;
+}
+
+export interface GenerationSnapshot {
+    generation: number;
+    genomes: PopulatedGenome[];
+    bestFitness: number;
+    avgNodes: number;
+    timestamp: string;
+    evaluated: boolean;  // false = pre-eval, true = post-eval with fitness
+}
+
 export const useEvolutionLoop = (datasetProfileId: string | null) => {
     const settings = useEvolutionSettingsStore();
 
@@ -41,8 +66,82 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [stats, setStats] = useState<GenerationStat[]>([]);
 
+    const [currentEvaluatingIndex, setCurrentEvaluatingIndex] = useState<number>(0);
+    const [liveMetrics, setLiveMetrics] = useState<BatchMetrics[]>([]);
+    const [generationHistory, setGenerationHistory] = useState<GenerationSnapshot[]>([]);
+
+    // Per-genome metrics accumulator (ref to avoid re-renders on every batch)
+    const perGenomeMetricsRef = useRef<Map<number, BatchMetrics[]>>(new Map());
+    const activeGenomeIndexRef = useRef<number>(0);
+
     // Using refs for safe async access within loops
     const isRunningRef = useRef(false);
+
+    useEffect(() => {
+        let unlistenGenome: (() => void) | undefined;
+        let unlistenStart: (() => void) | undefined;
+        let unlistenBatch: (() => void) | undefined;
+        let unlistenResult: (() => void) | undefined;
+
+        import('@tauri-apps/api/event').then(({ listen }) => {
+            listen<number>('evaluating-genome', (event) => {
+                setCurrentEvaluatingIndex(event.payload);
+            }).then(fn => {
+                unlistenGenome = fn;
+            });
+
+            listen<number>('evaluating-genome-start', (event) => {
+                setLiveMetrics([]); // Clear live charts for the new genome
+                activeGenomeIndexRef.current = event.payload;
+                perGenomeMetricsRef.current.set(event.payload, []);
+            }).then(fn => {
+                unlistenStart = fn;
+            });
+
+            listen<BatchMetrics>('evaluating-batch-metrics', (event) => {
+                setLiveMetrics(prev => [...prev, event.payload]);
+                // Also store per-genome
+                const idx = activeGenomeIndexRef.current;
+                const arr = perGenomeMetricsRef.current.get(idx);
+                if (arr) arr.push(event.payload);
+            }).then(fn => {
+                unlistenBatch = fn;
+            });
+
+            // Progressive per-genome result update
+            listen<GenomeResultEvent>('evaluating-genome-result', (event) => {
+                const { index, loss, accuracy } = event.payload;
+                const genomeMetrics = perGenomeMetricsRef.current.get(index) || [];
+                setGenerationHistory(prev => {
+                    if (prev.length === 0) return prev;
+                    const updated = [...prev];
+                    const last = { ...updated[updated.length - 1] };
+                    const genomes = [...last.genomes];
+                    if (index < genomes.length) {
+                        genomes[index] = {
+                            ...genomes[index],
+                            loss,
+                            accuracy,
+                            trainingMetrics: [...genomeMetrics],
+                            resources: genomes[index].genome.GetGenomeResources()
+                        };
+                    }
+                    last.genomes = genomes;
+                    updated[updated.length - 1] = last;
+                    return updated;
+                });
+            }).then(fn => {
+                unlistenResult = fn;
+            });
+        });
+
+        return () => {
+            if (unlistenGenome) unlistenGenome();
+            if (unlistenStart) unlistenStart();
+            if (unlistenBatch) unlistenBatch();
+            if (unlistenResult) unlistenResult();
+        };
+    }, []);
 
     const addLog = useCallback((msg: string, type: LogEntry['type'] = 'info') => {
         setLogs(prev => [...prev.slice(-49), { time: new Date().toLocaleTimeString(), message: msg, type }]);
@@ -51,11 +150,14 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
     const stopEvolution = useCallback(() => {
         setIsRunning(false);
         isRunningRef.current = false;
+        // Signal the Rust backend to stop the current evaluation pass
+        invoke('stop_evolution').catch(err => console.error('Failed to stop backend:', err));
         addLog("Evolution stopped by user.", "warn");
     }, [addLog]);
 
     // Initial Spawning (from multiple library seeds or a fallback graph)
-    const initPopulation = useCallback(async (seedJSONs: string[], popSize: number = 20) => {
+    const initPopulation = useCallback(async (seedJSONs: string[]) => {
+        const popSize = settings.populationSize;
         const genomes: PopulatedGenome[] = [];
         try {
             // First pass: instantiate all selected seeds
@@ -88,12 +190,32 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                     const seedStr = await serializeGenome(baseSeed);
                     let { genome: clone } = await deserializeGenome(seedStr);
 
-                    // Heavily mutate the clone to build initial diversity
-                    // Apply a few rounds of mutation to drift away from the seed
-                    const mutationRounds = Math.floor(Math.random() * 3) + 1;
+                    // === Guaranteed diversity: force at least one structural mutation ===
                     const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
+                    let mutated = false;
+                    const maxMutAttempts = 10;
 
-                    for (let r = 0; r < mutationRounds; r++) {
+                    for (let attempt = 0; attempt < maxMutAttempts && !mutated; attempt++) {
+                        // Pick a random structural mutation and force-apply it
+                        const structuralMutations = [
+                            () => clone.MutateAddNode(maxNodes),
+                            () => clone.MutateRemoveNode(),
+                            () => clone.MutateRemoveSubgraph(),
+                            ...(settings.mutationRates.addSkipConnection ? [() => clone.MutateAddSkipConnection(maxNodes)] : []),
+                            ...(settings.mutationRates.changeLayerType ? [() => clone.MutateChangeLayerType(maxNodes)] : []),
+                        ];
+
+                        const pick = structuralMutations[Math.floor(Math.random() * structuralMutations.length)];
+                        const res = pick();
+                        if (res) {
+                            clone = res.genome;
+                            mutated = true;
+                        }
+                    }
+
+                    // Additional probabilistic mutation rounds for extra variance
+                    const extraRounds = Math.floor(Math.random() * 3);
+                    for (let r = 0; r < extraRounds; r++) {
                         const dynamicRates = settings.useAdaptiveMutation
                             ? getAdaptiveMutationRates(clone.getAllNodes().length)
                             : {
@@ -122,17 +244,17 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                             const res = clone.MutateChangeLayerType(maxNodes);
                             if (res) clone = res.genome;
                         }
+                    }
 
-                        // Params mutation
-                        if (settings.mutationRates.params && Math.random() < settings.mutationRates.params) {
-                            const mutationOpts = new Map<string, number>();
-                            mutationOpts.set('params', settings.mutationRates.params);
-                            clone.getAllNodes().forEach(node => {
-                                if (typeof (node as any).Mutate === 'function') {
-                                    (node as any).Mutate(mutationOpts);
-                                }
-                            });
-                        }
+                    // Always apply params mutation to ensure weight diversity
+                    {
+                        const mutationOpts = new Map<string, number>();
+                        mutationOpts.set('params', settings.mutationRates.params || 0.5);
+                        clone.getAllNodes().forEach(node => {
+                            if (typeof (node as any).Mutate === 'function') {
+                                (node as any).Mutate(mutationOpts);
+                            }
+                        });
                     }
 
                     genomes.push({
@@ -154,6 +276,16 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             setPopulation(genomes);
             setGeneration(0);
             setStats([]);
+
+            // Save pre-eval snapshot so genomes are visible immediately
+            setGenerationHistory([{
+                generation: 0,
+                genomes: [...genomes],
+                bestFitness: 0,
+                avgNodes: Math.round(genomes.reduce((acc, g) => acc + g.nodes.length, 0) / genomes.length),
+                timestamp: new Date().toLocaleTimeString(),
+                evaluated: false
+            }]);
             addLog(`Spawned Generation 0: ${seedJSONs.length} direct seeds, ${popSize - seedJSONs.length} mutated clones.`, "info");
         } catch (e) {
             addLog(`Failed to initialize population: ${String(e)}`, "error");
@@ -193,22 +325,34 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                 testSplit,
             });
 
-            // 3. Map Results & Apply Parsimony Pressure (Bloat Control)
+            // 3. Map Results & Apply Fitness (Parsimony + Resource-Aware)
             const alpha = settings.useParsimonyPressure ? settings.parsimonyAlpha : 0;
             const evaluatedPop = population.map((p, index) => {
                 const res = results[index];
                 const nodeCount = p.genome.getAllNodes().length;
+                const resources = p.genome.GetGenomeResources();
 
-                // Let's assume fitness is inversely proportional to Loss (higher fitness is better).
-                // Base Fitness = (1.0 - Loss) or just -Loss.
-                // We will use Accuracy for fitness if available, or (1 / (1 + Loss))
-                const baseFitness = res.accuracy > 0 ? res.accuracy : (1 / (1 + res.loss));
+                let baseFitness = res.accuracy > 0 ? res.accuracy : (1 / (1 + res.loss));
+
+                // Resource-Aware Fitness penalty
+                if (settings.useResourceAwareFitness) {
+                    const flashPenalty = Math.max(0, resources.totalFlash - settings.resourceTargets.flash) / settings.resourceTargets.flash;
+                    const ramPenalty = Math.max(0, resources.totalRam - settings.resourceTargets.ram) / settings.resourceTargets.ram;
+                    const macsPenalty = Math.max(0, resources.totalMacs - settings.resourceTargets.macs) / settings.resourceTargets.macs;
+                    const resourcePenalty = (flashPenalty + ramPenalty + macsPenalty) / 3;
+                    baseFitness *= Math.max(0.1, 1.0 - resourcePenalty);
+                }
+
+                // Attach per-genome training metrics
+                const genomeMetrics = perGenomeMetricsRef.current.get(index) || [];
 
                 return {
                     ...p,
                     loss: res.loss,
                     accuracy: res.accuracy,
-                    adjustedFitness: baseFitness - (alpha * nodeCount)
+                    adjustedFitness: baseFitness - (alpha * nodeCount),
+                    trainingMetrics: genomeMetrics,
+                    resources
                 };
             });
 
@@ -234,8 +378,35 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                 avgNodes
             }]);
 
+            // Finalize the current generation's snapshot with fitness scores
+            setGenerationHistory(prev => {
+                if (prev.length === 0) return prev;
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                    generation,
+                    genomes: [...evaluatedPop],
+                    bestFitness: best.adjustedFitness || 0,
+                    avgNodes,
+                    timestamp: new Date().toLocaleTimeString(),
+                    evaluated: true
+                };
+                return updated;
+            });
+
+            // Clear per-genome metrics for next generation
+            perGenomeMetricsRef.current = new Map();
+
             // 5. Check if we should stop
             if (!isRunningRef.current) return;
+
+            // Max generations auto-stop
+            if (settings.useMaxGenerations && generation + 1 >= settings.maxGenerations) {
+                addLog(`Reached max generations limit (${settings.maxGenerations}). Stopping evolution.`, "warn");
+                setIsRunning(false);
+                isRunningRef.current = false;
+                invoke('stop_evolution').catch(() => { });
+                return;
+            }
 
             // 6. Selection, Crossover, Mutation (Breed next generation)
             addLog(`Breeding Generation ${generation + 1}...`);
@@ -354,6 +525,17 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             setPopulation(nextGen);
             setGeneration(g => g + 1);
 
+            // Save pre-eval snapshot for the new generation immediately
+            const nextGenNum = generation + 1;
+            setGenerationHistory(prev => [...prev, {
+                generation: nextGenNum,
+                genomes: [...nextGen],
+                bestFitness: 0,
+                avgNodes: Math.round(nextGen.reduce((acc, g) => acc + g.nodes.length, 0) / nextGen.length),
+                timestamp: new Date().toLocaleTimeString(),
+                evaluated: false
+            }]);
+
             // Timeout to yield to React rendering before next loop iteration
             setTimeout(() => {
                 if (isRunningRef.current) {
@@ -441,6 +623,9 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
         hallOfFame,
         logs,
         stats,
-        runGeneration // Exposed to be called manually or via useEffect
+        runGeneration, // Exposed to be called manually or via useEffect
+        currentEvaluatingIndex,
+        liveMetrics,
+        generationHistory
     };
 };

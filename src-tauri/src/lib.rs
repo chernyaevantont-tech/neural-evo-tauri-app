@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rfd::AsyncFileDialog;
 
@@ -13,6 +16,27 @@ use serde::{Deserialize, Serialize};
 pub mod data_loader;
 pub mod dtos;
 pub mod entities;
+
+/// Global session counter. Incremented by `stop_evolution`.
+/// Each `evaluate_population` call captures a snapshot; if the current value
+/// differs from the snapshot, the evaluation is cancelled.
+static EVOLUTION_SESSION: AtomicU64 = AtomicU64::new(0);
+
+/// Global cache: hash(genome_json + training_params) -> (loss, accuracy).
+/// Persists across generations within the app lifetime. Any parameter difference = different hash.
+static GENOME_EVAL_CACHE: std::sync::LazyLock<Mutex<HashMap<u64, (f32, f32)>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[tauri::command]
+async fn stop_evolution() -> Result<(), String> {
+    let prev = EVOLUTION_SESSION.fetch_add(1, Ordering::SeqCst);
+    println!(
+        ">>> Evolution cancellation requested (session {} -> {}).",
+        prev,
+        prev + 1
+    );
+    Ok(())
+}
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -301,6 +325,7 @@ pub struct EvaluationResult {
 
 #[tauri::command]
 async fn evaluate_population(
+    app_handle: tauri::AppHandle,
     genomes: Vec<String>,
     dataset_profile: String,
     batch_size: usize,
@@ -348,7 +373,10 @@ async fn evaluate_population(
         ));
     }
 
-    let loader = match crate::data_loader::DataLoader::new(profile.clone()) {
+    use tauri::{Emitter, Manager};
+    let app_data_dir = app_handle.path().app_data_dir().ok();
+
+    let loader = match crate::data_loader::DataLoader::new(profile.clone(), app_data_dir) {
         Ok(l) => l,
         Err(e) => return Err(e),
     };
@@ -486,20 +514,32 @@ async fn evaluate_population(
                 let mut batch_targets: Vec<Vec<crate::entities::DynamicTensor<Backend>>> = vec![Vec::new(); target_stream_indices.len()];
 
                 for id in chunk {
-                    if let Ok(sample) = $loader.load_sample(id, $dev) {
-                        for (i, &stream_idx) in input_stream_indices.iter().enumerate() {
-                            if let Some(t) = sample.stream_tensors.get(&stream_idx) {
-                                let t_clone: crate::entities::DynamicTensor<Backend> = t.clone();
-                                batch_inputs[i].push(t_clone);
+                    match $loader.load_sample(id, $dev) {
+                        Ok(sample) => {
+                            for (i, &stream_idx) in input_stream_indices.iter().enumerate() {
+                                if let Some(t) = sample.stream_tensors.get(&stream_idx) {
+                                    let t_clone: crate::entities::DynamicTensor<Backend> = t.clone();
+                                    batch_inputs[i].push(t_clone);
+                                }
+                            }
+                            for (i, &stream_idx) in target_stream_indices.iter().enumerate() {
+                                if let Some(t) = sample.stream_tensors.get(&stream_idx) {
+                                    let t_clone: crate::entities::DynamicTensor<Backend> = t.clone();
+                                    batch_targets[i].push(t_clone);
+                                }
                             }
                         }
-                        for (i, &stream_idx) in target_stream_indices.iter().enumerate() {
-                            if let Some(t) = sample.stream_tensors.get(&stream_idx) {
-                                let t_clone: crate::entities::DynamicTensor<Backend> = t.clone();
-                                batch_targets[i].push(t_clone);
-                            }
+                        Err(e) => {
+                            eprintln!("[ERROR] Sample '{}' dropped during load: {}", id, e);
                         }
                     }
+                }
+
+                if !batch_inputs.iter().all(|list| !list.is_empty()) || !batch_targets.iter().all(|list| !list.is_empty()) {
+                    eprintln!("[DEBUG] Skipping batch. Input lens: {:?}, Target lens: {:?}",
+                        batch_inputs.iter().map(|l| l.len()).collect::<Vec<_>>(),
+                        batch_targets.iter().map(|l| l.len()).collect::<Vec<_>>()
+                    );
                 }
 
                 if batch_inputs.iter().all(|list| !list.is_empty()) && batch_targets.iter().all(|list| !list.is_empty()) {
@@ -523,14 +563,94 @@ async fn evaluate_population(
         }};
     }
 
-    // 4. Evaluation Loop over each Genome
+    // 4. Build batches ONCE (reused for all genomes)
+    println!(">>> Assembling batches (shared across all genomes)...");
+    let train_batches = build_batches!(train_ids.as_slice(), loader, &device);
+    let val_batches = build_batches!(val_ids.as_slice(), loader, &device);
+    let test_batches = build_batches!(test_ids.as_slice(), loader, &device);
+
+    if train_batches.is_empty() {
+        return Err("No training batches could be assembled. Aborting.".to_string());
+    }
+
+    println!(
+        ">>> Assembled {} train + {} val + {} test batches. Starting genome evaluation...",
+        train_batches.len(),
+        val_batches.len(),
+        test_batches.len()
+    );
+
+    // 5. Evaluation Loop over each Genome
+    // Capture the current session counter — if stop_evolution() increments it,
+    // our snapshot won't match and we'll abort.
+    let session_snapshot = EVOLUTION_SESSION.load(Ordering::SeqCst);
+
     for (i, genome_str) in genomes.iter().enumerate() {
+        // Check cancellation between genomes
+        if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+            println!(">>> Evolution cancelled. Aborting remaining genomes.");
+            break;
+        }
+
+        // Emit current genome index to the frontend for UI synchronization
+        app_handle.emit("evaluating-genome", i).unwrap_or_else(|e| {
+            eprintln!("Failed to emit evaluating-genome event: {}", e);
+        });
+
         eprintln!(
             "\n===========================================================\nEvaluating Genome {}/{} (ID: genome_{})\n===========================================================",
             i + 1,
             genomes.len(),
             i
         );
+
+        // Compute a cache key from genome content + all training params
+        let cache_key = {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            genome_str.hash(&mut hasher);
+            dataset_profile.hash(&mut hasher);
+            batch_size.hash(&mut hasher);
+            eval_epochs.hash(&mut hasher);
+            dataset_percent.hash(&mut hasher);
+            train_split.hash(&mut hasher);
+            val_split.hash(&mut hasher);
+            test_split.hash(&mut hasher);
+            hasher.finish()
+        };
+
+        // Check cache for identical genome + training params
+        if let Some(&(cached_loss, cached_acc)) = GENOME_EVAL_CACHE.lock().unwrap().get(&cache_key)
+        {
+            eprintln!(
+                ">>> CACHE HIT for Genome {} (hash={:#x}): loss={}, acc={}",
+                i, cache_key, cached_loss, cached_acc
+            );
+            results.push(EvaluationResult {
+                genome_id: format!("genome_{}", i),
+                loss: cached_loss,
+                accuracy: cached_acc,
+            });
+
+            // Emit start + result events so the frontend updates progressively
+            let _ = app_handle.emit("evaluating-genome-start", i);
+            #[derive(serde::Serialize, Clone)]
+            struct CachedResult {
+                index: usize,
+                loss: f32,
+                accuracy: f32,
+            }
+            let _ = app_handle.emit(
+                "evaluating-genome-result",
+                CachedResult {
+                    index: i,
+                    loss: cached_loss,
+                    accuracy: cached_acc,
+                },
+            );
+            continue;
+        }
+
+        eprintln!("Genome JSON:\n{}", genome_str);
 
         match std::panic::catch_unwind(|| {
             crate::entities::GraphModel::<Backend>::build(
@@ -540,83 +660,156 @@ async fn evaluate_population(
                 Some(&output_overrides),
             )
         }) {
-            Ok(mut model) => {
-                let train_batches = build_batches!(train_ids.as_slice(), loader, &device);
-                let val_batches = build_batches!(val_ids.as_slice(), loader, &device);
-                let test_batches = build_batches!(test_ids.as_slice(), loader, &device);
+            Ok(_initial_model) => {
+                // Retry loop: if accuracy is near random chance, rebuild with fresh weights
+                const MAX_RETRIES: usize = 3;
+                const RANDOM_CHANCE_THRESHOLD: f32 = 55.0; // Below this = likely bad init
 
-                if train_batches.is_empty() {
-                    eprintln!(
-                        ">>> WARNING: No training batches assembled for Genome {}",
-                        i
+                let mut best_loss = 999.0_f32;
+                let mut best_acc = 0.0_f32;
+
+                for attempt in 0..MAX_RETRIES {
+                    // Check cancellation
+                    if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                        break;
+                    }
+
+                    // Rebuild model each attempt (fresh random weights)
+                    let mut model = crate::entities::GraphModel::<Backend>::build(
+                        genome_str,
+                        &device,
+                        Some(&input_overrides),
+                        Some(&output_overrides),
                     );
-                    results.push(EvaluationResult {
-                        genome_id: format!("genome_{}", i),
-                        loss: 999.0,
-                        accuracy: 0.0,
-                    });
-                    continue;
-                }
 
-                println!(
-                    ">>> Assembled {} train + {} val + {} test batches for Genome {}. Starting evaluation pass...",
-                    train_batches.len(),
-                    val_batches.len(),
-                    test_batches.len(),
-                    i
-                );
+                    // Let frontend know we are starting to evaluate a genome (so it clears live charts)
+                    let _ = app_handle.emit("evaluating-genome-start", i);
 
-                // Train on training set
-                crate::entities::run_eval_pass(
-                    &mut model,
-                    &train_batches,
-                    eval_epochs,
-                    0.001,
-                    is_classification,
-                );
+                    if attempt > 0 {
+                        eprintln!(
+                            ">>> RETRY {}/{} for Genome {} (previous acc={:.2}%, threshold={:.0}%)",
+                            attempt + 1,
+                            MAX_RETRIES,
+                            i,
+                            best_acc,
+                            RANDOM_CHANCE_THRESHOLD
+                        );
+                    }
 
-                crate::entities::run_validation_pass(
-                    &model,
-                    &val_batches,
-                    "Validation",
-                    is_classification,
-                );
-
-                // Evaluate fitness on test set (or val if no test batches, or train)
-                let (final_loss, final_acc) = if !test_batches.is_empty() {
-                    crate::entities::run_validation_pass(
-                        &model,
-                        &test_batches,
-                        "Test",
+                    // Train on training set
+                    crate::entities::run_eval_pass(
+                        &app_handle,
+                        &mut model,
+                        &train_batches,
+                        eval_epochs,
+                        0.001,
                         is_classification,
-                    )
-                } else if !val_batches.is_empty() {
-                    eprintln!(
-                        ">>> WARNING: No test batches. Using validation metrics for fitness."
+                        &EVOLUTION_SESSION,
+                        session_snapshot,
                     );
+
+                    // Check cancellation after training
+                    if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                        eprintln!(
+                            ">>> Cancelled after training for Genome {}. Skipping val/test.",
+                            i
+                        );
+                        break;
+                    }
+
                     crate::entities::run_validation_pass(
                         &model,
                         &val_batches,
                         "Validation",
                         is_classification,
-                    )
-                } else {
-                    eprintln!(
-                        ">>> WARNING: No validation/test batches. Using train metrics for fitness."
                     );
-                    crate::entities::run_validation_pass(
-                        &model,
-                        &train_batches,
-                        "Train",
-                        is_classification,
-                    )
-                };
+
+                    // Evaluate fitness on test set (or val if no test batches, or train)
+                    let (final_loss, final_acc) = if !test_batches.is_empty() {
+                        crate::entities::run_validation_pass(
+                            &model,
+                            &test_batches,
+                            "Test",
+                            is_classification,
+                        )
+                    } else if !val_batches.is_empty() {
+                        eprintln!(
+                            ">>> WARNING: No test batches. Using validation metrics for fitness."
+                        );
+                        crate::entities::run_validation_pass(
+                            &model,
+                            &val_batches,
+                            "Validation",
+                            is_classification,
+                        )
+                    } else {
+                        eprintln!(
+                            ">>> WARNING: No validation/test batches. Using train metrics for fitness."
+                        );
+                        crate::entities::run_validation_pass(
+                            &model,
+                            &train_batches,
+                            "Train",
+                            is_classification,
+                        )
+                    };
+
+                    // Keep the best attempt
+                    if final_acc > best_acc {
+                        best_loss = final_loss;
+                        best_acc = final_acc;
+                    }
+
+                    // If accuracy is above random chance, accept and stop retrying
+                    if final_acc > RANDOM_CHANCE_THRESHOLD {
+                        break;
+                    }
+
+                    if attempt < MAX_RETRIES - 1 {
+                        eprintln!(
+                            ">>> Genome {} attempt {} got acc={:.2}% (below {:.0}% threshold). Will retry with fresh weights.",
+                            i,
+                            attempt + 1,
+                            final_acc,
+                            RANDOM_CHANCE_THRESHOLD
+                        );
+                    }
+                }
+
+                // Check cancellation before pushing result
+                if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                    break;
+                }
 
                 results.push(EvaluationResult {
                     genome_id: format!("genome_{}", i),
-                    loss: final_loss,
-                    accuracy: final_acc,
+                    loss: best_loss,
+                    accuracy: best_acc,
                 });
+
+                // Notify frontend of this genome's result for progressive UI
+                #[derive(serde::Serialize, Clone)]
+                struct GenomeResult {
+                    index: usize,
+                    loss: f32,
+                    accuracy: f32,
+                }
+                let _ = app_handle.emit(
+                    "evaluating-genome-result",
+                    GenomeResult {
+                        index: i,
+                        loss: best_loss,
+                        accuracy: best_acc,
+                    },
+                );
+
+                // Only cache results above random chance threshold
+                if best_acc > RANDOM_CHANCE_THRESHOLD {
+                    GENOME_EVAL_CACHE
+                        .lock()
+                        .unwrap()
+                        .insert(cache_key, (best_loss, best_acc));
+                }
             }
             Err(err) => {
                 let msg = if let Some(s) = err.downcast_ref::<&str>() {
@@ -635,6 +828,22 @@ async fn evaluate_population(
                     loss: 999.0,
                     accuracy: 0.0,
                 });
+
+                // Notify frontend of this genome's failure result
+                #[derive(serde::Serialize, Clone)]
+                struct GenomeResult2 {
+                    index: usize,
+                    loss: f32,
+                    accuracy: f32,
+                }
+                let _ = app_handle.emit(
+                    "evaluating-genome-result",
+                    GenomeResult2 {
+                        index: i,
+                        loss: 999.0,
+                        accuracy: 0.0,
+                    },
+                );
             }
         }
     }
@@ -837,6 +1046,34 @@ async fn scan_dataset(
         dropped_count,
         stream_reports: reports,
     })
+}
+
+#[tauri::command]
+async fn cache_dataset(
+    app_handle: tauri::AppHandle,
+    dataset_profile_id: String,
+) -> Result<crate::data_loader::CacheResult, String> {
+    use tauri::Manager;
+    let profiles_json = load_dataset_profiles().await?;
+    let root: crate::dtos::DatasetProfilesRoot = serde_json::from_str(&profiles_json)
+        .map_err(|e| format!("Failed to parse dataset_profiles.json: {}", e))?;
+
+    let profile = root
+        .state
+        .profiles
+        .into_iter()
+        .find(|p| p.id == dataset_profile_id)
+        .ok_or_else(|| {
+            format!(
+                "Dataset profile '{}' not found in profiles JSON",
+                dataset_profile_id
+            )
+        })?;
+
+    let app_data_dir = app_handle.path().app_data_dir().ok();
+    let loader = crate::data_loader::DataLoader::new(profile, app_data_dir)?;
+    let result = loader.build_image_cache()?;
+    Ok(result)
 }
 
 // --- Genome Library ---
@@ -1085,7 +1322,9 @@ pub fn run() {
             test_neural_net_training,
             test_train_on_image_folder,
             evaluate_population,
+            stop_evolution,
             scan_dataset,
+            cache_dataset,
             list_library_genomes,
             save_to_library,
             delete_from_library,

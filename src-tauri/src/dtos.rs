@@ -89,7 +89,7 @@ pub struct DataStream {
 }
 
 #[derive(Deserialize, Clone, Debug)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type")]
 pub enum DataLocatorDef {
     GlobPattern {
         pattern: String,

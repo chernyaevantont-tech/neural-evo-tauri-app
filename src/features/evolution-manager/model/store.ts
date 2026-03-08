@@ -52,6 +52,14 @@ export interface EvolutionSettingsState {
     setEvalEpochs: (val: number) => void;
     datasetPercent: number;
     setDatasetPercent: (val: number) => void;
+
+    // Population & Generations
+    populationSize: number;
+    setPopulationSize: (val: number) => void;
+    maxGenerations: number;
+    useMaxGenerations: boolean;
+    setMaxGenerations: (val: number) => void;
+    setUseMaxGenerations: (val: boolean) => void;
 }
 
 export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) => ({
@@ -110,6 +118,13 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
     setEvalEpochs: (val) => set({ evalEpochs: val }),
     datasetPercent: 100,
     setDatasetPercent: (val) => set({ datasetPercent: Math.max(1, Math.min(100, val)) }),
+
+    populationSize: 20,
+    setPopulationSize: (val) => set({ populationSize: Math.max(4, Math.min(200, val)) }),
+    maxGenerations: 100,
+    useMaxGenerations: false,
+    setMaxGenerations: (val) => set({ maxGenerations: Math.max(1, val) }),
+    setUseMaxGenerations: (val) => set({ useMaxGenerations: val }),
 }));
 
 export function getAdaptiveMutationRates(currentNodes: number) {

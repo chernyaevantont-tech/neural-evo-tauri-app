@@ -17,3 +17,4 @@ export type { Position, VisualNode, VisualGenome, Connection } from './model/typ
 export { deserializeGenome } from './lib/deserializeGenome';
 export { serializeGenome } from './lib/serializeGenome';
 export { useCanvasGenomeStore } from './model/store';
+export { GenomeSvgPreview } from './ui/GenomeSvgPreview/GenomeSvgPreview';

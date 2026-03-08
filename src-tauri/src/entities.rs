@@ -68,13 +68,7 @@ pub fn concat_dynamic_tensors<B: Backend>(tensors: Vec<DynamicTensor<B>>) -> Dyn
 // Слои (обёртки для burn-слоёв)
 // ---------------------------------------------------------------------------
 
-#[derive(Module, Debug)]
-pub enum Layer<B: Backend> {
-    Conv2d(Conv2d<B>),
-    Dense(Linear<B>),
-    MaxPool2D(MaxPool2d),
-    AvgPool2D(AvgPool2d),
-}
+// Removed Layer enum to avoid hiding parameters from Burn
 
 // ---------------------------------------------------------------------------
 // Описание операции одной ноды
@@ -84,18 +78,18 @@ pub enum Layer<B: Backend> {
 pub enum Operation {
     Input(usize),
     Dense {
-        layer_idx: usize,
+        dense_idx: usize,
         activation: String,
     },
     Conv2D {
-        layer_idx: usize,
+        conv2d_idx: usize,
         activation: String,
     },
     MaxPool {
-        layer_idx: usize,
+        pool_idx: usize,
     },
     AvgPool {
-        layer_idx: usize,
+        pool_idx: usize,
     },
     Flatten,
     Add,
@@ -116,7 +110,10 @@ pub struct Instruction {
 
 #[derive(Module, Debug)]
 pub struct GraphModel<B: Backend> {
-    pub layers: Vec<Layer<B>>,
+    pub conv2ds: Vec<Conv2d<B>>,
+    pub denses: Vec<Linear<B>>,
+    pub max_pools: Vec<MaxPool2d>,
+    pub avg_pools: Vec<AvgPool2d>,
 
     pub execution_plan: Ignored<Vec<Instruction>>,
     pub use_counts: Vec<usize>,
@@ -251,7 +248,10 @@ impl<B: Backend> GraphModel<B> {
             }
         }
 
-        let mut layers = Vec::new();
+        let mut conv2ds = Vec::new();
+        let mut denses = Vec::new();
+        let mut max_pools = Vec::new();
+        let mut avg_pools = Vec::new();
         let mut execution_plan: Vec<Instruction> = Vec::new();
         let mut shape_cache = vec![vec![]; num_nodes];
 
@@ -288,9 +288,13 @@ impl<B: Backend> GraphModel<B> {
                         ))
                         .with_dilation([*dilation as usize; 2])
                         .with_bias(*use_bias)
+                        .with_initializer(burn::nn::Initializer::KaimingNormal {
+                            gain: 1.0,
+                            fan_out_only: false,
+                        })
                         .init(device);
 
-                    layers.push(Layer::Conv2d(conv));
+                    conv2ds.push(conv);
 
                     let h_in = prev_shape[1];
                     let w_in = prev_shape[2];
@@ -305,7 +309,7 @@ impl<B: Backend> GraphModel<B> {
 
                     (
                         Operation::Conv2D {
-                            layer_idx: layers.len() - 1,
+                            conv2d_idx: conv2ds.len() - 1,
                             activation: activation.clone(),
                         },
                         vec![*filters as usize, h_out, w_out],
@@ -320,6 +324,16 @@ impl<B: Backend> GraphModel<B> {
                     let prev_shape = &shape_cache[inputs_for_node[0]];
                     let d_input = prev_shape[0];
 
+                    // Guard: prevent absurdly large weight matrices (e.g., 254016 × 6272 = 1.6B params)
+                    const MAX_DENSE_PARAMS: usize = 50_000_000; // 50M params ~= 200MB
+                    let param_count = d_input * (*units as usize);
+                    if param_count > MAX_DENSE_PARAMS {
+                        panic!(
+                            "Dense layer too large: {}×{} = {} params (max {}). Architecture is infeasible.",
+                            d_input, units, param_count, MAX_DENSE_PARAMS
+                        );
+                    }
+
                     let linear = LinearConfig::new(d_input, *units as usize)
                         .with_bias(*use_bias)
                         .with_initializer(burn::nn::Initializer::KaimingNormal {
@@ -327,10 +341,10 @@ impl<B: Backend> GraphModel<B> {
                             fan_out_only: false,
                         })
                         .init(device);
-                    layers.push(Layer::Dense(linear));
+                    denses.push(linear);
                     (
                         Operation::Dense {
-                            layer_idx: layers.len() - 1,
+                            dense_idx: denses.len() - 1,
                             activation: activation.clone(),
                         },
                         vec![*units as usize],
@@ -395,8 +409,8 @@ impl<B: Backend> GraphModel<B> {
                                 if let Some(instr) =
                                     execution_plan.iter().find(|i| i.node_id == pred_id)
                                 {
-                                    if let Operation::Dense { layer_idx, .. } = &instr.op {
-                                        let layer_idx_val = *layer_idx;
+                                    if let Operation::Dense { dense_idx, .. } = &instr.op {
+                                        let layer_idx_val = *dense_idx;
                                         let pred_inputs = &node_inputs[pred_id];
 
                                         // 1. Rebuild linear layer if units don't match dataset classes
@@ -418,7 +432,7 @@ impl<B: Backend> GraphModel<B> {
                                                         },
                                                     )
                                                     .init(device);
-                                            layers[layer_idx_val] = Layer::Dense(new_linear);
+                                            denses[layer_idx_val] = new_linear;
                                             shape_cache[pred_id] = ov.clone();
 
                                             eprintln!(
@@ -482,9 +496,8 @@ impl<B: Backend> GraphModel<B> {
                         + 1;
                     let out_shape = vec![prev_shape[0], h_out, w_out];
 
-                    let layer_idx = layers.len();
                     if pool_type == "max" {
-                        layers.push(Layer::MaxPool2D(
+                        max_pools.push(
                             MaxPool2dConfig::new(k)
                                 .with_strides([*stride as usize; 2])
                                 .with_padding(PaddingConfig2d::Explicit(
@@ -492,10 +505,15 @@ impl<B: Backend> GraphModel<B> {
                                     *padding as usize,
                                 ))
                                 .init(),
-                        ));
-                        (Operation::MaxPool { layer_idx }, out_shape)
+                        );
+                        (
+                            Operation::MaxPool {
+                                pool_idx: max_pools.len() - 1,
+                            },
+                            out_shape,
+                        )
                     } else {
-                        layers.push(Layer::AvgPool2D(
+                        avg_pools.push(
                             AvgPool2dConfig::new(k)
                                 .with_strides([*stride as usize; 2])
                                 .with_padding(PaddingConfig2d::Explicit(
@@ -503,8 +521,13 @@ impl<B: Backend> GraphModel<B> {
                                     *padding as usize,
                                 ))
                                 .init(),
-                        ));
-                        (Operation::AvgPool { layer_idx }, out_shape)
+                        );
+                        (
+                            Operation::AvgPool {
+                                pool_idx: avg_pools.len() - 1,
+                            },
+                            out_shape,
+                        )
                     }
                 }
 
@@ -550,7 +573,10 @@ impl<B: Backend> GraphModel<B> {
         }
 
         Self {
-            layers,
+            conv2ds,
+            denses,
+            max_pools,
+            avg_pools,
             execution_plan: Ignored(execution_plan),
             use_counts,
             num_inputs,
@@ -600,12 +626,11 @@ impl<B: Backend> GraphModel<B> {
                 Operation::Input(idx) => inputs[*idx].clone(),
 
                 Operation::Dense {
-                    layer_idx,
+                    dense_idx,
                     activation,
                 } => {
-                    if let (DynamicTensor::Dim2(x), Layer::Dense(linear)) =
-                        (consume!(instr.input_ids[0]), &self.layers[*layer_idx])
-                    {
+                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
+                        let linear = &self.denses[*dense_idx];
                         let mut out = linear.forward(x);
                         out = match activation.as_str() {
                             "relu" => burn::tensor::activation::relu(out),
@@ -622,12 +647,11 @@ impl<B: Backend> GraphModel<B> {
                 }
 
                 Operation::Conv2D {
-                    layer_idx,
+                    conv2d_idx,
                     activation,
                 } => {
-                    if let (DynamicTensor::Dim4(x), Layer::Conv2d(conv)) =
-                        (consume!(instr.input_ids[0]), &self.layers[*layer_idx])
-                    {
+                    if let DynamicTensor::Dim4(x) = consume!(instr.input_ids[0]) {
+                        let conv = &self.conv2ds[*conv2d_idx];
                         let mut out = conv.forward(x);
                         out = match activation.as_str() {
                             "relu" => burn::tensor::activation::relu(out),
@@ -642,20 +666,18 @@ impl<B: Backend> GraphModel<B> {
                     }
                 }
 
-                Operation::MaxPool { layer_idx } => {
-                    if let (DynamicTensor::Dim4(x), Layer::MaxPool2D(pool)) =
-                        (consume!(instr.input_ids[0]), &self.layers[*layer_idx])
-                    {
+                Operation::MaxPool { pool_idx } => {
+                    if let DynamicTensor::Dim4(x) = consume!(instr.input_ids[0]) {
+                        let pool = &self.max_pools[*pool_idx];
                         DynamicTensor::Dim4(pool.forward(x))
                     } else {
                         unreachable!()
                     }
                 }
 
-                Operation::AvgPool { layer_idx } => {
-                    if let (DynamicTensor::Dim4(x), Layer::AvgPool2D(pool)) =
-                        (consume!(instr.input_ids[0]), &self.layers[*layer_idx])
-                    {
+                Operation::AvgPool { pool_idx } => {
+                    if let DynamicTensor::Dim4(x) = consume!(instr.input_ids[0]) {
+                        let pool = &self.avg_pools[*pool_idx];
                         DynamicTensor::Dim4(pool.forward(x))
                     } else {
                         unreachable!()
@@ -1114,13 +1136,25 @@ pub fn train_simple<B: AutodiffBackend>(
     model
 }
 
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct BatchMetrics {
+    pub epoch: usize,
+    pub batch: usize,
+    pub total_batches: usize,
+    pub loss: f32,
+    pub accuracy: f32,
+}
+
 #[allow(clippy::type_complexity)]
 pub fn run_eval_pass<B: AutodiffBackend>(
+    app_handle: &tauri::AppHandle,
     model: &mut GraphModel<B>,
     batches: &[DynamicBatch<B>],
     num_epochs: usize,
     learning_rate: f64,
     is_classification: bool,
+    session_counter: &std::sync::atomic::AtomicU64,
+    session_snapshot: u64,
 ) -> (f32, f32) {
     let mut optim = burn::optim::AdamConfig::new().init::<B, GraphModel<B>>();
 
@@ -1129,13 +1163,32 @@ pub fn run_eval_pass<B: AutodiffBackend>(
 
     let total_batches = batches.len();
     let log_interval = (total_batches / 10).max(1);
+    let mut prev_acc = 0.0;
 
     for epoch in 0..num_epochs {
+        // Check cancellation at the start of each epoch
+        if session_counter.load(std::sync::atomic::Ordering::SeqCst) != session_snapshot {
+            println!("  >>> Training cancelled at epoch {}.", epoch + 1);
+            break;
+        }
+
         let mut train_loss_sum = 0.0f32;
         let mut train_correct = 0;
         let mut train_total = 0;
 
         for (batch_idx, batch) in batches.iter().enumerate() {
+            // Check cancellation every 50 batches
+            if batch_idx % 50 == 0
+                && session_counter.load(std::sync::atomic::Ordering::SeqCst) != session_snapshot
+            {
+                println!(
+                    "  >>> Training cancelled at epoch {} batch {}.",
+                    epoch + 1,
+                    batch_idx + 1
+                );
+                return (final_loss, final_acc);
+            }
+
             // Clone inputs/targets so the autodiff graph is fresh each pass
             let cloned_inputs: Vec<DynamicTensor<B>> =
                 batch.inputs.iter().map(|t| t.clone()).collect();
@@ -1174,6 +1227,18 @@ pub fn run_eval_pass<B: AutodiffBackend>(
                     current_avg_loss,
                     current_acc
                 );
+
+                use tauri::Emitter;
+                let _ = app_handle.emit(
+                    "evaluating-batch-metrics",
+                    BatchMetrics {
+                        epoch: epoch + 1,
+                        batch: batch_idx + 1,
+                        total_batches,
+                        loss: current_avg_loss,
+                        accuracy: current_acc,
+                    },
+                );
             }
         }
 
@@ -1183,6 +1248,20 @@ pub fn run_eval_pass<B: AutodiffBackend>(
         } else {
             0.0
         };
+
+        if is_classification {
+            if epoch > 0 {
+                let improvement = final_acc - prev_acc;
+                if improvement < 1.0 && final_acc < 75.0 {
+                    println!(
+                        "  >>> Early stopping triggered: Accuracy stalled at {:.2}% (improvement: {:.2}%).",
+                        final_acc, improvement
+                    );
+                    break;
+                }
+            }
+            prev_acc = final_acc;
+        }
     }
 
     (final_loss, final_acc)

@@ -1,7 +1,7 @@
 import React from 'react';
 import styles from './DatasetManagerPage.module.css';
 import { TitleBar } from '../../widgets/title-bar/TitleBar';
-import { BsDatabaseAdd, BsFolder2Open, BsFiletypeCsv, BsSearch, BsCheckCircle, BsExclamationTriangle } from 'react-icons/bs';
+import { BsDatabaseAdd, BsFolder2Open, BsFiletypeCsv, BsSearch, BsCheckCircle, BsExclamationTriangle, BsLightningCharge } from 'react-icons/bs';
 import { useDatasetManagerStore, DatasetSourceType, ScanResult } from '../../features/dataset-manager/model/store';
 import { CreateDatasetModal } from './CreateDatasetModal';
 import { DataStreamsPanel } from './DataStreamsPanel';
@@ -12,6 +12,7 @@ export const DatasetManagerPage: React.FC = () => {
     const { profiles, selectedProfileId, setSelectedProfileId, removeProfile } = useDatasetManagerStore();
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isScanning, setIsScanning] = useState(false);
+    const [isCaching, setIsCaching] = useState(false);
 
     const getIcon = (type: DatasetSourceType) => {
         switch (type) {
@@ -75,6 +76,50 @@ export const DatasetManagerPage: React.FC = () => {
         }
     };
 
+    const handleCache = async (profileId: string) => {
+        setIsCaching(true);
+        try {
+            const result = await invoke<{
+                total_cached: number;
+                total_dropped: number;
+                dropped_sample_ids: string[];
+                class_counts: Record<string, number>;
+            }>('cache_dataset', { datasetProfileId: profileId });
+
+            const profile = useDatasetManagerStore.getState().profiles.find(p => p.id === profileId);
+            if (profile) {
+                // Build updated stream reports with real per-class counts from cache
+                const updatedStreamReports = (profile.scanResult?.streamReports || []).map(report => {
+                    if (report.discoveredClasses) {
+                        // Replace with actual per-class counts from cached data
+                        return {
+                            ...report,
+                            foundCount: result.total_cached,
+                            discoveredClasses: result.class_counts,
+                        };
+                    }
+                    return report;
+                });
+
+                const updatedScanResult: ScanResult = {
+                    totalMatched: result.total_cached,
+                    droppedCount: result.total_dropped,
+                    streamReports: updatedStreamReports,
+                    timestamp: new Date().toISOString(),
+                };
+
+                useDatasetManagerStore.getState().updateProfile(profileId, {
+                    scanResult: updatedScanResult,
+                    totalSamples: result.total_cached,
+                });
+            }
+        } catch (err) {
+            console.error('Caching failed:', err);
+        } finally {
+            setIsCaching(false);
+        }
+    };
+
     return (
         <>
             <TitleBar />
@@ -126,10 +171,20 @@ export const DatasetManagerPage: React.FC = () => {
                                                 className={styles.saveBtn}
                                                 style={{ background: 'var(--color-accent-primary)', padding: '0.5rem 1rem', fontSize: '0.85rem' }}
                                                 onClick={() => handleScan(profile.id)}
-                                                disabled={isScanning || !profile.sourcePath || profile.streams.length === 0}
+                                                disabled={isScanning || isCaching || !profile.sourcePath || profile.streams.length === 0}
                                             >
                                                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                                                     <BsSearch /> {isScanning ? 'Scanning...' : 'Scan & Validate'}
+                                                </span>
+                                            </button>
+                                            <button
+                                                className={styles.saveBtn}
+                                                style={{ background: 'var(--color-accent-secondary)', padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+                                                onClick={() => handleCache(profile.id)}
+                                                disabled={isScanning || isCaching || !profile.isScanned}
+                                            >
+                                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                                    <BsLightningCharge /> {isCaching ? 'Caching...' : 'Build AoT Cache'}
                                                 </span>
                                             </button>
                                             <button

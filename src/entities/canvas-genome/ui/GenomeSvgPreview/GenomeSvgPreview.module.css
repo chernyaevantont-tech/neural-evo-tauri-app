@@ -1,0 +1,84 @@
+.tooltipContainer {
+    position: fixed;
+    z-index: 1000;
+    width: 280px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    background-color: var(--color-bg-secondary);
+    border: 1px solid var(--color-border-primary);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    padding: 1rem;
+    pointer-events: none;
+    /* Let mouse events pass through the tooltip */
+    font-family: var(--font-family, system-ui, -apple-system, sans-serif);
+    color: var(--color-text-primary);
+}
+
+.tooltipTitle {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--color-border-primary);
+}
+
+.section {
+    margin-bottom: 0.75rem;
+}
+
+.section:last-child {
+    margin-bottom: 0;
+}
+
+.label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+    letter-spacing: 0.5px;
+}
+
+.value {
+    font-size: 0.9rem;
+    color: var(--color-text-primary);
+}
+
+.idStyle {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    font-family: monospace;
+    word-break: break-all;
+}
+
+.paramsContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    background-color: var(--color-bg-primary);
+    padding: 0.5rem;
+    border-radius: 6px;
+    border: 1px solid var(--color-border-primary);
+}
+
+.paramRow {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+.paramKey {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+    font-weight: 500;
+}
+
+.paramValue {
+    font-size: 0.85rem;
+    color: var(--color-text-primary);
+    font-family: monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
