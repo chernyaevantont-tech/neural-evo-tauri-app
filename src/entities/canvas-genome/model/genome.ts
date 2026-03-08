@@ -5,6 +5,9 @@ import { FlattenNode } from "./nodes/layers/flatten_node"
 import { PoolingNode } from "./nodes/layers/pooling_node"
 import { AddNode } from "./nodes/merge/add_node"
 
+/** Max parameter count for a single Dense layer (matches Rust guard: 50M params ~= 200MB) */
+const MAX_DENSE_PARAMS = 50_000_000;
+
 export class Genome {
     public inputNodes: BaseNode[]
     public outputNodes: BaseNode[]
@@ -119,6 +122,27 @@ export class Genome {
             totalMacs,
             totalNodes: allNodes.length
         };
+    }
+
+    /**
+     * Validates that no Dense layer in the genome exceeds the MAX_DENSE_PARAMS budget.
+     * Returns true if ALL Dense layers are within budget.
+     */
+    public static validateParamBudget(nodes: BaseNode[]): boolean {
+        for (const node of nodes) {
+            if (node.GetNodeType() === 'Dense') {
+                const inputDim = node.GetInputShape()[0] || 0;
+                const outputDim = node.GetOutputShape()[0] || 0;
+                const paramCount = inputDim * outputDim;
+                if (paramCount > MAX_DENSE_PARAMS) {
+                    console.warn(
+                        `[validateParamBudget] Dense layer ${node.id} too large: ${inputDim}×${outputDim} = ${paramCount} params (max ${MAX_DENSE_PARAMS}). Rejecting.`
+                    );
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     public GetRandomSubgenomeNodeIds(): string[] {
@@ -414,6 +438,8 @@ export class Genome {
             return null;
         }
 
+        if (!Genome.validateParamBudget(newNodes)) return null;
+
         return {
             genome: new Genome(newInputNodes, newOutputNodes),
             nodes: newNodes,
@@ -550,6 +576,8 @@ export class Genome {
                 }
 
                 newNodes.push(...adapters);
+
+                if (!Genome.validateParamBudget(newNodes)) return null;
 
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
@@ -716,6 +744,8 @@ export class Genome {
                 }
 
                 newNodes.push(...adapters);
+
+                if (!Genome.validateParamBudget(newNodes)) return null;
 
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
@@ -903,6 +933,8 @@ export class Genome {
 
                 console.log(`[MutateAddNode] Mutation successful. Inserted layer + ${inputAdapters.length + outputAdapters.length} adapters. New graph size: ${newNodes.length}`);
 
+                if (!Genome.validateParamBudget(newNodes)) return null;
+
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
                     nodes: newNodes,
@@ -1069,6 +1101,8 @@ export class Genome {
 
                 console.log(`[MutateAddSkipConnection] Added skip connection from ${sourceOrig.GetNodeType()} to AddNode before ${targetOrig.GetNodeType()}. Adapters: ${adapters.length}`);
 
+                if (!Genome.validateParamBudget(newNodes)) return null;
+
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
                     nodes: newNodes,
@@ -1221,6 +1255,8 @@ export class Genome {
                 }
 
                 console.log(`[MutateChangeLayerType] Replaced ${targetNodeOrig.GetNodeType()} with ${newLayer.GetNodeType()}`);
+
+                if (!Genome.validateParamBudget(finalNodes)) return null;
 
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
@@ -1396,6 +1432,8 @@ export class Genome {
                 }
 
                 console.log(`[BreedByReplacement] Replaced a ${recipientSubgenomeOriginal.length}-node subgraph with a ${donorSubgenome.length}-node subgraph from donor!`);
+
+                if (!Genome.validateParamBudget(newNodes)) return null;
 
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
@@ -1598,6 +1636,8 @@ export class Genome {
 
             console.log(`[BreedNeatStyle] Inserted disjoint node ${clonedTransplant.GetNodeType()} between anchors!`);
 
+            if (!Genome.validateParamBudget(newNodes)) return null;
+
             return {
                 genome: new Genome(newInputNodes, newOutputNodes),
                 nodes: newNodes,
@@ -1763,6 +1803,8 @@ export class Genome {
             if (maxNodes !== undefined && newNodes.length > maxNodes) {
                 return null;
             }
+
+            if (!Genome.validateParamBudget(newNodes)) return null;
 
             return {
                 genome: new Genome(newInputNodes, newOutputNodes),
