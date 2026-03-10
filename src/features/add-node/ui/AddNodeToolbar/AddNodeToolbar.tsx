@@ -14,6 +14,11 @@ export const AddNodeToolbar: React.FC = () => {
         { type: 'Flatten', label: 'Flatten' },
         { type: 'Add', label: 'Add' },
         { type: 'Concat2D', label: 'Concat' },
+        { type: 'Dropout', label: 'Dropout' },
+        { type: 'BatchNorm', label: 'BatchNorm' },
+        { type: 'LayerNorm', label: 'LayerNorm' },
+        { type: 'Dropout2D', label: 'Spatial DO' },
+        { type: 'GaussianNoise', label: 'Noise' },
         { type: 'Output', label: 'Output' },
     ];
 

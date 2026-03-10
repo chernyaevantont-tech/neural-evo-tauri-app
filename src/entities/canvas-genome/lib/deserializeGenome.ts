@@ -8,7 +8,12 @@ import {
     OutputNode,
     PoolingNode,
     AddNode,
-    Concat2DNode
+    Concat2DNode,
+    DropoutNode,
+    BatchNormNode,
+    LayerNormNode,
+    Dropout2DNode,
+    GaussianNoiseNode
 } from "..";
 
 export type ConnectionIndexes = { fromIndex: number, toIndex: number }[];
@@ -73,6 +78,37 @@ export const deserializeGenome = async (genomeStr: string): Promise<{
             case "Concat":
                 {
                     nodes.push(new Concat2DNode());
+                    break;
+                }
+            case "Dropout":
+                {
+                    const prob = obj.params.prob || 0.5;
+                    nodes.push(new DropoutNode(prob));
+                    break;
+                }
+            case "BatchNorm":
+                {
+                    const epsilon = obj.params.epsilon || 1e-5;
+                    const momentum = obj.params.momentum || 0.1;
+                    nodes.push(new BatchNormNode(epsilon, momentum));
+                    break;
+                }
+            case "LayerNorm":
+                {
+                    const epsilon = obj.params.epsilon || 1e-5;
+                    nodes.push(new LayerNormNode(epsilon));
+                    break;
+                }
+            case "Dropout2D":
+                {
+                    const prob = obj.params.prob || 0.5;
+                    nodes.push(new Dropout2DNode(prob));
+                    break;
+                }
+            case "GaussianNoise":
+                {
+                    const std_dev = obj.params.std_dev || 0.1;
+                    nodes.push(new GaussianNoiseNode(std_dev));
                     break;
                 }
             case "Output":

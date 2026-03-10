@@ -43,6 +43,22 @@ pub enum NodeDtoJSON {
     },
     Add {},
     Concat {},
+    Dropout {
+        prob: f64,
+    },
+    BatchNorm {
+        epsilon: f64,
+        momentum: f64,
+    },
+    LayerNorm {
+        epsilon: f64,
+    },
+    Dropout2D {
+        prob: f64,
+    },
+    GaussianNoise {
+        std_dev: f64,
+    },
 }
 
 // ---------------------------------------------------------------------------

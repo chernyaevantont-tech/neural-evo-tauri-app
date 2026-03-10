@@ -38,4 +38,6 @@ export class InputNode extends BaseNode {
     );
 
     public GetIsMerging = (): boolean => false;
+
+    public override CanHaveInput = (): boolean => false;
 }

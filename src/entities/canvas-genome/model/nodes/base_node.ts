@@ -31,13 +31,20 @@ export abstract class BaseNode {
 
     /** Checks if this node can structurally accept a connection FROM `node`. */
     public CanAcceptConnectionFrom(node: BaseNode, isDisconnectedCheck: boolean = false): boolean {
-        // Input nodes can NEVER accept incoming connections
-        if (this.GetNodeType() === "Input") {
+        // Source node must be able to have outputs
+        if (!node.CanHaveOutput()) {
             return false;
         }
 
-        // Output of source must match Expected Input of this (target)
-        if (node.GetNodeType() === "Output") return false;
+        // Target node (this) must be able to have inputs
+        if (!this.CanHaveInput()) {
+            return false;
+        }
+
+        // Source and target must not be the same
+        if (this.id === node.id) {
+            return false;
+        }
 
         // If this node isn't a merge node, it can only accept 1 incoming connection
         if (!this.GetIsMerging()) {
@@ -171,4 +178,14 @@ export abstract class BaseNode {
     protected abstract _CloneImpl(): BaseNode;
 
     public abstract GetIsMerging(): boolean;
+
+    /** Returns true if this node can have incoming connections. */
+    public CanHaveInput(): boolean {
+        return true;
+    }
+
+    /** Returns true if this node can have outgoing connections. */
+    public CanHaveOutput(): boolean {
+        return true;
+    }
 }

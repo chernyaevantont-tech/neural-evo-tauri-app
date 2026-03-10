@@ -39,4 +39,6 @@ export class OutputNode extends BaseNode {
     );
 
     public GetIsMerging = (): boolean => false;
+
+    public override CanHaveOutput = (): boolean => false;
 }

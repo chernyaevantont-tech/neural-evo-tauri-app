@@ -10,7 +10,8 @@ use burn::{
     lr_scheduler::constant::ConstantLr,
     module::{Ignored, Module},
     nn::{
-        Linear, LinearConfig, PaddingConfig2d,
+        BatchNorm, BatchNormConfig, Dropout, DropoutConfig, LayerNorm, LayerNormConfig, Linear,
+        LinearConfig, PaddingConfig2d,
         conv::{Conv2d, Conv2dConfig},
         loss::{CrossEntropyLossConfig, MseLoss},
         pool::{AvgPool2d, AvgPool2dConfig, MaxPool2d, MaxPool2dConfig},
@@ -94,6 +95,21 @@ pub enum Operation {
     Flatten,
     Add,
     Concat,
+    Dropout {
+        dropout_idx: usize,
+    },
+    BatchNorm {
+        batch_norm_idx: usize,
+    },
+    LayerNorm {
+        layer_norm_idx: usize,
+    },
+    Dropout2D {
+        dropout_2d_idx: usize,
+    },
+    GaussianNoise {
+        std_dev: f64,
+    },
     Output(usize),
 }
 
@@ -114,7 +130,10 @@ pub struct GraphModel<B: Backend> {
     pub denses: Vec<Linear<B>>,
     pub max_pools: Vec<MaxPool2d>,
     pub avg_pools: Vec<AvgPool2d>,
-
+    pub dropouts: Vec<Dropout>,
+    pub batch_norms_2d: Vec<BatchNorm<B>>, // For [B, F]
+    pub batch_norms_4d: Vec<BatchNorm<B>>, // For [B, C, H, W]
+    pub layer_norms: Vec<LayerNorm<B>>,
     pub execution_plan: Ignored<Vec<Instruction>>,
     pub use_counts: Vec<usize>,
     pub num_inputs: usize,
@@ -192,7 +211,7 @@ impl<B: Backend> GraphModel<B> {
         raw_data: &str,
         device: &B::Device,
         input_shape_overrides: Option<&[Vec<usize>]>,
-        output_shape_overrides: Option<&[Vec<usize>]>,
+        _output_shape_overrides: Option<&[Vec<usize>]>,
     ) -> Self {
         let mut configs = Vec::new();
         let mut edges = Vec::new();
@@ -216,7 +235,6 @@ impl<B: Backend> GraphModel<B> {
         }
 
         let num_nodes = configs.len();
-
         let mut in_degrees = vec![0; num_nodes];
         let mut adj_list = vec![vec![]; num_nodes];
         let mut node_inputs = vec![vec![]; num_nodes];
@@ -229,7 +247,6 @@ impl<B: Backend> GraphModel<B> {
             use_counts[from] += 1;
         }
 
-        // Топологическая сортировка (BFS / Кан)
         let mut queue: VecDeque<usize> = in_degrees
             .iter()
             .enumerate()
@@ -252,12 +269,15 @@ impl<B: Backend> GraphModel<B> {
         let mut denses = Vec::new();
         let mut max_pools = Vec::new();
         let mut avg_pools = Vec::new();
+        let mut dropouts = Vec::new();
+        let mut batch_norms_2d = Vec::new();
+        let mut batch_norms_4d = Vec::new();
+        let mut layer_norms = Vec::new();
+
         let mut execution_plan: Vec<Instruction> = Vec::new();
         let mut shape_cache = vec![vec![]; num_nodes];
-
         let mut num_inputs = 0;
         let mut num_outputs = 0;
-
         let mut input_shapes = Vec::new();
         let mut output_shapes = Vec::new();
 
@@ -266,108 +286,15 @@ impl<B: Backend> GraphModel<B> {
             let inputs_for_node = node_inputs[node_id].clone();
 
             let (op, out_shape) = match config {
-                NodeDtoJSON::Conv2D {
-                    filters,
-                    kernel_size,
-                    stride,
-                    padding,
-                    dilation,
-                    use_bias,
-                    activation,
-                } => {
-                    let prev_shape = &shape_cache[inputs_for_node[0]];
-                    let d_input = prev_shape[0];
-
-                    let k = [kernel_size.h as usize, kernel_size.w as usize];
-
-                    let conv = Conv2dConfig::new([d_input, *filters as usize], k)
-                        .with_stride([*stride as usize; 2])
-                        .with_padding(PaddingConfig2d::Explicit(
-                            *padding as usize,
-                            *padding as usize,
-                        ))
-                        .with_dilation([*dilation as usize; 2])
-                        .with_bias(*use_bias)
-                        .with_initializer(burn::nn::Initializer::KaimingNormal {
-                            gain: 1.0,
-                            fan_out_only: false,
-                        })
-                        .init(device);
-
-                    conv2ds.push(conv);
-
-                    let h_in = prev_shape[1];
-                    let w_in = prev_shape[2];
-                    let h_out = (h_in + 2 * (*padding as usize))
-                        .saturating_sub((*dilation as usize) * (k[0] - 1) + 1)
-                        / (*stride as usize)
-                        + 1;
-                    let w_out = (w_in + 2 * (*padding as usize))
-                        .saturating_sub((*dilation as usize) * (k[1] - 1) + 1)
-                        / (*stride as usize)
-                        + 1;
-
-                    (
-                        Operation::Conv2D {
-                            conv2d_idx: conv2ds.len() - 1,
-                            activation: activation.clone(),
-                        },
-                        vec![*filters as usize, h_out, w_out],
-                    )
-                }
-
-                NodeDtoJSON::Dense {
-                    units,
-                    activation,
-                    use_bias,
-                } => {
-                    let prev_shape = &shape_cache[inputs_for_node[0]];
-                    let d_input = prev_shape[0];
-
-                    // Guard: prevent absurdly large weight matrices (e.g., 254016 × 6272 = 1.6B params)
-                    const MAX_DENSE_PARAMS: usize = 50_000_000; // 50M params ~= 200MB
-                    let param_count = d_input * (*units as usize);
-                    if param_count > MAX_DENSE_PARAMS {
-                        panic!(
-                            "Dense layer too large: {}×{} = {} params (max {}). Architecture is infeasible.",
-                            d_input, units, param_count, MAX_DENSE_PARAMS
-                        );
-                    }
-
-                    let linear = LinearConfig::new(d_input, *units as usize)
-                        .with_bias(*use_bias)
-                        .with_initializer(burn::nn::Initializer::KaimingNormal {
-                            gain: 1.0,
-                            fan_out_only: false,
-                        })
-                        .init(device);
-                    denses.push(linear);
-                    (
-                        Operation::Dense {
-                            dense_idx: denses.len() - 1,
-                            activation: activation.clone(),
-                        },
-                        vec![*units as usize],
-                    )
-                }
-
-                NodeDtoJSON::Flatten {} => {
-                    let prev_shape = &shape_cache[inputs_for_node[0]];
-                    let flat_size = prev_shape[0] * prev_shape[1] * prev_shape[2];
-                    (Operation::Flatten, vec![flat_size])
-                }
-
                 NodeDtoJSON::Input { output_shape } => {
-                    let op = Operation::Input(num_inputs);
                     let input_idx = num_inputs;
                     num_inputs += 1;
 
-                    // Use override if provided, otherwise fall back to genome JSON
                     let internal_shape = if let Some(overrides) = input_shape_overrides {
                         if input_idx < overrides.len() {
                             let ov = &overrides[input_idx];
                             input_shapes.push(ov.clone());
-                            ov.clone() // Already in [C, H, W] format from caller
+                            ov.clone()
                         } else {
                             let shape: Vec<usize> =
                                 output_shape.iter().map(|&v| v as usize).collect();
@@ -388,94 +315,75 @@ impl<B: Backend> GraphModel<B> {
                         }
                     };
 
-                    (op, internal_shape)
+                    (Operation::Input(input_idx), internal_shape)
                 }
 
-                NodeDtoJSON::Output { input_shape } => {
-                    let op = Operation::Output(num_outputs);
-                    let output_idx = num_outputs;
-                    num_outputs += 1;
+                NodeDtoJSON::Conv2D {
+                    filters,
+                    kernel_size,
+                    stride,
+                    padding,
+                    dilation,
+                    use_bias,
+                    activation,
+                } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let in_channels = prev_shape[0];
+                    let h_in = prev_shape[1];
+                    let w_in = prev_shape[2];
+                    let k_h = kernel_size.h as usize;
+                    let k_w = kernel_size.w as usize;
 
-                    let shape = if let Some(overrides) = output_shape_overrides {
-                        if output_idx < overrides.len() {
-                            let ov = overrides[output_idx].clone();
+                    let conv = Conv2dConfig::new([in_channels, *filters as usize], [k_h, k_w])
+                        .with_stride([*stride as usize; 2])
+                        .with_padding(PaddingConfig2d::Explicit(
+                            *padding as usize,
+                            *padding as usize,
+                        ))
+                        .with_dilation([*dilation as usize; 2])
+                        .with_bias(*use_bias)
+                        .init(device);
 
-                            // Format the predecessor Dense layer to match new output requirements
-                            if inputs_for_node.len() == 1 {
-                                let pred_id = inputs_for_node[0];
-                                let pred_shape = &shape_cache[pred_id];
+                    let conv_idx = conv2ds.len();
+                    conv2ds.push(conv);
 
-                                // Find the Dense layer for the predecessor
-                                if let Some(instr) =
-                                    execution_plan.iter().find(|i| i.node_id == pred_id)
-                                {
-                                    if let Operation::Dense { dense_idx, .. } = &instr.op {
-                                        let layer_idx_val = *dense_idx;
-                                        let pred_inputs = &node_inputs[pred_id];
+                    let h_out =
+                        (h_in + 2 * (*padding as usize) - (*dilation as usize) * (k_h - 1) - 1)
+                            / (*stride as usize)
+                            + 1;
+                    let w_out =
+                        (w_in + 2 * (*padding as usize) - (*dilation as usize) * (k_w - 1) - 1)
+                            / (*stride as usize)
+                            + 1;
 
-                                        // 1. Rebuild linear layer if units don't match dataset classes
-                                        if pred_shape.len() == 1
-                                            && ov.len() == 1
-                                            && pred_shape[0] != ov[0]
-                                        {
-                                            let d_input = if !pred_inputs.is_empty() {
-                                                shape_cache[pred_inputs[0]][0]
-                                            } else {
-                                                pred_shape[0] // Fallback
-                                            };
-                                            let new_linear =
-                                                burn::nn::LinearConfig::new(d_input, ov[0])
-                                                    .with_initializer(
-                                                        burn::nn::Initializer::KaimingNormal {
-                                                            gain: 1.0,
-                                                            fan_out_only: false,
-                                                        },
-                                                    )
-                                                    .init(device);
-                                            denses[layer_idx_val] = new_linear;
-                                            shape_cache[pred_id] = ov.clone();
+                    (
+                        Operation::Conv2D {
+                            conv2d_idx: conv_idx,
+                            activation: activation.clone(),
+                        },
+                        vec![*filters as usize, h_out, w_out],
+                    )
+                }
 
-                                            eprintln!(
-                                                ">>> Overrode predecessor Dense (node {}) to {} units",
-                                                pred_id, ov[0]
-                                            );
-                                        }
-
-                                        // 2. ALWAYS force "linear" activation on pre-Output Dense
-                                        // CrossEntropyLoss applies log_softmax internally,
-                                        // so the last Dense must output raw logits.
-                                        if let Some(instr_mut) =
-                                            execution_plan.iter_mut().find(|i| i.node_id == pred_id)
-                                        {
-                                            if let Operation::Dense { activation, .. } =
-                                                &mut instr_mut.op
-                                            {
-                                                if activation != "linear" {
-                                                    eprintln!(
-                                                        ">>> Forcing pre-Output Dense (node {}) activation from '{}' to 'linear'",
-                                                        pred_id, activation
-                                                    );
-                                                    *activation = "linear".to_string();
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            output_shapes.push(ov.clone());
-                            ov
-                        } else {
-                            let s: Vec<usize> = input_shape.iter().map(|&v| v as usize).collect();
-                            output_shapes.push(s.clone());
-                            s
-                        }
-                    } else {
-                        let s: Vec<usize> = input_shape.iter().map(|&v| v as usize).collect();
-                        output_shapes.push(s.clone());
-                        s
-                    };
-                    (op, shape)
+                NodeDtoJSON::Dense {
+                    units,
+                    activation,
+                    use_bias,
+                } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let d_input = prev_shape[0];
+                    let linear = LinearConfig::new(d_input, *units as usize)
+                        .with_bias(*use_bias)
+                        .init(device);
+                    let dense_idx = denses.len();
+                    denses.push(linear);
+                    (
+                        Operation::Dense {
+                            dense_idx,
+                            activation: activation.clone(),
+                        },
+                        vec![*units as usize],
+                    )
                 }
 
                 NodeDtoJSON::Pooling {
@@ -485,9 +393,7 @@ impl<B: Backend> GraphModel<B> {
                     padding,
                 } => {
                     let prev_shape = &shape_cache[inputs_for_node[0]];
-
                     let k = [kernel_size.h as usize, kernel_size.w as usize];
-
                     let h_out = (prev_shape[1] + 2 * (*padding as usize)).saturating_sub(k[0])
                         / (*stride as usize)
                         + 1;
@@ -531,60 +437,81 @@ impl<B: Backend> GraphModel<B> {
                     }
                 }
 
-                NodeDtoJSON::Add {} => {
-                    let first_id = inputs_for_node[0];
-                    let expected_shape = &shape_cache[first_id];
-
-                    for &in_id in inputs_for_node.iter().skip(1) {
-                        let actual_shape = &shape_cache[in_id];
-                        if expected_shape != actual_shape {
-                            panic!(
-                                "AddNode shape mismatch: Node {} shape {:?} vs Node {} shape {:?}",
-                                first_id, expected_shape, in_id, actual_shape
-                            );
-                        }
-                    }
-
-                    (Operation::Add, expected_shape.clone())
+                NodeDtoJSON::Flatten {} => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    (Operation::Flatten, vec![prev_shape.iter().product()])
                 }
 
-                NodeDtoJSON::Concat {} => {
-                    let first_id = inputs_for_node[0];
-                    let first_shape = &shape_cache[first_id];
+                NodeDtoJSON::Add {} => (Operation::Add, shape_cache[inputs_for_node[0]].clone()),
 
+                NodeDtoJSON::Concat {} => {
+                    let first_shape = &shape_cache[inputs_for_node[0]];
                     let mut total_channels = first_shape[0];
                     for &in_id in inputs_for_node.iter().skip(1) {
-                        let actual_shape = &shape_cache[in_id];
-
-                        // Concat validation (assuming concatenation on channel dimension 0)
-                        if first_shape.len() != actual_shape.len() {
-                            panic!(
-                                "ConcatNode dimension mismatch: Node {} ({:?}) vs Node {} ({:?})",
-                                first_id, first_shape, in_id, actual_shape
-                            );
-                        }
-
-                        if first_shape.len() == 3 {
-                            // Spatial dims (H, W) must match
-                            if first_shape[1] != actual_shape[1]
-                                || first_shape[2] != actual_shape[2]
-                            {
-                                panic!(
-                                    "ConcatNode spatial mismatch: Node {} ({:?}) vs Node {} ({:?})",
-                                    first_id, first_shape, in_id, actual_shape
-                                );
-                            }
-                        }
-
-                        total_channels += actual_shape[0];
+                        total_channels += shape_cache[in_id][0];
                     }
-
-                    let out_shape = if first_shape.len() == 3 {
-                        vec![total_channels, first_shape[1], first_shape[2]]
-                    } else {
-                        vec![total_channels]
-                    };
+                    let mut out_shape = first_shape.clone();
+                    out_shape[0] = total_channels;
                     (Operation::Concat, out_shape)
+                }
+
+                NodeDtoJSON::Dropout { prob } => {
+                    let dropout_idx = dropouts.len();
+                    dropouts.push(DropoutConfig::new(*prob).init());
+                    (
+                        Operation::Dropout { dropout_idx },
+                        shape_cache[inputs_for_node[0]].clone(),
+                    )
+                }
+
+                NodeDtoJSON::BatchNorm { epsilon, momentum } => {
+                    let in_shape = &shape_cache[inputs_for_node[0]];
+                    let num_features = in_shape[0];
+                    let bn = BatchNormConfig::new(num_features)
+                        .with_epsilon(*epsilon)
+                        .with_momentum(*momentum)
+                        .init(device);
+                    if in_shape.len() == 3 {
+                        let batch_norm_idx = batch_norms_4d.len();
+                        batch_norms_4d.push(bn);
+                        (Operation::BatchNorm { batch_norm_idx }, in_shape.clone())
+                    } else {
+                        let batch_norm_idx = batch_norms_2d.len();
+                        batch_norms_2d.push(bn);
+                        (Operation::BatchNorm { batch_norm_idx }, in_shape.clone())
+                    }
+                }
+
+                NodeDtoJSON::LayerNorm { epsilon } => {
+                    let in_shape = &shape_cache[inputs_for_node[0]];
+                    let ln = LayerNormConfig::new(*in_shape.last().unwrap())
+                        .with_epsilon(*epsilon)
+                        .init(device);
+                    let layer_norm_idx = layer_norms.len();
+                    layer_norms.push(ln);
+                    (Operation::LayerNorm { layer_norm_idx }, in_shape.clone())
+                }
+
+                NodeDtoJSON::Dropout2D { prob } => {
+                    let dropout_2d_idx = dropouts.len();
+                    dropouts.push(DropoutConfig::new(*prob).init());
+                    (
+                        Operation::Dropout2D { dropout_2d_idx },
+                        shape_cache[inputs_for_node[0]].clone(),
+                    )
+                }
+
+                NodeDtoJSON::GaussianNoise { std_dev } => (
+                    Operation::GaussianNoise { std_dev: *std_dev },
+                    shape_cache[inputs_for_node[0]].clone(),
+                ),
+
+                NodeDtoJSON::Output { .. } => {
+                    let out_idx = num_outputs;
+                    num_outputs += 1;
+                    let out_sh = shape_cache[inputs_for_node[0]].clone();
+                    output_shapes.push(out_sh.clone());
+                    (Operation::Output(out_idx), out_sh)
                 }
             };
 
@@ -617,6 +544,10 @@ impl<B: Backend> GraphModel<B> {
             denses,
             max_pools,
             avg_pools,
+            dropouts,
+            batch_norms_2d,
+            batch_norms_4d,
+            layer_norms,
             execution_plan: Ignored(execution_plan),
             use_counts,
             num_inputs,
@@ -631,12 +562,13 @@ impl<B: Backend> GraphModel<B> {
     // -----------------------------------------------------------------------
 
     pub fn forward(&self, inputs: &[DynamicTensor<B>]) -> Vec<DynamicTensor<B>> {
-        self.forward_internal(inputs, false)
+        self.forward_internal(inputs, false, false)
     }
 
     pub fn forward_internal(
         &self,
         inputs: &[DynamicTensor<B>],
+        is_training: bool,
         debug: bool,
     ) -> Vec<DynamicTensor<B>> {
         assert_eq!(inputs.len(), self.num_inputs);
@@ -787,6 +719,76 @@ impl<B: Backend> GraphModel<B> {
                     }
                 }
 
+                Operation::Dropout { dropout_idx } => {
+                    let input = consume!(instr.input_ids[0]);
+                    let dropout = &self.dropouts[*dropout_idx];
+                    match input {
+                        DynamicTensor::Dim2(t) => DynamicTensor::Dim2(dropout.forward(t)),
+                        DynamicTensor::Dim4(t) => DynamicTensor::Dim4(dropout.forward(t)),
+                    }
+                }
+
+                Operation::BatchNorm { batch_norm_idx } => {
+                    let input = consume!(instr.input_ids[0]);
+                    match input {
+                        DynamicTensor::Dim2(t) => {
+                            let bn = &self.batch_norms_2d[*batch_norm_idx];
+                            DynamicTensor::Dim2(bn.forward(t))
+                        }
+                        DynamicTensor::Dim4(t) => {
+                            let bn = &self.batch_norms_4d[*batch_norm_idx];
+                            DynamicTensor::Dim4(bn.forward(t))
+                        }
+                    }
+                }
+
+                Operation::LayerNorm { layer_norm_idx } => {
+                    let input = consume!(instr.input_ids[0]);
+                    let ln = &self.layer_norms[*layer_norm_idx];
+                    match input {
+                        DynamicTensor::Dim2(t) => DynamicTensor::Dim2(ln.forward(t)),
+                        DynamicTensor::Dim4(t) => DynamicTensor::Dim4(ln.forward(t)),
+                    }
+                }
+
+                Operation::Dropout2D { dropout_2d_idx } => {
+                    let input = consume!(instr.input_ids[0]);
+                    if is_training {
+                        // For now, use standard Dropout as approximate if SpatialDropout not available
+                        let dropout = &self.dropouts[*dropout_2d_idx];
+                        match input {
+                            DynamicTensor::Dim2(t) => DynamicTensor::Dim2(dropout.forward(t)),
+                            DynamicTensor::Dim4(t) => DynamicTensor::Dim4(dropout.forward(t)),
+                        }
+                    } else {
+                        input
+                    }
+                }
+
+                Operation::GaussianNoise { std_dev } => {
+                    let input = consume!(instr.input_ids[0]);
+                    if is_training {
+                        match input {
+                            DynamicTensor::Dim2(t) => {
+                                let noise = burn::tensor::Tensor::random_like(
+                                    &t,
+                                    burn::tensor::Distribution::Normal(0.0, *std_dev),
+                                );
+                                DynamicTensor::Dim2(t + noise)
+                            }
+                            DynamicTensor::Dim4(t) => {
+                                let noise = burn::tensor::Tensor::random_like(
+                                    &t,
+                                    burn::tensor::Distribution::Normal(0.0, *std_dev),
+                                );
+                                DynamicTensor::Dim4(t + noise)
+                            }
+                        }
+                    } else {
+                        input
+                    }
+                }
+
                 _ => unreachable!(),
             };
 
@@ -872,7 +874,7 @@ impl<B: AutodiffBackend> TrainStep for GraphModel<B> {
 
     fn step(&self, batch: DynamicBatch<B>) -> TrainOutput<DynamicOutput<B>> {
         // 1. Прямой проход
-        let predictions = self.forward(&batch.inputs);
+        let predictions = self.forward_internal(&batch.inputs, true, false);
 
         // 2. Вычисление ошибки
         let loss = self.compute_loss(&predictions, &batch.targets);
@@ -1089,7 +1091,7 @@ pub fn train_simple<B: AutodiffBackend>(
                 println!("=== Starting first forward pass with debug logs ===");
             }
             // Прямой проход
-            let predictions = model.forward_internal(&batch.inputs, is_first_step);
+            let predictions = model.forward_internal(&batch.inputs, true, is_first_step);
 
             // Вычисление loss
             let loss = model.compute_loss(&predictions, &batch.targets);
@@ -1126,7 +1128,7 @@ pub fn train_simple<B: AutodiffBackend>(
         let mut valid_total = 0;
 
         for batch in valid_batches {
-            let predictions = model.forward_internal(&batch.inputs, false);
+            let predictions = model.forward_internal(&batch.inputs, false, false);
             let loss = model.compute_loss(&predictions, &batch.targets);
             valid_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];
 
@@ -1158,7 +1160,7 @@ pub fn train_simple<B: AutodiffBackend>(
         let mut test_correct = 0;
         let mut test_total = 0;
         for batch in test_batches {
-            let predictions = model.forward_internal(&batch.inputs, false);
+            let predictions = model.forward_internal(&batch.inputs, false, false);
             let (batch_correct, batch_total) = compute_accuracy(&predictions, &batch.targets, true);
             test_correct += batch_correct;
             test_total += batch_total;
@@ -1235,7 +1237,7 @@ pub fn run_eval_pass<B: AutodiffBackend>(
             let cloned_targets: Vec<DynamicTensor<B>> =
                 batch.targets.iter().map(|t| t.clone()).collect();
 
-            let predictions = model.forward_internal(&cloned_inputs, false);
+            let predictions = model.forward_internal(&cloned_inputs, true, false);
             let loss = model.compute_loss(&predictions, &cloned_targets);
 
             let grads = loss.backward();
@@ -1324,7 +1326,7 @@ pub fn run_validation_pass<B: AutodiffBackend>(
         let cloned_targets: Vec<DynamicTensor<B>> =
             batch.targets.iter().map(|t| t.clone()).collect();
 
-        let predictions = model.forward_internal(&cloned_inputs, false);
+        let predictions = model.forward_internal(&cloned_inputs, false, false);
         let loss = model.compute_loss(&predictions, &cloned_targets);
 
         val_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];

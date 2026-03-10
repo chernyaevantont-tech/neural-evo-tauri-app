@@ -9,6 +9,11 @@ import {
   PoolingNode,
   AddNode,
   Concat2DNode,
+  DropoutNode,
+  BatchNormNode,
+  LayerNormNode,
+  Dropout2DNode,
+  GaussianNoiseNode,
   ActivationFunction,
   KernelSize,
   PoolType
@@ -64,6 +69,12 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
   const [poolPadding, setPoolPadding] = useState<number>(0);
   const [outputShapeLength, setOutputShapeLength] = useState<number>(1);
   const [outputShape, setOutputShape] = useState<number[]>([1]);
+  const [dropoutProb, setDropoutProb] = useState<number>(0.5);
+  const [bnEpsilon, setBnEpsilon] = useState<number>(1e-5);
+  const [bnMomentum, setBnMomentum] = useState<number>(0.1);
+  const [lnEpsilon, setLnEpsilon] = useState<number>(1e-5);
+  const [dropout2dProb, setDropout2dProb] = useState<number>(0.5);
+  const [gaussianNoiseStdDev, setGaussianNoiseStdDev] = useState<number>(0.1);
 
   const handleSave = () => {
     try {
@@ -92,6 +103,21 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
           break;
         case 'Concat2D':
           newNode = new Concat2DNode();
+          break;
+        case 'Dropout':
+          newNode = new DropoutNode(dropoutProb);
+          break;
+        case 'BatchNorm':
+          newNode = new BatchNormNode(bnEpsilon, bnMomentum);
+          break;
+        case 'LayerNorm':
+          newNode = new LayerNormNode(lnEpsilon);
+          break;
+        case 'Dropout2D':
+          newNode = new Dropout2DNode(dropout2dProb);
+          break;
+        case 'GaussianNoise':
+          newNode = new GaussianNoiseNode(gaussianNoiseStdDev);
           break;
         case 'Output':
           newNode = new OutputNode(outputShape);
@@ -125,7 +151,7 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
         />
       </FormField>
       {inputShape.map((d, i) => (
-        <FormField label={`Dimension ${i + 1}`}>
+        <FormField key={i} label={`Dimension ${i + 1}`}>
           <input
             className={styles.input}
             type="number"
@@ -161,7 +187,7 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
         />
       </FormField>
       {outputShape.map((d, i) => (
-        <FormField label={`Dimension ${i + 1}`}>
+        <FormField key={i} label={`Dimension ${i + 1}`}>
           <input
             className={styles.input}
             type="number"
@@ -259,6 +285,49 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
     </>
   );
 
+  const renderDropoutConfig = () => (
+    <>
+      <FormField label="Probability">
+        <input className={styles.input} type="number" step="0.1" min="0" max="1" value={dropoutProb} onChange={(e) => setDropoutProb(parseFloat(e.target.value) || 0)} />
+      </FormField>
+    </>
+  );
+
+  const renderBatchNormConfig = () => (
+    <>
+      <FormField label="Epsilon">
+        <input className={styles.input} type="number" step="0.00001" min="0" value={bnEpsilon} onChange={(e) => setBnEpsilon(parseFloat(e.target.value) || 0)} />
+      </FormField>
+      <FormField label="Momentum">
+        <input className={styles.input} type="number" step="0.01" min="0" max="1" value={bnMomentum} onChange={(e) => setBnMomentum(parseFloat(e.target.value) || 0.1)} />
+      </FormField>
+    </>
+  );
+
+  const renderLayerNormConfig = () => (
+    <>
+      <FormField label="Epsilon">
+        <input className={styles.input} type="number" step="0.00001" min="0" value={lnEpsilon} onChange={(e) => setLnEpsilon(parseFloat(e.target.value) || 0)} />
+      </FormField>
+    </>
+  );
+
+  const renderDropout2DConfig = () => (
+    <>
+      <FormField label="Probability">
+        <input className={styles.input} type="number" step="0.1" min="0" max="1" value={dropout2dProb} onChange={(e) => setDropout2dProb(parseFloat(e.target.value) || 0)} />
+      </FormField>
+    </>
+  );
+
+  const renderGaussianNoiseConfig = () => (
+    <>
+      <FormField label="Std Dev">
+        <input className={styles.input} type="number" step="0.01" min="0" value={gaussianNoiseStdDev} onChange={(e) => setGaussianNoiseStdDev(parseFloat(e.target.value) || 0)} />
+      </FormField>
+    </>
+  );
+
   return (
     <Modal isOpen={true} onClose={onCancel} title="Add Node" maxWidth="500px">
       <div className={styles.form}>
@@ -267,6 +336,11 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
         {nodeType === 'Dense' && renderDenseConfig()}
         {nodeType === 'Conv2D' && renderConv2DConfig()}
         {nodeType === 'Pooling' && renderPoolingConfig()}
+        {nodeType === 'Dropout' && renderDropoutConfig()}
+        {nodeType === 'BatchNorm' && renderBatchNormConfig()}
+        {nodeType === 'LayerNorm' && renderLayerNormConfig()}
+        {nodeType === 'Dropout2D' && renderDropout2DConfig()}
+        {nodeType === 'GaussianNoise' && renderGaussianNoiseConfig()}
         {(nodeType === 'Add' || nodeType === 'Concat2D' || nodeType === 'Flatten') && (
           <p className={styles.nodeConfigText}>
             This node has no configurable parameters.
@@ -285,4 +359,3 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
     </Modal>
   );
 };
-
