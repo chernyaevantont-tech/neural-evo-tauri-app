@@ -531,16 +531,56 @@ impl<B: Backend> GraphModel<B> {
                     }
                 }
 
-                NodeDtoJSON::Add {} => (Operation::Add, shape_cache[inputs_for_node[0]].clone()),
+                NodeDtoJSON::Add {} => {
+                    let first_id = inputs_for_node[0];
+                    let expected_shape = &shape_cache[first_id];
+
+                    for &in_id in inputs_for_node.iter().skip(1) {
+                        let actual_shape = &shape_cache[in_id];
+                        if expected_shape != actual_shape {
+                            panic!(
+                                "AddNode shape mismatch: Node {} shape {:?} vs Node {} shape {:?}",
+                                first_id, expected_shape, in_id, actual_shape
+                            );
+                        }
+                    }
+
+                    (Operation::Add, expected_shape.clone())
+                }
 
                 NodeDtoJSON::Concat {} => {
-                    let prev_shape = &shape_cache[inputs_for_node[0]];
-                    let mut total_channels = prev_shape[0];
+                    let first_id = inputs_for_node[0];
+                    let first_shape = &shape_cache[first_id];
+
+                    let mut total_channels = first_shape[0];
                     for &in_id in inputs_for_node.iter().skip(1) {
-                        total_channels += shape_cache[in_id][0];
+                        let actual_shape = &shape_cache[in_id];
+
+                        // Concat validation (assuming concatenation on channel dimension 0)
+                        if first_shape.len() != actual_shape.len() {
+                            panic!(
+                                "ConcatNode dimension mismatch: Node {} ({:?}) vs Node {} ({:?})",
+                                first_id, first_shape, in_id, actual_shape
+                            );
+                        }
+
+                        if first_shape.len() == 3 {
+                            // Spatial dims (H, W) must match
+                            if first_shape[1] != actual_shape[1]
+                                || first_shape[2] != actual_shape[2]
+                            {
+                                panic!(
+                                    "ConcatNode spatial mismatch: Node {} ({:?}) vs Node {} ({:?})",
+                                    first_id, first_shape, in_id, actual_shape
+                                );
+                            }
+                        }
+
+                        total_channels += actual_shape[0];
                     }
-                    let out_shape = if prev_shape.len() == 3 {
-                        vec![total_channels, prev_shape[1], prev_shape[2]]
+
+                    let out_shape = if first_shape.len() == 3 {
+                        vec![total_channels, first_shape[1], first_shape[2]]
                     } else {
                         vec![total_channels]
                     };

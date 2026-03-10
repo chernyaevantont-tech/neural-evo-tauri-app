@@ -512,10 +512,32 @@
 }
 
 .genPageLabel {
-    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    font-size: 0.85rem;
     color: var(--color-text-secondary);
     flex: 1;
-    text-align: center;
+    justify-content: center;
+}
+
+.evalStatus {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.1rem 0.6rem;
+    border-radius: 10px;
+}
+
+.evalStatusProgress {
+    background-color: rgba(100, 108, 255, 0.2);
+    color: var(--color-accent-primary);
+    border: 1px solid var(--color-accent-primary);
+}
+
+.evalStatusDone {
+    background-color: rgba(80, 250, 123, 0.1);
+    color: var(--color-success);
+    border: 1px solid var(--color-success);
 }
 
 .autoFollowLabel {
@@ -600,4 +622,45 @@
 .genomeRow td:first-child {
     color: var(--color-text-secondary);
     font-weight: 600;
+}
+
+.evaluatingRow {
+    background-color: rgba(100, 108, 255, 0.15) !important;
+    position: relative;
+    font-weight: 600;
+}
+
+.evaluatingRow::after {
+    content: "Evaluating...";
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.7rem;
+    color: var(--color-accent-primary);
+    font-style: italic;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 0.4;
+    }
+
+    50% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0.4;
+    }
+}
+
+.accValue {
+    font-weight: 600;
+    color: var(--color-success);
+}
+
+.accValueLow {
+    color: var(--color-danger);
 }

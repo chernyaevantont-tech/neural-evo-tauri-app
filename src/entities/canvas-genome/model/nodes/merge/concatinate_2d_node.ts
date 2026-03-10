@@ -2,16 +2,30 @@ import { BaseNode, ResourceCriteria } from "../base_node";
 
 export class Concat2DNode extends BaseNode {
     protected CalculateOutputShape(): void {
-        if (this.previous.length == 0) {
-            return
+        if (this.previous.length === 0) {
+            this.inputShape = [];
+            this.outputShape = [];
+            return;
         }
 
-        const h = this.previous[0].GetOutputShape()[0]
-        const w = this.previous[0].GetOutputShape()[1]
-        const c = this.previous.reduce((result, current) => result + current.GetOutputShape()[2], 0)
+        const firstShape = this.previous[0].GetOutputShape();
+        if (firstShape.length < 3) {
+            this.inputShape = [...firstShape];
+            this.outputShape = [...firstShape];
+            return;
+        }
+
+        const h = firstShape[0];
+        const w = firstShape[1];
+
+        // Sum channels across all inputs, guarding against invalid shapes
+        const c = this.previous.reduce((sum, node) => {
+            const s = node.GetOutputShape();
+            return sum + (s.length === 3 ? s[2] : 0);
+        }, 0);
 
         this.inputShape = [h, w, 0];
-        this.outputShape = [h, w, c]
+        this.outputShape = [h, w, c];
     }
 
     GetInfo(): string {
@@ -51,8 +65,6 @@ export class Concat2DNode extends BaseNode {
 
         return true;
     }
-
-
 
     public GetNodeType = () => "Concat";
 

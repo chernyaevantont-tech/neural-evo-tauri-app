@@ -3,7 +3,9 @@ import { BaseNode, ResourceCriteria } from "../base_node";
 export class AddNode extends BaseNode {
     protected CalculateOutputShape(): void {
         if (this.previous.length > 0) {
-            this.outputShape = [...this.previous[0].GetOutputShape()]
+            const firstInputShape = this.previous[0].GetOutputShape();
+            this.inputShape = [...firstInputShape];
+            this.outputShape = [...firstInputShape];
         } else {
             this.outputShape = [...this.inputShape]
         }

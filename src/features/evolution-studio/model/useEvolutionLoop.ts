@@ -94,6 +94,8 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                 setLiveMetrics([]); // Clear live charts for the new genome
                 activeGenomeIndexRef.current = event.payload;
                 perGenomeMetricsRef.current.set(event.payload, []);
+                // Add log for the user
+                addLog(`Starting evaluation for Genome #${event.payload + 1}...`, 'info');
             }).then(fn => {
                 unlistenStart = fn;
             });
@@ -164,6 +166,12 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             const seedInstances = [];
             for (const seedStr of seedJSONs) {
                 const { genome, nodes } = await deserializeGenome(seedStr);
+
+                if (!Genome.isGenomeFeasible(nodes)) {
+                    addLog(`Seed genome is architecturally invalid or excessive. Skipping.`, "warn");
+                    continue;
+                }
+
                 seedInstances.push(genome);
                 genomes.push({
                     id: crypto.randomUUID(),
@@ -257,10 +265,19 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                         });
                     }
 
+                    const finalNodes = clone.getAllNodes();
+                    if (!Genome.isGenomeFeasible(finalNodes)) {
+                        console.warn(`[initPopulation] Mutated clone failed feasibility check. Retrying.`);
+                        if (initAttempts % 10 === 0) {
+                            addLog(`Retrying mutation (structural mismatch or budget limit hit)...`, "warn");
+                        }
+                        continue;
+                    }
+
                     genomes.push({
                         id: crypto.randomUUID(),
                         genome: clone,
-                        nodes: clone.getAllNodes()
+                        nodes: finalNodes
                     });
                 } catch (e) {
                     console.warn(`[initPopulation] Seed mutation failed (likely shape mismatch). Attempt ${initAttempts}/${popSize * 10}`, e);
@@ -511,10 +528,18 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                         });
                     }
 
+                    const nextGenNodes = childGenome.getAllNodes();
+                    if (!Genome.isGenomeFeasible(nextGenNodes)) {
+                        if (breedAttempts % 10 === 0) {
+                            addLog(`Rejected invalid child (shape mismatch). Retrying breeding...`, "warn");
+                        }
+                        continue;
+                    }
+
                     nextGen.push({
                         id: crypto.randomUUID(),
                         genome: childGenome,
-                        nodes: childGenome.getAllNodes()
+                        nodes: nextGenNodes
                     });
                 } catch (e) {
                     console.warn(`[Breed] Child generation failed (likely shape mismatch). Attempt ${breedAttempts}/${popSize * 10}`, e);

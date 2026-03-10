@@ -46,7 +46,7 @@ export class Genome {
                 current = current.next[0];
             }
 
-            return chain;
+            return chain; 10
         };
 
         // Собираем все узлы графа через BFS
@@ -142,6 +142,73 @@ export class Genome {
                 }
             }
         }
+        return true;
+    }
+
+    /**
+     * Performs a full shape propagation and verifies that all merge nodes (Add, Concat)
+     * are structurally consistent (matching dimensions).
+     * Returns true if the graph is structurally valid.
+     */
+    public static validateStructuralIntegrity(nodes: BaseNode[]): boolean {
+        // 1. Refresh all shapes from Input nodes
+        const inputNodes = nodes.filter(n => n.GetNodeType() === 'Input');
+        if (inputNodes.length === 0) return false;
+
+        const visited = new Set<string>();
+        for (const inputNode of inputNodes) {
+            inputNode.PropagateShapeUpdate(visited);
+        }
+
+        // 2. Validate all merging nodes for internal compatibility
+        for (const node of nodes) {
+            const nodeType = node.GetNodeType();
+
+            if (nodeType === 'Add') {
+                if (node.previous.length === 0) continue;
+                const firstShape = node.previous[0].GetOutputShape();
+
+                for (let i = 1; i < node.previous.length; i++) {
+                    const otherShape = node.previous[i].GetOutputShape();
+                    if (firstShape.length !== otherShape.length ||
+                        !firstShape.every((v, j) => v === otherShape[j])) {
+                        console.warn(
+                            `[validateStructuralIntegrity] AddNode ${node.id} mismatch: ` +
+                            `Node ${node.previous[0].id} (${JSON.stringify(firstShape)}) vs ` +
+                            `Node ${node.previous[i].id} (${JSON.stringify(otherShape)}). Rejecting.`
+                        );
+                        return false;
+                    }
+                }
+            } else if (nodeType === 'Concat') {
+                if (node.previous.length === 0) continue;
+                const firstShape = node.previous[0].GetOutputShape();
+
+                // Assuming Concat2D (3D shapes: [H, W, C])
+                if (firstShape.length === 3) {
+                    for (let i = 1; i < node.previous.length; i++) {
+                        const otherShape = node.previous[i].GetOutputShape();
+                        if (otherShape.length !== 3 ||
+                            firstShape[0] !== otherShape[0] ||
+                            firstShape[1] !== otherShape[1]) {
+                            console.warn(
+                                `[validateStructuralIntegrity] ConcatNode ${node.id} spatial mismatch: ` +
+                                `Node ${node.previous[0].id} (${JSON.stringify(firstShape)}) vs ` +
+                                `Node ${node.previous[i].id} (${JSON.stringify(otherShape)}). Rejecting.`
+                            );
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /** Combined check for all feasibility constraints */
+    public static isGenomeFeasible(nodes: BaseNode[]): boolean {
+        if (!Genome.validateStructuralIntegrity(nodes)) return false;
+        if (!Genome.validateParamBudget(nodes)) return false;
         return true;
     }
 
@@ -438,7 +505,7 @@ export class Genome {
             return null;
         }
 
-        if (!Genome.validateParamBudget(newNodes)) return null;
+        if (!Genome.isGenomeFeasible(newNodes)) return null;
 
         return {
             genome: new Genome(newInputNodes, newOutputNodes),
@@ -577,7 +644,7 @@ export class Genome {
 
                 newNodes.push(...adapters);
 
-                if (!Genome.validateParamBudget(newNodes)) return null;
+                if (!Genome.isGenomeFeasible(newNodes)) return null;
 
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
@@ -745,7 +812,7 @@ export class Genome {
 
                 newNodes.push(...adapters);
 
-                if (!Genome.validateParamBudget(newNodes)) return null;
+                if (!Genome.isGenomeFeasible(newNodes)) return null;
 
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
@@ -933,7 +1000,7 @@ export class Genome {
 
                 console.log(`[MutateAddNode] Mutation successful. Inserted layer + ${inputAdapters.length + outputAdapters.length} adapters. New graph size: ${newNodes.length}`);
 
-                if (!Genome.validateParamBudget(newNodes)) return null;
+                if (!Genome.isGenomeFeasible(newNodes)) return null;
 
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
@@ -1101,7 +1168,7 @@ export class Genome {
 
                 console.log(`[MutateAddSkipConnection] Added skip connection from ${sourceOrig.GetNodeType()} to AddNode before ${targetOrig.GetNodeType()}. Adapters: ${adapters.length}`);
 
-                if (!Genome.validateParamBudget(newNodes)) return null;
+                if (!Genome.isGenomeFeasible(newNodes)) return null;
 
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
@@ -1256,7 +1323,7 @@ export class Genome {
 
                 console.log(`[MutateChangeLayerType] Replaced ${targetNodeOrig.GetNodeType()} with ${newLayer.GetNodeType()}`);
 
-                if (!Genome.validateParamBudget(finalNodes)) return null;
+                if (!Genome.isGenomeFeasible(finalNodes)) return null;
 
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
@@ -1433,7 +1500,7 @@ export class Genome {
 
                 console.log(`[BreedByReplacement] Replaced a ${recipientSubgenomeOriginal.length}-node subgraph with a ${donorSubgenome.length}-node subgraph from donor!`);
 
-                if (!Genome.validateParamBudget(newNodes)) return null;
+                if (!Genome.isGenomeFeasible(newNodes)) return null;
 
                 return {
                     genome: new Genome(newInputNodes, newOutputNodes),
@@ -1636,7 +1703,7 @@ export class Genome {
 
             console.log(`[BreedNeatStyle] Inserted disjoint node ${clonedTransplant.GetNodeType()} between anchors!`);
 
-            if (!Genome.validateParamBudget(newNodes)) return null;
+            if (!Genome.isGenomeFeasible(newNodes)) return null;
 
             return {
                 genome: new Genome(newInputNodes, newOutputNodes),
@@ -1804,7 +1871,7 @@ export class Genome {
                 return null;
             }
 
-            if (!Genome.validateParamBudget(newNodes)) return null;
+            if (!Genome.isGenomeFeasible(newNodes)) return null;
 
             return {
                 genome: new Genome(newInputNodes, newOutputNodes),

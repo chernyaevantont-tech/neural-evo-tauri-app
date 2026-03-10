@@ -458,8 +458,13 @@ export const EvolutionStudioPage: React.FC = () => {
                                         onClick={() => { setAutoFollow(false); setViewingGenIndex(i => Math.max(0, i - 1)); }}
                                     >←</button>
                                     <span className={styles.genPageLabel}>
-                                        Generation {viewingSnapshot ? viewingSnapshot.generation : '--'}
-                                        {viewingSnapshot && ` (${viewingSnapshot.timestamp})`}
+                                        <span>Generation {viewingSnapshot ? viewingSnapshot.generation : '--'}</span>
+                                        {viewingSnapshot && (
+                                            <span className={`${styles.evalStatus} ${viewingSnapshot.evaluated ? styles.evalStatusDone : styles.evalStatusProgress}`}>
+                                                {viewingSnapshot.evaluated ? 'EVALUATED' : 'EVALUATING...'}
+                                            </span>
+                                        )}
+                                        {viewingSnapshot && <span style={{ opacity: 0.6 }}>{viewingSnapshot.timestamp}</span>}
                                     </span>
                                     <button
                                         className={styles.genPageBtn}
@@ -508,22 +513,30 @@ export const EvolutionStudioPage: React.FC = () => {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {sortedGenomes.map((g, idx) => (
-                                                    <tr
-                                                        key={g.id}
-                                                        className={styles.genomeRow}
-                                                        onClick={() => setInspectingGenome(g)}
-                                                    >
-                                                        <td>{idx + 1}</td>
-                                                        <td>{g.adjustedFitness?.toFixed(4) || '--'}</td>
-                                                        <td>{g.loss?.toFixed(4) || '--'}</td>
-                                                        <td>{g.accuracy?.toFixed(2) || '--'}</td>
-                                                        <td>{g.nodes.length}</td>
-                                                        <td>{g.resources ? (g.resources.totalFlash / 1024).toFixed(1) + 'K' : '--'}</td>
-                                                        <td>{g.resources ? (g.resources.totalRam / 1024).toFixed(1) + 'K' : '--'}</td>
-                                                        <td>{g.resources ? (g.resources.totalMacs / 1000).toFixed(1) + 'K' : '--'}</td>
-                                                    </tr>
-                                                ))}
+                                                {sortedGenomes.map((g, idx) => {
+                                                    const isEvaluating = isRunning &&
+                                                        viewingGenIndex === generationHistory.length - 1 &&
+                                                        g.id === population[currentEvaluatingIndex]?.id;
+
+                                                    return (
+                                                        <tr
+                                                            key={g.id}
+                                                            className={`${styles.genomeRow} ${isEvaluating ? styles.evaluatingRow : ''}`}
+                                                            onClick={() => setInspectingGenome(g)}
+                                                        >
+                                                            <td>{idx + 1}</td>
+                                                            <td>{g.adjustedFitness?.toFixed(4) || '--'}</td>
+                                                            <td>{g.loss?.toFixed(4) || '--'}</td>
+                                                            <td className={g.accuracy !== undefined ? (g.accuracy > 50 ? styles.accValue : styles.accValueLow) : ''}>
+                                                                {g.accuracy?.toFixed(2) || '--'}
+                                                            </td>
+                                                            <td>{g.nodes.length}</td>
+                                                            <td>{g.resources ? (g.resources.totalFlash / 1024).toFixed(1) + 'K' : '--'}</td>
+                                                            <td>{g.resources ? (g.resources.totalRam / 1024).toFixed(1) + 'K' : '--'}</td>
+                                                            <td>{g.resources ? (g.resources.totalMacs / 1000).toFixed(1) + 'K' : '--'}</td>
+                                                        </tr>
+                                                    );
+                                                })}
                                             </tbody>
                                         </table>
                                     </div>
@@ -590,7 +603,12 @@ export const EvolutionStudioPage: React.FC = () => {
                     }
                     subtitle={`Loss: ${inspectingGenome.loss?.toFixed(4) || '--'} | Acc: ${inspectingGenome.accuracy?.toFixed(2) || '--'}% | Nodes: ${inspectingGenome.nodes.length}${inspectingGenome.resources ? ` | Flash: ${(inspectingGenome.resources.totalFlash / 1024).toFixed(1)}K | RAM: ${(inspectingGenome.resources.totalRam / 1024).toFixed(1)}K` : ''}`}
                     nodes={inspectingGenome.nodes}
-                    trainingMetrics={inspectingGenome.trainingMetrics}
+                    trainingMetrics={
+                        // If inspecting the currently active genome, merge in the live metrics for real-time progress
+                        inspectingGenome.id === population[currentEvaluatingIndex]?.id && isRunning
+                            ? [...(inspectingGenome.trainingMetrics || []), ...liveMetrics]
+                            : inspectingGenome.trainingMetrics
+                    }
                     onClose={() => setInspectingGenome(null)}
                 />
             )}
