@@ -339,6 +339,12 @@ async fn evaluate_population(
         ">>> Entered evaluate_population. Preparing to process dataset profile '{}'...",
         dataset_profile
     );
+
+    // 1. Capture the current session counter IMMEDIATELY.
+    // Each evaluate_population call captures a snapshot; if the current value
+    // differs from the snapshot (via stop_evolution), we abort.
+    let session_snapshot = EVOLUTION_SESSION.load(Ordering::SeqCst);
+
     type Backend = Autodiff<Wgpu>;
     let device = burn::backend::wgpu::WgpuDevice::DiscreteGpu(0);
     let mut results = Vec::new();
@@ -542,7 +548,12 @@ async fn evaluate_population(
     macro_rules! build_batches {
         ($ids:expr, $loader:expr, $dev:expr) => {{
             let mut assembled_batches: Vec<crate::entities::DynamicBatch<Backend>> = Vec::new();
-            for chunk in $ids.chunks(batch_size) {
+            for (idx, chunk) in $ids.chunks(batch_size).enumerate() {
+                // Check cancellation every 10 chunks during assembly
+                if idx % 10 == 0 && EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                    return Err("Evolution cancelled during batch assembly".to_string());
+                }
+
                 let mut batch_inputs: Vec<Vec<crate::entities::DynamicTensor<Backend>>> = vec![Vec::new(); input_stream_indices.len()];
                 let mut batch_targets: Vec<Vec<crate::entities::DynamicTensor<Backend>>> = vec![Vec::new(); target_stream_indices.len()];
 
@@ -597,6 +608,9 @@ async fn evaluate_population(
     }
 
     // 4. Build batches ONCE (reused for all genomes)
+    if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+        return Err("Evolution cancelled before batch assembly".to_string());
+    }
     println!(">>> Assembling batches (shared across all genomes)...");
     let train_batches = build_batches!(train_ids.as_slice(), loader, &device);
     let val_batches = build_batches!(val_ids.as_slice(), loader, &device);
@@ -614,9 +628,6 @@ async fn evaluate_population(
     );
 
     // 5. Evaluation Loop over each Genome
-    // Capture the current session counter — if stop_evolution() increments it,
-    // our snapshot won't match and we'll abort.
-    let session_snapshot = EVOLUTION_SESSION.load(Ordering::SeqCst);
 
     for (i, genome_str) in genomes.iter().enumerate() {
         // Check cancellation between genomes
