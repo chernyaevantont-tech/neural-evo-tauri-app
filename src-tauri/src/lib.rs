@@ -412,24 +412,57 @@ async fn evaluate_population(
     let train_ratio = train_split as f32 / total_split;
     let val_ratio = val_split as f32 / total_split;
 
-    let train_count = ((valid_ids.len() as f32) * train_ratio).round() as usize;
-    let val_count = ((valid_ids.len() as f32) * val_ratio).round() as usize;
+    let mut train_ids = Vec::new();
+    let mut val_ids = Vec::new();
+    let mut test_ids = Vec::new();
 
-    let train_count = train_count.min(valid_ids.len());
-    let val_count = val_count.min(valid_ids.len() - train_count);
+    // Find a categorical target stream for stratification
+    let strat_stream_idx = profile.streams.iter().position(|s| s.role == "Target" && matches!(s.data_type, crate::dtos::DataType::Categorical));
 
-    let train_ids: Vec<String> = valid_ids.iter().take(train_count).cloned().collect();
-    let val_ids: Vec<String> = valid_ids
-        .iter()
-        .skip(train_count)
-        .take(val_count)
-        .cloned()
-        .collect();
-    let test_ids: Vec<String> = valid_ids
-        .iter()
-        .skip(train_count + val_count)
-        .cloned()
-        .collect();
+    if let Some(s_idx) = strat_stream_idx {
+        println!(">>> Stratifying split based on categorical stream '{}'...", profile.streams[s_idx].alias);
+        let stream_id = &profile.streams[s_idx].id;
+        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+
+        if let Some(map) = loader.stream_files.get(stream_id) {
+            for id in &valid_ids {
+                let label = map.get(id).cloned().unwrap_or_else(|| "unknown".to_string());
+                groups.entry(label).or_default().push(id.clone());
+            }
+        }
+
+        for (label, mut members) in groups {
+            members.shuffle(&mut rng);
+            let n = members.len();
+            let t_count = ((n as f32) * train_ratio).round() as usize;
+            let v_count = ((n as f32) * val_ratio).round() as usize;
+
+            let t_count = t_count.min(n);
+            let v_count = v_count.min(n - t_count);
+
+            train_ids.extend(members.iter().take(t_count).cloned());
+            val_ids.extend(members.iter().skip(t_count).take(v_count).cloned());
+            test_ids.extend(members.iter().skip(t_count + v_count).cloned());
+
+            println!("  Class '{}': Total={}, Train={}, Val={}, Test={}", label, n, t_count, v_count, n - t_count - v_count);
+        }
+
+        // Final shuffle of the split sets
+        train_ids.shuffle(&mut rng);
+        val_ids.shuffle(&mut rng);
+        test_ids.shuffle(&mut rng);
+    } else {
+        // Fallback to random split
+        let train_count = ((valid_ids.len() as f32) * train_ratio).round() as usize;
+        let val_count = ((valid_ids.len() as f32) * val_ratio).round() as usize;
+
+        let train_count = train_count.min(valid_ids.len());
+        let val_count = val_count.min(valid_ids.len() - train_count);
+
+        train_ids = valid_ids.iter().take(train_count).cloned().collect();
+        val_ids = valid_ids.iter().skip(train_count).take(val_count).cloned().collect();
+        test_ids = valid_ids.iter().skip(train_count + val_count).cloned().collect();
+    }
 
     eprintln!(
         ">>> Split: {} train samples, {} val samples, {} test samples",
@@ -997,9 +1030,41 @@ async fn scan_dataset(
                     discovered_classes: None,
                 });
             }
+            "MasterIndex" => {
+                let index_path = cfg.pattern.as_deref().unwrap_or("index.csv");
+                let full_path = root.join(index_path);
+                let mut found_ids = HashSet::new();
+                let mut class_counts: HashMap<String, usize> = HashMap::new();
+
+                if let Ok(mut rdr) = csv::ReaderBuilder::new().has_headers(true).from_path(&full_path) {
+                    // Try to find a classification column if possible, or just collect IDs
+                    for result in rdr.records() {
+                        if let Ok(record) = result {
+                            if let Some(id) = record.get(0) {
+                                let id_str = id.to_string();
+                                found_ids.insert(id_str.clone());
+                                // If there's a second column, assume it's a class for preview
+                                if let Some(class) = record.get(1) {
+                                    *class_counts.entry(class.to_string()).or_insert(0) += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                let missing: Vec<String> = all_sample_ids.difference(&found_ids).cloned().collect();
+                valid_ids = valid_ids.intersection(&found_ids).cloned().collect();
+
+                reports.push(StreamScanReport {
+                    stream_id: cfg.stream_id.clone(),
+                    alias: cfg.alias.clone(),
+                    found_count: found_ids.len(),
+                    missing_sample_ids: missing,
+                    discovered_classes: if class_counts.is_empty() { None } else { Some(class_counts) },
+                });
+            }
             "FolderMapping" => {
                 let folder_map = collect_folder_mapping_ids(&anchor_ids);
-                // Count samples per class
                 let mut class_counts: HashMap<String, usize> = HashMap::new();
                 for class_name in folder_map.values() {
                     *class_counts.entry(class_name.clone()).or_insert(0) += 1;
@@ -1017,6 +1082,8 @@ async fn scan_dataset(
                 let found = collect_companion_ids(root, &all_sample_ids, template);
                 let missing: Vec<String> = all_sample_ids.difference(&found).cloned().collect();
                 valid_ids = valid_ids.intersection(&found).cloned().collect();
+                
+                // For companion files, we can't easily discover classes without parsing them all
                 reports.push(StreamScanReport {
                     stream_id: cfg.stream_id.clone(),
                     alias: cfg.alias.clone(),

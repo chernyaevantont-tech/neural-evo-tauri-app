@@ -247,35 +247,65 @@ export const DatasetManagerPage: React.FC = () => {
                                                                 ✗ {report.missingSampleIds.length} missing
                                                             </span>
                                                         )}
-                                                        {report.discoveredClasses && (
-                                                            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginLeft: 'auto' }}>
-                                                                {Object.entries(report.discoveredClasses)
-                                                                    .sort((a, b) => b[1] - a[1])
-                                                                    .map(([cls, count]) => (
-                                                                        <span key={cls} style={{
-                                                                            background: 'var(--color-bg-tertiary)',
-                                                                            padding: '0.15rem 0.5rem',
-                                                                            borderRadius: '12px',
-                                                                            fontSize: '0.8rem',
-                                                                            border: '1px solid var(--color-border)',
-                                                                        }}>
-                                                                            {cls}: {count}
-                                                                        </span>
-                                                                    ))}
-                                                            </div>
-                                                        )}
+                                                {report.discoveredClasses && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                                                            <strong style={{ fontSize: '0.85rem' }}>Class Distribution ({report.alias})</strong>
+                                                            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                                                                {Object.keys(report.discoveredClasses).length} classes
+                                                            </span>
+                                                        </div>
+                                                        <div style={{
+                                                            display: 'flex', flexDirection: 'column', gap: '4px',
+                                                            background: 'var(--color-bg-tertiary)', padding: '8px', borderRadius: '4px'
+                                                        }}>
+                                                            {(() => {
+                                                                const entries = Object.entries(report.discoveredClasses).sort((a, b) => b[1] - a[1]);
+                                                                const maxCount = Math.max(...entries.map(e => e[1]));
+                                                                return entries.map(([cls, count]) => (
+                                                                    <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                        <div style={{ width: '100px', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cls}>{cls}</div>
+                                                                        <div style={{ flex: 1, height: '8px', background: 'var(--color-bg-primary)', borderRadius: '4px', overflow: 'hidden' }}>
+                                                                            <div style={{
+                                                                                width: `${(count / maxCount) * 100}%`,
+                                                                                height: '100%',
+                                                                                background: count / maxCount < 0.2 ? 'var(--color-warning)' : 'var(--color-accent-primary)',
+                                                                                transition: 'width 0.3s ease'
+                                                                            }} />
+                                                                        </div>
+                                                                        <div style={{ width: '40px', fontSize: '0.75rem', textAlign: 'right' }}>{count}</div>
+                                                                    </div>
+                                                                ));
+                                                            })()}
+                                                        </div>
                                                     </div>
-                                                ))}
+                                                )}
                                             </div>
-                                        </div>
-                                    )}
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
 
                                     {/* Data Streams */}
                                     <DataStreamsPanel profile={profile} />
 
                                     {/* Splits */}
                                     <div className={styles.configSection}>
-                                        <h3>Dataset Splits</h3>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                            <h3 style={{ margin: 0 }}>Dataset Splits</h3>
+                                            {profile.streams.some(s => s.role === 'Target' && s.dataType === 'Categorical') && (
+                                                <span style={{
+                                                    fontSize: '0.75rem',
+                                                    color: 'var(--color-success)',
+                                                    background: 'rgba(52, 211, 153, 0.1)',
+                                                    padding: '2px 8px',
+                                                    borderRadius: '10px',
+                                                    border: '1px solid var(--color-success)'
+                                                }}>
+                                                    Stratified (Classification)
+                                                </span>
+                                            )}
+                                        </div>
                                         <div className={styles.configRow}>
                                             <div className={styles.inputGroup}>
                                                 <label>Train (%)</label>

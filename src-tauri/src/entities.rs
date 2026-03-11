@@ -211,8 +211,9 @@ impl<B: Backend> GraphModel<B> {
         raw_data: &str,
         device: &B::Device,
         input_shape_overrides: Option<&[Vec<usize>]>,
-        _output_shape_overrides: Option<&[Vec<usize>]>,
+        output_shape_overrides: Option<&[Vec<usize>]>,
     ) -> Self {
+        use std::collections::HashMap;
         let mut configs = Vec::new();
         let mut edges = Vec::new();
         let mut parsing_connections = false;
@@ -262,6 +263,18 @@ impl<B: Backend> GraphModel<B> {
                 if in_degrees[next_node] == 0 {
                     queue.push_back(next_node);
                 }
+            }
+        }
+
+        // Pre-scan: Map which nodes connect directly to an Output node
+        let mut connects_to_output = HashMap::new();
+        let mut output_node_count = 0;
+        for (i, config) in configs.iter().enumerate() {
+            if let NodeDtoJSON::Output { .. } = config {
+                if let Some(&input_node_id) = node_inputs[i].first() {
+                    connects_to_output.insert(input_node_id, output_node_count);
+                }
+                output_node_count += 1;
             }
         }
 
@@ -334,7 +347,18 @@ impl<B: Backend> GraphModel<B> {
                     let k_h = kernel_size.h as usize;
                     let k_w = kernel_size.w as usize;
 
-                    let conv = Conv2dConfig::new([in_channels, *filters as usize], [k_h, k_w])
+                    let mut actual_filters = *filters as usize;
+                    if let Some(&out_idx) = connects_to_output.get(&node_id) {
+                        if let Some(overrides) = output_shape_overrides {
+                            if let Some(ov) = overrides.get(out_idx) {
+                                if !ov.is_empty() {
+                                    actual_filters = ov[0];
+                                }
+                            }
+                        }
+                    }
+
+                    let conv = Conv2dConfig::new([in_channels, actual_filters], [k_h, k_w])
                         .with_stride([*stride as usize; 2])
                         .with_padding(PaddingConfig2d::Explicit(
                             *padding as usize,
@@ -361,7 +385,7 @@ impl<B: Backend> GraphModel<B> {
                             conv2d_idx: conv_idx,
                             activation: activation.clone(),
                         },
-                        vec![*filters as usize, h_out, w_out],
+                        vec![actual_filters, h_out, w_out],
                     )
                 }
 
@@ -370,9 +394,20 @@ impl<B: Backend> GraphModel<B> {
                     activation,
                     use_bias,
                 } => {
+                    let mut actual_units = *units as usize;
+                    if let Some(&out_idx) = connects_to_output.get(&node_id) {
+                        if let Some(overrides) = output_shape_overrides {
+                            if let Some(ov) = overrides.get(out_idx) {
+                                if !ov.is_empty() {
+                                    actual_units = ov[0];
+                                }
+                            }
+                        }
+                    }
+
                     let prev_shape = &shape_cache[inputs_for_node[0]];
                     let d_input = prev_shape[0];
-                    let linear = LinearConfig::new(d_input, *units as usize)
+                    let linear = LinearConfig::new(d_input, actual_units)
                         .with_bias(*use_bias)
                         .init(device);
                     let dense_idx = denses.len();
@@ -382,7 +417,7 @@ impl<B: Backend> GraphModel<B> {
                             dense_idx,
                             activation: activation.clone(),
                         },
-                        vec![*units as usize],
+                        vec![actual_units],
                     )
                 }
 

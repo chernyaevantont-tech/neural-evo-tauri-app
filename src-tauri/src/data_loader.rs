@@ -29,7 +29,7 @@ pub struct DataLoader {
     profile: DatasetProfile,
     root_path: PathBuf,
     // Stream ID -> Map of SampleID -> FilePath/LocatorData
-    stream_files: HashMap<String, HashMap<String, String>>,
+    pub stream_files: HashMap<String, HashMap<String, String>>,
     pub valid_sample_ids: Vec<String>,
     pub stream_classes: HashMap<usize, usize>,
     pub app_data_dir: Option<PathBuf>,
