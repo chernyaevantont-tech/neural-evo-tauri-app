@@ -22,7 +22,8 @@ import {
     Tooltip,
     Legend,
     ChartOptions,
-    ChartData
+    ChartData,
+    Filler
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 
@@ -33,7 +34,8 @@ ChartJS.register(
     LineElement,
     Title,
     Tooltip,
-    Legend
+    Legend,
+    Filler
 );
 
 export const EvolutionStudioPage: React.FC = () => {
@@ -214,6 +216,57 @@ export const EvolutionStudioPage: React.FC = () => {
         }
     };
 
+    const fitnessChartData: ChartData<'line'> = {
+        labels: stats.map(s => s.generation.toString()),
+        datasets: [
+            {
+                label: 'Best Fitness',
+                data: stats.map(s => s.bestFitness),
+                borderColor: '#bd93f9',
+                backgroundColor: 'rgba(189, 147, 249, 0.15)',
+                tension: 0.3,
+                pointRadius: 3,
+                pointBackgroundColor: '#bd93f9',
+                borderWidth: 2,
+                fill: true,
+            }
+        ]
+    };
+
+    const fitnessChartOptions: ChartOptions<'line'> = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 400 },
+        interaction: {
+            mode: 'index',
+            intersect: false,
+        },
+        scales: {
+            x: {
+                display: true,
+                title: { display: true, text: 'Generation', color: '#999' },
+                ticks: { color: '#aaa', maxTicksLimit: 10 },
+                grid: { color: 'rgba(255, 255, 255, 0.08)' }
+            },
+            y: {
+                display: true,
+                title: { display: true, text: 'Fitness', color: '#999' },
+                ticks: { color: '#aaa' },
+                grid: { color: 'rgba(255, 255, 255, 0.08)' }
+            }
+        },
+        plugins: {
+            legend: {
+                display: false,
+            },
+            tooltip: {
+                callbacks: {
+                    title: (context) => `Generation: ${context[0].label}`,
+                }
+            }
+        }
+    };
+
     return (
         <div className={styles.pageContainer}>
             <TitleBar />
@@ -377,36 +430,11 @@ export const EvolutionStudioPage: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Chart Area */}
                     <div className={styles.chartArea}>
                         <h3 className={styles.sectionTitle}>Fitness Over Time</h3>
-                        <div className={styles.chartContainer}>
+                        <div className={styles.chartContainer} style={{ padding: '1rem' }}>
                             {stats.length > 0 ? (
-                                <svg width="100%" height="200" viewBox="0 0 100 100" preserveAspectRatio="none">
-                                    {/* Simple Grid/Axes */}
-                                    <line x1="0" y1="100" x2="100" y2="100" stroke="var(--color-border-primary)" strokeWidth="1" />
-                                    <line x1="0" y1="0" x2="0" y2="100" stroke="var(--color-border-primary)" strokeWidth="1" />
-                                    <polyline
-                                        fill="none"
-                                        stroke="var(--color-accent-primary)"
-                                        strokeWidth="2"
-                                        points={(() => {
-                                            const minGen = 0;
-                                            const maxGen = Math.max(...stats.map(s => s.generation), 1);
-                                            // Handle case where fitness might be negative or low
-                                            const minFitness = Math.min(0, ...stats.map(s => s.bestFitness));
-                                            const maxFitness = Math.max(1, ...stats.map(s => s.bestFitness));
-                                            const rangeX = maxGen - minGen;
-                                            const rangeY = (maxFitness - minFitness) || 1;
-
-                                            return stats.map(s => {
-                                                const x = ((s.generation - minGen) / rangeX) * 100;
-                                                const y = 100 - (((s.bestFitness - minFitness) / rangeY) * 100);
-                                                return `${x},${y}`;
-                                            }).join(' ');
-                                        })()}
-                                    />
-                                </svg>
+                                <Line data={fitnessChartData} options={fitnessChartOptions} />
                             ) : (
                                 <div className={styles.chartPlaceholder}>
                                     Run evolution to see fitness chart
