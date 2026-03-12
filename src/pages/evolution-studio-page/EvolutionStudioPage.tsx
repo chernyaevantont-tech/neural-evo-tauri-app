@@ -272,9 +272,6 @@ export const EvolutionStudioPage: React.FC = () => {
             <TitleBar />
 
             <div className={styles.header}>
-                <button className={styles.backButton} onClick={() => navigate('/')}>
-                    <BsArrowLeft /> Back to Home
-                </button>
                 <h1 className={styles.title}>Evolution Studio</h1>
                 <div className={styles.controls}>
                     <button
