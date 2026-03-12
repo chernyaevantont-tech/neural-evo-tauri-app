@@ -395,6 +395,8 @@ impl<B: Backend> GraphModel<B> {
                     use_bias,
                 } => {
                     let mut actual_units = *units as usize;
+                    let mut final_activation = activation.clone();
+
                     if let Some(&out_idx) = connects_to_output.get(&node_id) {
                         if let Some(overrides) = output_shape_overrides {
                             if let Some(ov) = overrides.get(out_idx) {
@@ -402,6 +404,10 @@ impl<B: Backend> GraphModel<B> {
                                     actual_units = ov[0];
                                 }
                             }
+                        }
+                        if final_activation == "softmax" && actual_units > 1 {
+                            println!("Auto-converting Output Dense activation from 'softmax' to 'linear' (CrossEntropyLoss requires logits)");
+                            final_activation = "linear".to_string();
                         }
                     }
 
@@ -415,7 +421,7 @@ impl<B: Backend> GraphModel<B> {
                     (
                         Operation::Dense {
                             dense_idx,
-                            activation: activation.clone(),
+                            activation: final_activation,
                         },
                         vec![actual_units],
                     )
