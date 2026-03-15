@@ -434,7 +434,7 @@ export const EvolutionStudioPage: React.FC = () => {
                                 <Line data={fitnessChartData} options={fitnessChartOptions} />
                             ) : (
                                 <div className={styles.chartPlaceholder}>
-                                    Run evolution to see fitness chart
+                                    Waiting for first generation training complete
                                 </div>
                             )}
                         </div>
