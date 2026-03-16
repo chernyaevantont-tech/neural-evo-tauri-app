@@ -11,10 +11,13 @@ use burn::{
     module::{Ignored, Module},
     nn::{
         BatchNorm, BatchNormConfig, Dropout, DropoutConfig, LayerNorm, LayerNormConfig, Linear,
-        LinearConfig, PaddingConfig2d,
-        conv::{Conv2d, Conv2dConfig},
+        LinearConfig, PaddingConfig1d, PaddingConfig2d,
+        conv::{Conv1d, Conv1dConfig, Conv2d, Conv2dConfig},
         loss::{CrossEntropyLossConfig, MseLoss},
         pool::{AvgPool2d, AvgPool2dConfig, MaxPool2d, MaxPool2dConfig},
+        lstm::{Lstm, LstmConfig},
+        gru::{Gru, GruConfig},
+        attention::{MultiHeadAttention, MultiHeadAttentionConfig},
     },
     optim::{AdamConfig, GradientsParams, Optimizer},
     prelude::Backend,
@@ -82,9 +85,25 @@ pub enum Operation {
         dense_idx: usize,
         activation: String,
     },
+    Conv1D {
+        conv1d_idx: usize,
+        activation: String,
+    },
     Conv2D {
         conv2d_idx: usize,
         activation: String,
+    },
+    LSTM {
+        lstm_idx: usize,
+    },
+    GRU {
+        gru_idx: usize,
+    },
+    MultiHeadAttention {
+        mha_idx: usize,
+    },
+    TransformerEncoderBlock {
+        transformer_idx: usize,
     },
     MaxPool {
         pool_idx: usize,
@@ -126,8 +145,14 @@ pub struct Instruction {
 
 #[derive(Module, Debug)]
 pub struct GraphModel<B: Backend> {
+    pub conv1ds: Vec<Conv1d<B>>,
     pub conv2ds: Vec<Conv2d<B>>,
     pub denses: Vec<Linear<B>>,
+    pub lstms: Vec<Lstm<B>>,
+    pub lstm_hidden_sizes: Vec<usize>,
+    pub grus: Vec<Gru<B>>,
+    pub gru_hidden_sizes: Vec<usize>,
+    pub mha_layers: Vec<MultiHeadAttention<B>>,
     pub max_pools: Vec<MaxPool2d>,
     pub avg_pools: Vec<AvgPool2d>,
     pub dropouts: Vec<Dropout>,
@@ -278,8 +303,14 @@ impl<B: Backend> GraphModel<B> {
             }
         }
 
+        let mut conv1ds = Vec::new();
         let mut conv2ds = Vec::new();
         let mut denses = Vec::new();
+        let mut lstms = Vec::new();
+        let mut lstm_hidden_sizes = Vec::new();
+        let mut grus = Vec::new();
+        let mut gru_hidden_sizes = Vec::new();
+        let mut mha_layers = Vec::new();
         let mut max_pools = Vec::new();
         let mut avg_pools = Vec::new();
         let mut dropouts = Vec::new();
@@ -547,6 +578,156 @@ impl<B: Backend> GraphModel<B> {
                     shape_cache[inputs_for_node[0]].clone(),
                 ),
 
+                NodeDtoJSON::Conv1D {
+                    filters,
+                    kernel_size,
+                    stride,
+                    padding,
+                    dilation,
+                    use_bias,
+                    activation,
+                } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let in_channels = prev_shape[0];
+                    let seq_len = prev_shape[1];
+
+                    let mut actual_filters = *filters as usize;
+                    if let Some(&out_idx) = connects_to_output.get(&node_id) {
+                        if let Some(overrides) = output_shape_overrides {
+                            if let Some(ov) = overrides.get(out_idx) {
+                                if !ov.is_empty() {
+                                    actual_filters = ov[0];
+                                }
+                            }
+                        }
+                    }
+
+                    let conv1d = Conv1dConfig::new(in_channels, actual_filters, *kernel_size as usize)
+                        .with_stride(*stride as usize)
+                        .with_padding(PaddingConfig1d::Explicit(*padding as usize))
+                        .with_dilation(*dilation as usize)
+                        .with_bias(*use_bias)
+                        .init(device);
+
+                    let conv1d_idx = conv1ds.len();
+                    conv1ds.push(conv1d);
+
+                    // Output length: floor((seq_len + 2*padding - dilation*(kernel_size-1) - 1) / stride + 1)
+                    let seq_out = (seq_len + 2 * (*padding as usize)
+                        - (*dilation as usize) * (*kernel_size as usize - 1)
+                        - 1) / (*stride as usize)
+                        + 1;
+
+                    (
+                        Operation::Conv1D {
+                            conv1d_idx,
+                            activation: activation.clone(),
+                        },
+                        vec![actual_filters, seq_out],
+                    )
+                }
+
+                NodeDtoJSON::LSTM {
+                    hidden_units,
+                    gate_activation: _,
+                    cell_activation: _,
+                    hidden_activation: _,
+                    use_bias,
+                } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let input_size = prev_shape[0];
+                    let seq_len = prev_shape[1];
+                    let hidden_units = *hidden_units as usize;
+
+                    let lstm = LstmConfig::new(input_size, hidden_units, *use_bias).init(device);
+
+                    let lstm_idx = lstms.len();
+                    lstms.push(lstm);
+                    lstm_hidden_sizes.push(hidden_units);
+
+                    // LSTM output: [hidden_units, seq_len]
+                    (
+                        Operation::LSTM { lstm_idx },
+                        vec![hidden_units, seq_len],
+                    )
+                }
+
+                NodeDtoJSON::GRU {
+                    hidden_units,
+                    gate_activation: _,
+                    hidden_activation: _,
+                    use_bias,
+                    reset_after: _,
+                } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let input_size = prev_shape[0];
+                    let seq_len = prev_shape[1];
+                    let hidden_units = *hidden_units as usize;
+
+                    let gru = GruConfig::new(input_size, hidden_units, *use_bias).init(device);
+
+                    let gru_idx = grus.len();
+                    grus.push(gru);
+                    gru_hidden_sizes.push(hidden_units);
+
+                    // GRU output: [hidden_units, seq_len]
+                    (
+                        Operation::GRU { gru_idx },
+                        vec![hidden_units, seq_len],
+                    )
+                }
+
+                NodeDtoJSON::MultiHeadAttention {
+                    n_heads,
+                    dropout: _,
+                    quiet_softmax: _,
+                } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let d_model = prev_shape[0];
+                    let seq_len = prev_shape[1];
+
+                    let mha = MultiHeadAttentionConfig::new(d_model, *n_heads as usize)
+                        .init(device);
+
+                    let mha_idx = mha_layers.len();
+                    mha_layers.push(mha);
+
+                    // MHA preserves shape
+                    (
+                        Operation::MultiHeadAttention { mha_idx },
+                        vec![d_model, seq_len],
+                    )
+                }
+
+                NodeDtoJSON::TransformerEncoderBlock {
+                    n_heads,
+                    d_ff: _,
+                    dropout: _,
+                    activation: _,
+                    norm_first: _,
+                } => {
+                    // For now, we'll skip transformer encoder block implementation
+                    // as Burn's API requires more complex setup
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let d_model = prev_shape[0];
+                    let seq_len = prev_shape[1];
+                    
+                    // Placeholder: use MHA instead of full transformer for now
+                    let mha = MultiHeadAttentionConfig::new(d_model, *n_heads as usize)
+                        .init(device);
+
+                    let mha_idx = mha_layers.len();
+                    mha_layers.push(mha);
+
+                    // MHA preserves shape (but ideally we'd use full transformer)
+                    (
+                        Operation::TransformerEncoderBlock {
+                            transformer_idx: mha_idx, // Reusing mha_idx as placeholder
+                        },
+                        vec![d_model, seq_len],
+                    )
+                }
+
                 NodeDtoJSON::Output { .. } => {
                     let out_idx = num_outputs;
                     num_outputs += 1;
@@ -581,8 +762,14 @@ impl<B: Backend> GraphModel<B> {
         }
 
         Self {
+            conv1ds,
             conv2ds,
             denses,
+            lstms,
+            lstm_hidden_sizes,
+            grus,
+            gru_hidden_sizes,
+            mha_layers,
             max_pools,
             avg_pools,
             dropouts,
@@ -676,6 +863,115 @@ impl<B: Backend> GraphModel<B> {
                         DynamicTensor::Dim4(out)
                     } else {
                         unreachable!("Conv2D требует 4D тензор")
+                    }
+                }
+
+                Operation::Conv1D {
+                    conv1d_idx,
+                    activation,
+                } => {
+                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
+                        let [seq_len, in_channels] = x.dims();
+                        // Reshape [seq_len, in_channels] -> [1, in_channels, seq_len]
+                        let batched = x.clone().reshape([1, in_channels, seq_len]);
+                        
+                        let conv = &self.conv1ds[*conv1d_idx];
+                        let mut out = conv.forward(batched);
+                        
+                        // Apply activation
+                        out = match activation.as_str() {
+                            "relu" => burn::tensor::activation::relu(out),
+                            "leaky_relu" => burn::tensor::activation::leaky_relu(out, 0.01),
+                            "sigmoid" => burn::tensor::activation::sigmoid(out),
+                            "linear" | "none" => out,
+                            _ => burn::tensor::activation::relu(out),
+                        };
+
+                        // Reshape back to [seq_len_out, filters]
+                        let [_, filters, seq_len_out] = out.dims();
+                        let output_2d = out.reshape([seq_len_out, filters]);
+                        DynamicTensor::Dim2(output_2d)
+                    } else {
+                        unreachable!("Conv1D expects 2D input [seq_len, channels]")
+                    }
+                }
+
+                Operation::LSTM { lstm_idx } => {
+                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
+                        let [input_size, seq_len] = x.dims();
+                        // Frontend sends [input_size, seq_len]
+                        // Reshape to [1, seq_len, input_size] for Burn LSTM
+                        let input_3d = x.transpose().reshape([1, seq_len, input_size]);
+                        
+                        let lstm = &self.lstms[*lstm_idx];
+                        let (output, _state) = lstm.forward(input_3d, None);
+                        
+                        // Output shape: [1, seq_len, hidden_units]
+                        // Reshape back to [hidden_units, seq_len]
+                        let [_, seq_out, hidden] = output.dims();
+                        let output_2d = output.reshape([seq_out, hidden]).transpose();
+                        DynamicTensor::Dim2(output_2d)
+                    } else {
+                        unreachable!("LSTM expects 2D input [input_size, seq_len]")
+                    }
+                }
+
+                Operation::GRU { gru_idx } => {
+                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
+                        let [input_size, seq_len] = x.dims();
+                        let input_3d = x.transpose().reshape([1, seq_len, input_size]);
+
+                        let gru = &self.grus[*gru_idx];
+                        let output = gru.forward(input_3d, None); // GRU returns just Tensor, not (Tensor, State)
+                        let [_, seq_out, hidden] = output.dims();
+                        let output_2d = output.reshape([seq_out, hidden]).transpose();
+                        DynamicTensor::Dim2(output_2d)
+                    } else {
+                        unreachable!("GRU expects 2D input [input_size, seq_len]")
+                    }
+                }
+
+                Operation::MultiHeadAttention { mha_idx } => {
+                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
+                        let [d_model, seq_len] = x.dims();
+                        
+                        // Reshape to [1, seq_len, d_model] for Burn MHA
+                        let input_3d = x.transpose().reshape([1, seq_len, d_model]);
+                        
+                        let mha = &self.mha_layers[*mha_idx];
+                        // For self-attention, query = key = value = input
+                        let mha_input = burn::nn::attention::MhaInput::self_attn(input_3d);
+                        let mha_output = mha.forward(mha_input);
+                        
+                        // Output: [1, seq_len, d_model]
+                        // Reshape back to [d_model, seq_len]
+                        let [_, seq_out, dim] = mha_output.context.dims();
+                        let output_2d = mha_output.context.reshape([seq_out, dim]).transpose();
+                        DynamicTensor::Dim2(output_2d)
+                    } else {
+                        unreachable!("MHA expects 2D input [d_model, seq_len]")
+                    }
+                }
+
+                Operation::TransformerEncoderBlock { transformer_idx } => {
+                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
+                        let [d_model, seq_len] = x.dims();
+                        
+                        // Reshape to [1, seq_len, d_model]
+                        let input_3d = x.transpose().reshape([1, seq_len, d_model]);
+                        
+                        // Use MHA as placeholder for transformer encoder
+                        let mha = &self.mha_layers[*transformer_idx];
+                        let mha_input = burn::nn::attention::MhaInput::self_attn(input_3d);
+                        let mha_output = mha.forward(mha_input);
+                        
+                        // Output: [1, seq_len, d_model]
+                        // Reshape back to [d_model, seq_len]
+                        let [_, seq_out, dim] = mha_output.context.dims();
+                        let output_2d = mha_output.context.reshape([seq_out, dim]).transpose();
+                        DynamicTensor::Dim2(output_2d)
+                    } else {
+                        unreachable!("TransformerBlock expects 2D input [d_model, seq_len]")
                     }
                 }
 

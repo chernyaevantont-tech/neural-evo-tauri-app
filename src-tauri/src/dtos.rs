@@ -23,6 +23,16 @@ pub enum NodeDtoJSON {
         #[serde(default = "default_relu")]
         activation: String,
     },
+    Conv1D {
+        filters: u64,
+        kernel_size: u64,
+        stride: u8,
+        padding: u8,
+        dilation: u8,
+        use_bias: bool,
+        #[serde(default = "default_relu")]
+        activation: String,
+    },
     Dense {
         units: u64,
         activation: String,
@@ -58,6 +68,32 @@ pub enum NodeDtoJSON {
     },
     GaussianNoise {
         std_dev: f64,
+    },
+    LSTM {
+        hidden_units: u64,
+        gate_activation: String,
+        cell_activation: String,
+        hidden_activation: String,
+        use_bias: bool,
+    },
+    GRU {
+        hidden_units: u64,
+        gate_activation: String,
+        hidden_activation: String,
+        use_bias: bool,
+        reset_after: bool,
+    },
+    MultiHeadAttention {
+        n_heads: u64,
+        dropout: f64,
+        quiet_softmax: bool,
+    },
+    TransformerEncoderBlock {
+        n_heads: u64,
+        d_ff: u64,
+        dropout: f64,
+        activation: String,
+        norm_first: bool,
     },
 }
 

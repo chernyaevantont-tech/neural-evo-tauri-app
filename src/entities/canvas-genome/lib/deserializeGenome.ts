@@ -2,13 +2,18 @@ import {
     Genome,
     BaseNode,
     Conv2DNode,
+    Conv1DNode,
     DenseNode,
     FlattenNode,
     InputNode,
     OutputNode,
     PoolingNode,
+    LSTMNode,
+    GRUNode,
     AddNode,
     Concat2DNode,
+    MultiHeadAttentionNode,
+    TransformerEncoderBlockNode,
     DropoutNode,
     BatchNormNode,
     LayerNormNode,
@@ -109,6 +114,56 @@ export const deserializeGenome = async (genomeStr: string): Promise<{
                 {
                     const std_dev = obj.params.std_dev || 0.1;
                     nodes.push(new GaussianNoiseNode(std_dev));
+                    break;
+                }
+            case "Conv1D":
+                {
+                    const filters = obj.params.filters;
+                    const kernel_size = obj.params.kernel_size;
+                    const stride = obj.params.stride;
+                    const padding = obj.params.padding;
+                    const dilation = obj.params.dilation;
+                    const use_bias = obj.params.use_bias;
+                    const activation = obj.params.activation || 'relu';
+                    nodes.push(new Conv1DNode(filters, kernel_size, stride, padding, dilation, use_bias, activation));
+                    break;
+                }
+            case "LSTM":
+                {
+                    const hidden_units = obj.params.hidden_units;
+                    const gate_activation = obj.params.gate_activation || 'sigmoid';
+                    const cell_activation = obj.params.cell_activation || 'tanh';
+                    const hidden_activation = obj.params.hidden_activation || 'tanh';
+                    const use_bias = obj.params.use_bias !== undefined ? obj.params.use_bias : true;
+                    nodes.push(new LSTMNode(hidden_units, gate_activation, cell_activation, hidden_activation, use_bias));
+                    break;
+                }
+            case "GRU":
+                {
+                    const hidden_units = obj.params.hidden_units;
+                    const gate_activation = obj.params.gate_activation || 'sigmoid';
+                    const hidden_activation = obj.params.hidden_activation || 'tanh';
+                    const use_bias = obj.params.use_bias !== undefined ? obj.params.use_bias : true;
+                    const reset_after = obj.params.reset_after !== undefined ? obj.params.reset_after : true;
+                    nodes.push(new GRUNode(hidden_units, gate_activation, hidden_activation, use_bias, reset_after));
+                    break;
+                }
+            case "MultiHeadAttention":
+                {
+                    const n_heads = obj.params.n_heads;
+                    const dropout = obj.params.dropout || 0.1;
+                    const quiet_softmax = obj.params.quiet_softmax || false;
+                    nodes.push(new MultiHeadAttentionNode(n_heads, dropout, quiet_softmax));
+                    break;
+                }
+            case "TransformerEncoderBlock":
+                {
+                    const n_heads = obj.params.n_heads;
+                    const d_ff = obj.params.d_ff;
+                    const dropout = obj.params.dropout || 0.1;
+                    const activation = obj.params.activation || 'relu';
+                    const norm_first = obj.params.norm_first !== undefined ? obj.params.norm_first : true;
+                    nodes.push(new TransformerEncoderBlockNode(n_heads, d_ff, dropout, activation, norm_first));
                     break;
                 }
             case "Output":

@@ -14,6 +14,11 @@ import {
   LayerNormNode,
   Dropout2DNode,
   GaussianNoiseNode,
+  Conv1DNode,
+  LSTMNode,
+  GRUNode,
+  MultiHeadAttentionNode,
+  TransformerEncoderBlockNode,
   ActivationFunction,
   KernelSize,
   PoolType
@@ -75,6 +80,41 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
   const [lnEpsilon, setLnEpsilon] = useState<number>(1e-5);
   const [dropout2dProb, setDropout2dProb] = useState<number>(0.5);
   const [gaussianNoiseStdDev, setGaussianNoiseStdDev] = useState<number>(0.1);
+  
+  // Conv1D parameters
+  const [conv1dKernelSize, setConv1dKernelSize] = useState<number>(3);
+  const [conv1dFilters, setConv1dFilters] = useState<number>(32);
+  const [conv1dStride, setConv1dStride] = useState<number>(1);
+  const [conv1dPadding, setConv1dPadding] = useState<number>(0);
+  const [conv1dDilation, setConv1dDilation] = useState<number>(1);
+  const [conv1dUseBias, setConv1dUseBias] = useState<boolean>(true);
+  const [conv1dActivation, setConv1dActivation] = useState<ActivationFunction>('relu');
+  
+  // LSTM parameters
+  const [lstmHiddenUnits, setLstmHiddenUnits] = useState<number>(128);
+  const [lstmGateActivation, setLstmGateActivation] = useState<ActivationFunction>('sigmoid');
+  const [lstmCellActivation, setLstmCellActivation] = useState<ActivationFunction>('tanh');
+  const [lstmHiddenActivation, setLstmHiddenActivation] = useState<ActivationFunction>('tanh');
+  const [lstmUseBias, setLstmUseBias] = useState<boolean>(true);
+  
+  // GRU parameters
+  const [gruHiddenUnits, setGruHiddenUnits] = useState<number>(128);
+  const [gruGateActivation, setGruGateActivation] = useState<ActivationFunction>('sigmoid');
+  const [gruHiddenActivation, setGruHiddenActivation] = useState<ActivationFunction>('tanh');
+  const [gruUseBias, setGruUseBias] = useState<boolean>(true);
+  const [gruResetAfter, setGruResetAfter] = useState<boolean>(true);
+  
+  // MultiHeadAttention parameters
+  const [mhaHeads, setMhaHeads] = useState<number>(8);
+  const [mhaDropout, setMhaDropout] = useState<number>(0.1);
+  const [mhaQuietSoftmax, setMhaQuietSoftmax] = useState<boolean>(false);
+  
+  // TransformerEncoderBlock parameters
+  const [tebHeads, setTebHeads] = useState<number>(8);
+  const [tebDFF, setTebDFF] = useState<number>(512);
+  const [tebDropout, setTebDropout] = useState<number>(0.1);
+  const [tebActivation, setTebActivation] = useState<ActivationFunction>('relu');
+  const [tebNormFirst, setTebNormFirst] = useState<boolean>(true);
 
   const handleSave = () => {
     try {
@@ -118,6 +158,21 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
           break;
         case 'GaussianNoise':
           newNode = new GaussianNoiseNode(gaussianNoiseStdDev);
+          break;
+        case 'Conv1D':
+          newNode = new Conv1DNode(conv1dFilters, conv1dKernelSize, conv1dStride, conv1dPadding, conv1dDilation, conv1dUseBias, conv1dActivation);
+          break;
+        case 'LSTM':
+          newNode = new LSTMNode(lstmHiddenUnits, lstmGateActivation, lstmCellActivation, lstmHiddenActivation, lstmUseBias);
+          break;
+        case 'GRU':
+          newNode = new GRUNode(gruHiddenUnits, gruGateActivation, gruHiddenActivation, gruUseBias, gruResetAfter);
+          break;
+        case 'MultiHeadAttention':
+          newNode = new MultiHeadAttentionNode(mhaHeads, mhaDropout, mhaQuietSoftmax);
+          break;
+        case 'TransformerEncoderBlock':
+          newNode = new TransformerEncoderBlockNode(tebHeads, tebDFF, tebDropout, tebActivation, tebNormFirst);
           break;
         case 'Output':
           newNode = new OutputNode(outputShape);
@@ -328,6 +383,139 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
     </>
   );
 
+  const renderConv1DConfig = () => (
+    <>
+      <FormField label="Filters">
+        <input className={styles.input} type="number" value={conv1dFilters} onChange={(e) => setConv1dFilters(parseInt(e.target.value) || 1)} min="1" />
+      </FormField>
+      <FormField label="Kernel Size">
+        <input className={styles.input} type="number" value={conv1dKernelSize} onChange={(e) => setConv1dKernelSize(parseInt(e.target.value) || 1)} min="1" />
+      </FormField>
+      <FormField label="Stride">
+        <input className={styles.input} type="number" value={conv1dStride} onChange={(e) => setConv1dStride(parseInt(e.target.value) || 1)} min="1" />
+      </FormField>
+      <FormField label="Padding">
+        <input className={styles.input} type="number" value={conv1dPadding} onChange={(e) => setConv1dPadding(parseInt(e.target.value) || 0)} min="0" />
+      </FormField>
+      <FormField label="Dilation">
+        <input className={styles.input} type="number" value={conv1dDilation} onChange={(e) => setConv1dDilation(parseInt(e.target.value) || 1)} min="1" />
+      </FormField>
+      <FormField label="Use Bias">
+        <input type="checkbox" checked={conv1dUseBias} onChange={(e) => setConv1dUseBias(e.target.checked)} />
+      </FormField>
+      <FormField label="Activation">
+        <select className={styles.select} value={conv1dActivation} onChange={(e) => setConv1dActivation(e.target.value as ActivationFunction)}>
+          <option value="relu">ReLU</option>
+          <option value="leaky_relu">Leaky ReLU</option>
+          <option value="tanh">Tanh</option>
+          <option value="sigmoid">Sigmoid</option>
+          <option value="linear">Linear</option>
+          <option value="gelu">GELU</option>
+          <option value="swish">Swish</option>
+        </select>
+      </FormField>
+    </>
+  );
+
+  const renderLSTMConfig = () => (
+    <>
+      <FormField label="Hidden Units">
+        <input className={styles.input} type="number" value={lstmHiddenUnits} onChange={(e) => setLstmHiddenUnits(parseInt(e.target.value) || 1)} min="1" />
+      </FormField>
+      <FormField label="Gate Activation">
+        <select className={styles.select} value={lstmGateActivation} onChange={(e) => setLstmGateActivation(e.target.value as ActivationFunction)}>
+          <option value="sigmoid">Sigmoid</option>
+          <option value="tanh">Tanh</option>
+          <option value="relu">ReLU</option>
+        </select>
+      </FormField>
+      <FormField label="Cell Activation">
+        <select className={styles.select} value={lstmCellActivation} onChange={(e) => setLstmCellActivation(e.target.value as ActivationFunction)}>
+          <option value="tanh">Tanh</option>
+          <option value="sigmoid">Sigmoid</option>
+          <option value="relu">ReLU</option>
+        </select>
+      </FormField>
+      <FormField label="Hidden Activation">
+        <select className={styles.select} value={lstmHiddenActivation} onChange={(e) => setLstmHiddenActivation(e.target.value as ActivationFunction)}>
+          <option value="tanh">Tanh</option>
+          <option value="sigmoid">Sigmoid</option>
+          <option value="relu">ReLU</option>
+        </select>
+      </FormField>
+      <FormField label="Use Bias">
+        <input type="checkbox" checked={lstmUseBias} onChange={(e) => setLstmUseBias(e.target.checked)} />
+      </FormField>
+    </>
+  );
+
+  const renderGRUConfig = () => (
+    <>
+      <FormField label="Hidden Units">
+        <input className={styles.input} type="number" value={gruHiddenUnits} onChange={(e) => setGruHiddenUnits(parseInt(e.target.value) || 1)} min="1" />
+      </FormField>
+      <FormField label="Gate Activation">
+        <select className={styles.select} value={gruGateActivation} onChange={(e) => setGruGateActivation(e.target.value as ActivationFunction)}>
+          <option value="sigmoid">Sigmoid</option>
+          <option value="tanh">Tanh</option>
+          <option value="relu">ReLU</option>
+        </select>
+      </FormField>
+      <FormField label="Hidden Activation">
+        <select className={styles.select} value={gruHiddenActivation} onChange={(e) => setGruHiddenActivation(e.target.value as ActivationFunction)}>
+          <option value="tanh">Tanh</option>
+          <option value="sigmoid">Sigmoid</option>
+          <option value="relu">ReLU</option>
+        </select>
+      </FormField>
+      <FormField label="Use Bias">
+        <input type="checkbox" checked={gruUseBias} onChange={(e) => setGruUseBias(e.target.checked)} />
+      </FormField>
+      <FormField label="Reset After">
+        <input type="checkbox" checked={gruResetAfter} onChange={(e) => setGruResetAfter(e.target.checked)} />
+      </FormField>
+    </>
+  );
+
+  const renderMultiHeadAttentionConfig = () => (
+    <>
+      <FormField label="Number of Heads">
+        <input className={styles.input} type="number" value={mhaHeads} onChange={(e) => setMhaHeads(parseInt(e.target.value) || 1)} min="1" max="32" />
+      </FormField>
+      <FormField label="Dropout">
+        <input className={styles.input} type="number" step="0.1" min="0" max="1" value={mhaDropout} onChange={(e) => setMhaDropout(parseFloat(e.target.value) || 0)} />
+      </FormField>
+      <FormField label="Quiet Softmax">
+        <input type="checkbox" checked={mhaQuietSoftmax} onChange={(e) => setMhaQuietSoftmax(e.target.checked)} />
+      </FormField>
+    </>
+  );
+
+  const renderTransformerEncoderBlockConfig = () => (
+    <>
+      <FormField label="Number of Heads">
+        <input className={styles.input} type="number" value={tebHeads} onChange={(e) => setTebHeads(parseInt(e.target.value) || 1)} min="1" max="32" />
+      </FormField>
+      <FormField label="Feed-Forward Dimension">
+        <input className={styles.input} type="number" value={tebDFF} onChange={(e) => setTebDFF(parseInt(e.target.value) || 1)} min="1" step="64" />
+      </FormField>
+      <FormField label="Dropout">
+        <input className={styles.input} type="number" step="0.1" min="0" max="1" value={tebDropout} onChange={(e) => setTebDropout(parseFloat(e.target.value) || 0)} />
+      </FormField>
+      <FormField label="FFN Activation">
+        <select className={styles.select} value={tebActivation} onChange={(e) => setTebActivation(e.target.value as ActivationFunction)}>
+          <option value="relu">ReLU</option>
+          <option value="gelu">GELU</option>
+          <option value="swish">Swish</option>
+          <option value="tanh">Tanh</option>
+        </select>
+      </FormField>
+      <FormField label="Norm First">
+        <input type="checkbox" checked={tebNormFirst} onChange={(e) => setTebNormFirst(e.target.checked)} />
+      </FormField>
+    </>
+  );
+
   return (
     <Modal isOpen={true} onClose={onCancel} title="Add Node" maxWidth="500px">
       <div className={styles.form}>
@@ -341,6 +529,11 @@ export const AddNodeModal: React.FC<AddNodeModalProps> = ({
         {nodeType === 'LayerNorm' && renderLayerNormConfig()}
         {nodeType === 'Dropout2D' && renderDropout2DConfig()}
         {nodeType === 'GaussianNoise' && renderGaussianNoiseConfig()}
+        {nodeType === 'Conv1D' && renderConv1DConfig()}
+        {nodeType === 'LSTM' && renderLSTMConfig()}
+        {nodeType === 'GRU' && renderGRUConfig()}
+        {nodeType === 'MultiHeadAttention' && renderMultiHeadAttentionConfig()}
+        {nodeType === 'TransformerEncoderBlock' && renderTransformerEncoderBlockConfig()}
         {(nodeType === 'Add' || nodeType === 'Concat2D' || nodeType === 'Flatten') && (
           <p className={styles.nodeConfigText}>
             This node has no configurable parameters.

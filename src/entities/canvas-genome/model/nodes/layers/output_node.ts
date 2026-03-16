@@ -6,8 +6,6 @@ export class OutputNode extends BaseNode {
         this.inputShape = [...inputShape];
     }
 
-    protected CalculateOutputShape(): void { }
-
     GetInfo(): string {
         return JSON.stringify({
             node: this.GetNodeType(),
@@ -22,6 +20,11 @@ export class OutputNode extends BaseNode {
     }
 
     protected Mutate(_mutation_options: Map<string, number>): void { }
+
+    protected CalculateOutputShape(): void {
+        // OutputNode passes through the input shape as output
+        this.outputShape = [...this.inputShape];
+    }
 
     public GetExpectedInputDimensions(): number | "any" {
         return this.inputShape.length;
