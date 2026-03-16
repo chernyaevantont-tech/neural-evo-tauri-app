@@ -60,6 +60,12 @@ export interface EvolutionSettingsState {
     useMaxGenerations: boolean;
     setMaxGenerations: (val: number) => void;
     setUseMaxGenerations: (val: boolean) => void;
+
+    // Random Architecture Initialization
+    useRandomInitialization: boolean;
+    setUseRandomInitialization: (val: boolean) => void;
+    randomInitRatio: number; // 0-100: percentage of population to initialize randomly
+    setRandomInitRatio: (val: number) => void;
 }
 
 export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) => ({
@@ -125,6 +131,11 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
     useMaxGenerations: false,
     setMaxGenerations: (val) => set({ maxGenerations: Math.max(1, val) }),
     setUseMaxGenerations: (val) => set({ useMaxGenerations: val }),
+
+    useRandomInitialization: false,
+    setUseRandomInitialization: (val) => set({ useRandomInitialization: val }),
+    randomInitRatio: 30, // 30% of population initialized randomly by default
+    setRandomInitRatio: (val) => set({ randomInitRatio: Math.max(0, Math.min(100, val)) }),
 }));
 
 export function getAdaptiveMutationRates(currentNodes: number) {

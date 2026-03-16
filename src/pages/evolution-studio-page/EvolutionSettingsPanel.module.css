@@ -175,3 +175,10 @@
     flex-direction: column;
     gap: 0.4rem;
 }
+
+/* Helper text for ratio display */
+.helperText {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    font-style: italic;
+}

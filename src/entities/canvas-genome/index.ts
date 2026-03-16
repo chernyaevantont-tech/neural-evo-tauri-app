@@ -26,5 +26,6 @@ export { Genome } from './model/genome';
 export type { Position, VisualNode, VisualGenome, Connection } from './model/types';
 export { deserializeGenome } from './lib/deserializeGenome';
 export { serializeGenome } from './lib/serializeGenome';
+export { generateRandomArchitecture, extractShapesFromDatasetProfile } from './lib/randomArchitectureGenerator';
 export { useCanvasGenomeStore } from './model/store';
 export { GenomeSvgPreview } from './ui/GenomeSvgPreview/GenomeSvgPreview';

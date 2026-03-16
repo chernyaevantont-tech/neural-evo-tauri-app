@@ -211,6 +211,41 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
                 )}
             </div>
 
+            {/* Random Initialization */}
+            <div className={styles.section}>
+                <h4 className={styles.sectionTitle}>Random Initialization</h4>
+                
+                <label className={styles.checkboxLabel}>
+                    <input
+                        type="checkbox"
+                        checked={settings.useRandomInitialization}
+                        onChange={e => settings.setUseRandomInitialization(e.target.checked)}
+                        disabled={disabled}
+                    />
+                    <span>Generate Random Architectures</span>
+                </label>
+
+                {settings.useRandomInitialization && (
+                    <div className={styles.subSetting}>
+                        <span className={styles.subLabel}>Random vs Seeded Ratio</span>
+                        <div className={styles.sliderControl}>
+                            <input
+                                type="range"
+                                min="0" max="100" step="5"
+                                value={settings.randomInitRatio}
+                                onChange={e => settings.setRandomInitRatio(parseInt(e.target.value))}
+                                className={styles.slider}
+                                disabled={disabled}
+                            />
+                            <span className={styles.sliderValue}>{settings.randomInitRatio}%</span>
+                        </div>
+                        <div className={styles.helperText}>
+                            {settings.randomInitRatio}% random, {100 - settings.randomInitRatio}% from seeds
+                        </div>
+                    </div>
+                )}
+            </div>
+
             {/* Training Parameters */}
             <div className={styles.section}>
                 <h4 className={styles.sectionTitle}>Training Parameters</h4>

@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useEvolutionSettingsStore, getAdaptiveMutationRates } from '../../evolution-manager/model/store';
 import { useDatasetManagerStore } from '../../../features/dataset-manager/model/store';
-import { Genome, BaseNode, serializeGenome, deserializeGenome } from '../../../entities/canvas-genome';
+import { Genome, BaseNode, serializeGenome, deserializeGenome, generateRandomArchitecture, extractShapesFromDatasetProfile } from '../../../entities/canvas-genome';
 
 export interface EvaluationResult {
     genome_id: string;
@@ -162,7 +162,71 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
         const popSize = settings.populationSize;
         const genomes: PopulatedGenome[] = [];
         try {
-            // First pass: instantiate all selected seeds
+            // Determine how many genomes to generate randomly vs from seeds
+            const useRandom = settings.useRandomInitialization && seedJSONs.length > 0;
+            const numRandom = useRandom ? Math.floor((popSize * settings.randomInitRatio) / 100) : 0;
+            const numFromSeeds = popSize - numRandom;
+
+            // Get dataset profile for random generation
+            let inputShape: number[] | null = null;
+            let outputShape: number[] | null = null;
+
+            if (useRandom) {
+                const profiles = useDatasetManagerStore.getState().profiles;
+                const profile = profiles.find(p => p.id === datasetProfileId);
+
+                if (profile && profile.streams && profile.streams.length > 0) {
+                    const shapes = extractShapesFromDatasetProfile(profile.streams);
+                    if (shapes) {
+                        inputShape = shapes.inputShape;
+                        outputShape = shapes.outputShape;
+                        addLog(`Detected input shape: [${inputShape.join(',')}], output shape: [${outputShape.join(',')}]`, "info");
+                    }
+                }
+            }
+
+            // First pass: generate random architectures if enabled
+            if (useRandom && inputShape && outputShape) {
+                let randomAttempts = 0;
+                while (genomes.length < numRandom && randomAttempts < numRandom * 5) {
+                    randomAttempts++;
+                    try {
+                        const randomGenome = generateRandomArchitecture(inputShape, outputShape, {
+                            maxDepth: 8,
+                            useAttention: false
+                        });
+                        const nodes = randomGenome.getAllNodes();
+
+                        if (!Genome.isGenomeFeasible(nodes)) {
+                            continue;
+                        }
+
+                        // Apply parameter mutations for diversity
+                        const mutationOpts = new Map<string, number>();
+                        mutationOpts.set('params', settings.mutationRates.params || 0.5);
+                        randomGenome.getAllNodes().forEach(node => {
+                            if (typeof (node as any).Mutate === 'function') {
+                                (node as any).Mutate(mutationOpts);
+                            }
+                        });
+
+                        genomes.push({
+                            id: crypto.randomUUID(),
+                            genome: randomGenome,
+                            nodes: nodes
+                        });
+                    } catch (e) {
+                        console.warn(`[initPopulation] Random generation failed. Attempt ${randomAttempts}/${numRandom * 5}`, e);
+                        continue;
+                    }
+                }
+
+                if (genomes.length > 0) {
+                    addLog(`Generated ${genomes.length} random architectures from dataset shapes.`, "info");
+                }
+            }
+
+            // Second pass: instantiate seed genomes
             const seedInstances = [];
             for (const seedStr of seedJSONs) {
                 const { genome, nodes } = await deserializeGenome(seedStr);
@@ -180,18 +244,25 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                 });
             }
 
-            // Fallback if no seeds provided (shouldn't happen with UI checks, but just in case)
-            if (seedInstances.length === 0) {
-                addLog("No seeds provided, initialization aborted.", "error");
+            // Final fallback if no genomes at all
+            if (genomes.length === 0 && seedInstances.length === 0) {
+                addLog("No seeds or random genomes available, initialization aborted.", "error");
                 return;
             }
 
-            // Fill the rest of the population up to popSize by mutating the seeds
+            // If no seeds but we have random genomes, use them for mutation base
+            if (seedInstances.length === 0 && genomes.length > 0) {
+                for (const g of genomes) {
+                    seedInstances.push(g.genome);
+                }
+            }
+
+            // Fill the rest of the population up to popSize by mutating from available sources
             let initAttempts = 0;
             while (genomes.length < popSize && initAttempts < popSize * 10) {
                 initAttempts++;
                 try {
-                    // Pick a random seed
+                    // Pick a random seed or random genome to mutate
                     const baseSeed = seedInstances[Math.floor(Math.random() * seedInstances.length)];
 
                     // Clone the seed
@@ -303,11 +374,13 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                 timestamp: new Date().toLocaleTimeString(),
                 evaluated: false
             }]);
-            addLog(`Spawned Generation 0: ${seedJSONs.length} direct seeds, ${popSize - seedJSONs.length} mutated clones.`, "info");
+
+            const randomCount = useRandom ? genomes.filter(g => !seedJSONs.some(s => s === g.genome.toString())).length : 0;
+            addLog(`Spawned Generation 0: ${seedJSONs.length} direct seeds, ${randomCount} random archs, ${genomes.length - seedJSONs.length - randomCount} mutated clones.`, "info");
         } catch (e) {
             addLog(`Failed to initialize population: ${String(e)}`, "error");
         }
-    }, [addLog, settings]);
+    }, [addLog, settings, datasetProfileId]);
 
     // Main Async Loop
     const runGeneration = useCallback(async () => {
