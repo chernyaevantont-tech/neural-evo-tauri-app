@@ -21,11 +21,18 @@ Modern visual SVG editor for creating and editing neural network architectures w
 
 **Layer Nodes:**
 - **Input** — Input layer with configurable shape (e.g., `28×28×3` for RGB images)
-- **Dense** — Fully connected layer with units, activation (`relu` / `leaky_relu` / `softmax`), and bias options
+- **Dense** — Fully connected layer with units, activation (`relu` / `leaky_relu` / `softmax`), and bias options. *Note: final softmax is auto-converted to linear for CrossEntropy compatibility.*
 - **Conv2D** — Convolutional layer with filters, kernel size, stride, padding, dilation
 - **Pooling** — Max/Average pooling with kernel size, stride, and padding
 - **Flatten** — Flattens multi-dimensional input to a 1D vector
+- **BatchNorm** — Normalizes features to improve training stability (supports both 2D and 4D)
+- **LayerNorm** — Normalizes across the feature dimension
 - **Output** — Output layer with configurable shape
+
+**Regularization Nodes:**
+- **Dropout** — Randomly zeroes units during training to prevent overfitting
+- **Dropout2D** — Spatial dropout for convolutional feature maps
+- **GaussianNoise** — Adds random noise to inputs during training
 
 **Merge Nodes:**
 - **Add** — Element-wise addition (residual / skip connections)
@@ -46,9 +53,10 @@ Modern visual SVG editor for creating and editing neural network architectures w
 - **Automatic Adapters**: When tensor shapes become incompatible during structural mutations or crossover, the system automatically creates adapter layers (Dense, Conv2D, Pooling) to bridge the dimensional gap.
 
 ### Evolution Studio & Orchestration
-- **TS Orchestrator**: Fully asynchronous TypeScript loop (`useEvolutionLoop`) that manages population spawning, generational evaluation via Rust, fitness assignment, elitism, and tournament selection.
-- **Dataset Manager**: Configure and manage custom folder-based datasets used to evaluate the fitness of the population.
-- **Live Dashboard**: Real-time SVG charts tracking fitness and node counts over time, system event logs, and a dynamic "Hall of Fame" showcasing the top topologies discovered.
+- **Evolution Loop Orchestrator**: Fully asynchronous TypeScript loop (`useEvolutionLoop`) that manages population spawning, generational evaluation via Rust, fitness assignment, elitism, and tournament selection. Supports **Stratified Dataset Splitting** for balanced evaluations.
+- **Dataset Manager**: Configure and manage custom folder-based datasets. Includes a **Class Distribution Analyzer** to detect data imbalance.
+- **Immediate Cancellation**: The evolution process can be stopped instantly, even during heavy data preprocessing or training, thanks to session-locked early-exit points.
+- **Live Dashboard**: High-performance **Chart.js** charts tracking fitness and node counts over time, system event logs, and a dynamic "Hall of Fame" showcasing the top topologies discovered.
 
 ### Rust Backend (burn ML framework)
 - **GraphModel** — Universal directed-acyclic-graph neural network model compiled from a genome description
@@ -56,10 +64,11 @@ Modern visual SVG editor for creating and editing neural network architectures w
 - **Dynamic Tensor Support** — Supports both 2D (Dense) and 4D (Conv/Pooling) tensor paths within a single graph
 - **Weight Initialization** — Kaiming Normal initialization for `Dense` layers to prevent vanishing gradients
 - **Hardware Acceleration** — Configurable `Wgpu` backend for GPU-accelerated tensor operations
+- **Loss Functions** — Automatic loss selection: `CrossEntropyLoss` for classification (Dim2), `MseLoss` for regression/image tasks (Dim4). 
+- **Logits Optimization** — Detects final `softmax` activations and automatically converts them to `linear` for `CrossEntropyLoss` to prevent gradient squashing.
 - **Training Pipelines**:
   - Full loop via burn's `SupervisedTraining` with `Adam` optimizer, `ConstantLr` scheduler, and `LossMetric` tracking
   - Manual lightweight loop (`train_simple`) supporting Train/Validation/Test data splits, shuffling, and per-epoch metrics (Loss & Accuracy) logging
-- **Loss Functions** — Automatic loss selection: `CrossEntropyLoss` for classification (Dim2), `MseLoss` for regression/image tasks (Dim4)
 
 ### Interaction Features
 
@@ -239,10 +248,9 @@ src-tauri/
 | Structure | Purpose |
 |-----------|---------|
 | `DynamicTensor<B>` | Enum for 2D and 4D tensors within a single execution graph |
-| `Layer<B>` | burn Module enum wrapping Conv2d, Linear, MaxPool2d, AvgPool2d |
-| `Operation` | Describes what each node does (Input, Dense, Conv2D, MaxPool, AvgPool, Flatten, Add, Concat, Output) |
+| `Operation` | Describes what each node does (Input, Dense, Conv2D, MaxPool, AvgPool, Flatten, BatchNorm, LayerNorm, Dropout, GaussianNoise, Add, Concat, Output) |
 | `Instruction` | Links a node ID to its operation and input node IDs |
-| `GraphModel<B>` | The main model: holds `layers` + `execution_plan` + reference counts. Implements `TrainStep` and `InferenceStep` |
+| `GraphModel<B>` | The main model: holds `execution_plan` + layers. Implements `TrainStep` and `InferenceStep` |
 | `DynamicBatch<B>` | Training batch: multiple input & target tensors |
 | `DynamicBatcher<B>` | burn `Batcher` implementation for `DataLoader` |
 | `train()` | Full training via burn `SupervisedTraining` + `Learner` (checkpoints, metrics, LR scheduling) |
@@ -266,6 +274,7 @@ src-tauri/
 | Conv2D | Orange | `#ff9f43` |
 | Pooling | Purple | `#ab47bc` |
 | Flatten | Light Green | `#7cb342` |
+| Regularization (Dropout/Norm) | Lavender | `#bd93f9` |
 | Add | Red | `#ef5350` |
 | Concat | Pink | `#ec407a` |
 | Output | Bright Red | `#ff5252` |
