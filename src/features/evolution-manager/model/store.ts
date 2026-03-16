@@ -66,6 +66,16 @@ export interface EvolutionSettingsState {
     setUseRandomInitialization: (val: boolean) => void;
     randomInitRatio: number; // 0-100: percentage of population to initialize randomly
     setRandomInitRatio: (val: number) => void;
+
+    // Zero-Cost Proxy Evaluation
+    useZeroCostProxies: boolean;
+    setUseZeroCostProxies: (val: boolean) => void;
+    zeroCostStrategy: 'two-stage' | 'early-stopping';
+    setZeroCostStrategy: (val: 'two-stage' | 'early-stopping') => void;
+    fastPassThreshold: number; // 0.0-1.0: threshold for full training
+    setFastPassThreshold: (val: number) => void;
+    partialTrainingEpochs: number;
+    setPartialTrainingEpochs: (val: number) => void;
 }
 
 export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) => ({
@@ -136,6 +146,15 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
     setUseRandomInitialization: (val) => set({ useRandomInitialization: val }),
     randomInitRatio: 30, // 30% of population initialized randomly by default
     setRandomInitRatio: (val) => set({ randomInitRatio: Math.max(0, Math.min(100, val)) }),
+
+    useZeroCostProxies: false,
+    setUseZeroCostProxies: (val) => set({ useZeroCostProxies: val }),
+    zeroCostStrategy: 'two-stage',
+    setZeroCostStrategy: (val) => set({ zeroCostStrategy: val }),
+    fastPassThreshold: 0.6,
+    setFastPassThreshold: (val) => set({ fastPassThreshold: Math.max(0, Math.min(1, val)) }),
+    partialTrainingEpochs: 20,
+    setPartialTrainingEpochs: (val) => set({ partialTrainingEpochs: Math.max(1, Math.min(100, val)) }),
 }));
 
 export function getAdaptiveMutationRates(currentNodes: number) {

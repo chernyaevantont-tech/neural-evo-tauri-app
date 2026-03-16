@@ -191,3 +191,20 @@ pub struct TabularSettings {
     #[serde(rename = "fillMissing")]
     pub fill_missing: String, // "mean" | "median" | "mode" | "drop"
 }
+
+// ---------------------------------------------------------------------------
+// Zero-Cost Proxy Configuration DTOs
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ZeroCostConfigDto {
+    pub enabled: bool,
+    pub strategy: String, // "two-stage" | "early-stopping"
+    #[serde(rename = "fastPassThreshold")]
+    pub fast_pass_threshold: f32,
+    #[serde(rename = "partialTrainingEpochs")]
+    pub partial_training_epochs: u32,
+    #[serde(rename = "useVoting")]
+    pub use_voting: bool,
+}

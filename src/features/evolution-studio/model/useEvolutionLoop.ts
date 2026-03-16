@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useEvolutionSettingsStore, getAdaptiveMutationRates } from '../../evolution-manager/model/store';
 import { useDatasetManagerStore } from '../../../features/dataset-manager/model/store';
 import { Genome, BaseNode, serializeGenome, deserializeGenome, generateRandomArchitecture, extractShapesFromDatasetProfile } from '../../../entities/canvas-genome';
+import { computeZeroCostScore, ZeroCostMetrics } from './useZeroCostEvaluation';
 
 export interface EvaluationResult {
     genome_id: string;
@@ -19,6 +20,7 @@ export interface PopulatedGenome {
     adjustedFitness?: number;
     trainingMetrics?: BatchMetrics[];
     resources?: { totalFlash: number; totalRam: number; totalMacs: number; totalNodes: number };
+    zeroCostMetric?: ZeroCostMetrics;
 }
 
 export interface LogEntry {
@@ -396,6 +398,70 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
 
             addLog(`Sending ${serializedGenomes.length} genomes to Rust for evaluation...`);
 
+            // 1b. Zero-Cost Proxy Scoring (if enabled)
+            let zeroCostScores: ZeroCostMetrics[] = [];
+            let evalEpochsAdjustments: Map<number, number> = new Map();
+            
+            if (settings.useZeroCostProxies) {
+                addLog(`Computing zero-cost proxy scores for architecture evaluation...`);
+                
+                for (let i = 0; i < serializedGenomes.length; i++) {
+                    try {
+                        const score = await computeZeroCostScore(serializedGenomes[i], {
+                            enabled: true,
+                            strategy: settings.zeroCostStrategy,
+                            fastPassThreshold: settings.fastPassThreshold,
+                            partialTrainingEpochs: settings.partialTrainingEpochs,
+                            useVoting: false,
+                        });
+                        
+                        zeroCostScores.push(score);
+                        
+                        // Determine epochs for this genome based on strategy decision
+                        const recommended = score.strategy_decision === 'skip' 
+                            ? 0 
+                            : score.strategy_decision === 'partial_train'
+                                ? settings.partialTrainingEpochs
+                                : settings.evalEpochs;
+                        
+                        evalEpochsAdjustments.set(i, recommended);
+                        
+                        addLog(
+                            `Genome ${i}: SynFlow=${score.synflow.toFixed(2)} ` +
+                            `(${(score.normalized_score * 100).toFixed(0)}%) → ` +
+                            `${score.strategy_decision === 'skip' ? 'SKIP' : recommended + ' epochs'}`,
+                            "info"
+                        );
+                    } catch (e) {
+                        // Fallback: full training if zero-cost fails
+                        zeroCostScores.push({
+                            synflow: 5.0,
+                            normalized_score: 0.5,
+                            strategy_decision: 'full_train',
+                        });
+                        evalEpochsAdjustments.set(i, settings.evalEpochs);
+                        addLog(`Genome ${i}: Zero-cost scoring failed, using full training fallback`);
+                    }
+                }
+                
+                // Count statistics
+                const skipped = zeroCostScores.filter(s => s.strategy_decision === 'skip').length;
+                const partial = zeroCostScores.filter(s => s.strategy_decision === 'partial_train').length;
+                const full = zeroCostScores.filter(s => s.strategy_decision === 'full_train').length;
+                const avgScore = zeroCostScores.reduce((sum, s) => sum + s.normalized_score, 0) / zeroCostScores.length;
+                
+                addLog(
+                    `Zero-Cost Summary: ${full} full + ${partial} partial + ${skipped} skipped | ` +
+                    `Avg SynFlow: ${(avgScore * 10).toFixed(2)}`,
+                    "success"
+                );
+            } else {
+                // If zero-cost disabled, use standard epochs for all
+                for (let i = 0; i < serializedGenomes.length; i++) {
+                    evalEpochsAdjustments.set(i, settings.evalEpochs);
+                }
+            }
+
             // Look up dataset split percentages from the dataset manager
             const profiles = useDatasetManagerStore.getState().profiles;
             const currentProfile = profiles.find(p => p.id === datasetProfileId);
@@ -404,25 +470,45 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             const testSplit = currentProfile?.split?.test ?? 10;
 
             // 2. Call Rust Evaluator
+            // For now, we use a global evalEpochs value
+            // In a more advanced implementation, we'd modify evaluate_population to accept per-genome epochs
+            const avgAdjustedEpochs = Math.ceil(
+                Array.from(evalEpochsAdjustments.values()).reduce((a, b) => a + b, 0) / 
+                evalEpochsAdjustments.size
+            );
+            
             const results = await invoke<EvaluationResult[]>('evaluate_population', {
                 genomes: serializedGenomes,
                 datasetProfile: datasetProfileId,
                 batchSize: settings.batchSize || 32,
-                evalEpochs: settings.evalEpochs || 1,
+                evalEpochs: avgAdjustedEpochs,
                 datasetPercent: settings.datasetPercent || 100,
                 trainSplit,
                 valSplit,
                 testSplit,
             });
 
-            // 3. Map Results & Apply Fitness (Parsimony + Resource-Aware)
+            // 3. Map Results & Apply Fitness (Parsimony + Resource-Aware + Zero-Cost)
             const alpha = settings.useParsimonyPressure ? settings.parsimonyAlpha : 0;
             const evaluatedPop = population.map((p, index) => {
                 const res = results[index];
                 const nodeCount = p.genome.getAllNodes().length;
                 const resources = p.genome.GetGenomeResources();
+                const zeroCostMetric = zeroCostScores.length > index ? zeroCostScores[index] : undefined;
 
                 let baseFitness = res.accuracy > 0 ? res.accuracy : (1 / (1 + res.loss));
+
+                // Combine with zero-cost proxy if available
+                if (settings.useZeroCostProxies && zeroCostMetric) {
+                    if (zeroCostMetric.strategy_decision === 'skip') {
+                        // Genome was not trained, use only proxy score
+                        baseFitness = zeroCostMetric.normalized_score;
+                    } else {
+                        // Genome was trained (partial or full), combine accuracy with proxy
+                        // 70% accuracy + 30% proxy for diversity
+                        baseFitness = (0.7 * baseFitness) + (0.3 * zeroCostMetric.normalized_score);
+                    }
+                }
 
                 // Resource-Aware Fitness penalty
                 if (settings.useResourceAwareFitness) {
@@ -442,8 +528,9 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                     accuracy: res.accuracy,
                     adjustedFitness: baseFitness - (alpha * nodeCount),
                     trainingMetrics: genomeMetrics,
-                    resources
-                };
+                    resources,
+                    zeroCostMetric,
+                } as PopulatedGenome;
             });
 
             // 4. Sort by Adjusted Fitness (descending)

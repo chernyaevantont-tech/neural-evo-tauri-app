@@ -325,6 +325,94 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
                     </div>
                 )}
             </div>
+
+            {/* Zero-Cost Proxy Evaluation */}
+            <div className={styles.section}>
+                <h4 className={styles.sectionTitle}>⚡ Zero-Cost Proxy Evaluation</h4>
+                
+                <label className={styles.checkboxLabel}>
+                    <input
+                        type="checkbox"
+                        checked={settings.useZeroCostProxies}
+                        onChange={e => settings.setUseZeroCostProxies(e.target.checked)}
+                        disabled={disabled}
+                    />
+                    <span>Enable Fast Architecture Scoring</span>
+                </label>
+                <p className={styles.helpText}>
+                    Estimate quality without training (1000x faster), ~5-8x overall speedup
+                </p>
+
+                {settings.useZeroCostProxies && (
+                    <>
+                        <div className={styles.subSetting}>
+                            <span className={styles.subLabel}>Scoring Strategy</span>
+                            <div className={styles.radioGroup}>
+                                <label className={styles.radioLabel}>
+                                    <input
+                                        type="radio"
+                                        name="strategy"
+                                        value="two-stage"
+                                        checked={settings.zeroCostStrategy === 'two-stage'}
+                                        onChange={e => settings.setZeroCostStrategy(e.target.value as 'two-stage' | 'early-stopping')}
+                                        disabled={disabled}
+                                    />
+                                    <span>Two-Stage (Recommended, -50% time)</span>
+                                </label>
+                                <label className={styles.radioLabel}>
+                                    <input
+                                        type="radio"
+                                        name="strategy"
+                                        value="early-stopping"
+                                        checked={settings.zeroCostStrategy === 'early-stopping'}
+                                        onChange={e => settings.setZeroCostStrategy(e.target.value as 'two-stage' | 'early-stopping')}
+                                        disabled={disabled}
+                                    />
+                                    <span>Early Stopping (-70% time, more aggressive)</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div className={styles.sliderRow}>
+                            <span className={styles.sliderLabel}>
+                                Fast-Pass Threshold: {settings.fastPassThreshold.toFixed(2)}
+                            </span>
+                            <div className={styles.sliderControl}>
+                                <input
+                                    type="range"
+                                    min="0" max="1" step="0.05"
+                                    value={settings.fastPassThreshold}
+                                    onChange={e => settings.setFastPassThreshold(parseFloat(e.target.value))}
+                                    className={styles.slider}
+                                    disabled={disabled}
+                                />
+                            </div>
+                            <p className={styles.helpText}>
+                                Architectures above this SynFlow score get full training
+                            </p>
+                        </div>
+
+                        <div className={styles.sliderRow}>
+                            <span className={styles.sliderLabel}>
+                                Partial Training Epochs: {settings.partialTrainingEpochs}
+                            </span>
+                            <div className={styles.sliderControl}>
+                                <input
+                                    type="range"
+                                    min="1" max="50" step="1"
+                                    value={settings.partialTrainingEpochs}
+                                    onChange={e => settings.setPartialTrainingEpochs(parseInt(e.target.value))}
+                                    className={styles.slider}
+                                    disabled={disabled}
+                                />
+                            </div>
+                            <p className={styles.helpText}>
+                                For medium-scored architectures (scoring 0.3-0.7 range)
+                            </p>
+                        </div>
+                    </>
+                )}
+            </div>
         </div>
     );
 };

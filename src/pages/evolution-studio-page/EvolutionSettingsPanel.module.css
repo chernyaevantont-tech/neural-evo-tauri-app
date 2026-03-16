@@ -181,4 +181,32 @@
     font-size: 0.75rem;
     color: var(--color-text-secondary);
     font-style: italic;
+    margin-top: 0.25rem;
+}
+
+/* Radio button groups */
+.radioGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}
+
+.radioLabel {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--color-text-primary);
+    cursor: pointer;
+}
+
+.radioLabel input[type="radio"] {
+    cursor: pointer;
+    accent-color: var(--color-accent-primary, #646cff);
+}
+
+.radioLabel input[type="radio"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
