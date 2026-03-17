@@ -35,16 +35,13 @@ impl CsvDatasetLoader {
             return Err(format!("CSV file not found: {}", csv_path.display()));
         }
 
-        // Parse feature columns (handle range like "ch0:ch11" if provided)
-        let feature_indices = parse_column_range(&config.feature_columns)?;
-
-        // Open CSV reader
+        // Open CSV reader first to get headers
         let mut reader = csv::ReaderBuilder::new()
             .has_headers(config.has_headers)
             .from_path(&csv_path)
             .map_err(|e| format!("Failed to read CSV: {}", e))?;
 
-        // Get headers to find target column index
+        // Get headers first
         let headers = if config.has_headers {
             reader.headers()
                 .map_err(|e| format!("Failed to read headers: {}", e))?
@@ -56,15 +53,25 @@ impl CsvDatasetLoader {
             (0..100).map(|i| i.to_string()).collect()
         };
 
-        // Find target column index
-        let target_index = if config.has_headers {
+        // Now map feature column names/specs to actual column indices
+        let feature_indices = if config.feature_columns.is_empty() {
+            vec![] // Target streams have no features
+        } else {
+            map_column_specs_to_indices(&config.feature_columns, &headers)?
+        };
+
+        // Find target column index (required if target_column is not empty, optional otherwise)
+        let target_index = if config.target_column.is_empty() {
+            // Input stream: no target column needed
+            0 // dummy value, won't be used
+        } else if config.has_headers {
             headers.iter()
                 .position(|h| h == &config.target_column)
-                .ok_or_else(|| format!("Target column not found: {}", config.target_column))?
+                .ok_or_else(|| format!("Target column '{}' not found in headers: {:?}", config.target_column, headers))?
         } else {
             config.target_column
                 .parse::<usize>()
-                .map_err(|_| format!("Invalid column index: {}", config.target_column))?
+                .map_err(|_| format!("Invalid column index for target_column '{}': expected usize", config.target_column))?
         };
 
         // Validate feature indices are within bounds
@@ -99,10 +106,16 @@ impl CsvDatasetLoader {
             }
             rows.push(feature_values);
 
-            // Extract label
-            let label = record.get(target_index)
-                .ok_or_else(|| format!("Missing target value at row {}", row_idx))?
-                .to_string();
+            // Extract label (required if target_column is specified, dummy "unlabeled" for Input streams)
+            let label = if config.target_column.is_empty() {
+                // Input stream: use dummy label
+                "unlabeled".to_string()
+            } else {
+                // Target stream: extract from target column
+                record.get(target_index)
+                    .ok_or_else(|| format!("Missing target value at row {}", row_idx))?
+                    .to_string()
+            };
             labels.push(label.clone());
             class_set.insert(label);
         }
@@ -318,6 +331,82 @@ impl CsvDatasetLoader {
     }
 }
 
+/// Map column specifications to actual indices using CSV headers
+/// Supports: "ch0" (column name), "0" (direct index), "ch0:ch11" (range by name)
+fn map_column_specs_to_indices(specs: &[String], headers: &[String]) -> Result<Vec<usize>, String> {
+    if specs.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut indices = vec![];
+    
+    for spec in specs {
+        let spec = spec.trim();
+        
+        // Try range format: "ch0:ch11" or "0:11"
+        if let Some(colon_pos) = spec.find(':') {
+            let start_spec = spec[..colon_pos].trim();
+            let end_spec = spec[colon_pos + 1..].trim();
+            
+            let start_idx = resolve_single_column(start_spec, headers)?;
+            let end_idx = resolve_single_column(end_spec, headers)?;
+            
+            if start_idx <= end_idx {
+                for i in start_idx..=end_idx {
+                    indices.push(i);
+                }
+            } else {
+                return Err(format!("Invalid column range: {}:{} (start > end)", start_spec, end_spec));
+            }
+        } else {
+            // Single column (by name or index)
+            let idx = resolve_single_column(spec, headers)?;
+            indices.push(idx);
+        }
+    }
+
+    Ok(indices)
+}
+
+/// Resolve a single column spec to its index
+/// Tries: direct index → column name lookup
+fn resolve_single_column(spec: &str, headers: &[String]) -> Result<usize, String> {
+    let spec = spec.trim();
+    
+    // Try parsing as direct index first
+    if let Ok(idx) = spec.parse::<usize>() {
+        if idx < headers.len() {
+            return Ok(idx);
+        } else {
+            return Err(format!("Column index {} out of bounds (CSV has {} columns)", idx, headers.len()));
+        }
+    }
+    
+    // Try looking up by column name
+    if let Some(pos) = headers.iter().position(|h| h == spec) {
+        return Ok(pos);
+    }
+    
+    // Try extracting number from column name like "ch0"
+    if let Ok(num) = extract_trailing_number(spec) {
+        // Look for a column that has this number as suffix
+        if let Some(pos) = headers.iter().position(|h| {
+            if let Ok(h_num) = extract_trailing_number(h) {
+                h_num == num
+            } else {
+                false
+            }
+        }) {
+            return Ok(pos);
+        }
+    }
+    
+    Err(format!(
+        "Cannot resolve column spec '{}'. Available columns: {:?}",
+        spec, headers
+    ))
+}
+
 /// Parse feature column range like "ch0:ch11" or use predefined columns
 fn parse_column_range(columns: &[String]) -> Result<Vec<usize>, String> {
     if columns.is_empty() {
@@ -346,11 +435,16 @@ fn parse_column_range(columns: &[String]) -> Result<Vec<usize>, String> {
                 }
             }
         } else {
-            // Try to parse as direct column index
+            // Try to parse as direct column index (numeric)
             if let Ok(idx) = col.parse::<usize>() {
                 indices.push(idx);
             } else {
-                return Err(format!("Cannot parse column spec: {}", col));
+                // Try to extract trailing number from column names like "ch0", "ch1", etc.
+                if let Ok(idx) = extract_trailing_number(col) {
+                    indices.push(idx);
+                } else {
+                    return Err(format!("Cannot parse column spec: {}", col));
+                }
             }
         }
     }

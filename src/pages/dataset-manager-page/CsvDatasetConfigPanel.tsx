@@ -20,40 +20,47 @@ interface Props {
     onChange: (locator: CsvDatasetLocator) => void;
     onPreview?: () => void;
     previewDisabled?: boolean;
+    role?: 'Input' | 'Target' | 'Ignore';  // ← Add role information
 }
 
 export const CsvDatasetConfigPanel: React.FC<Props> = ({ 
     locator, 
     onChange, 
     onPreview,
-    previewDisabled
+    previewDisabled,
+    role
 }) => {
+    // For Target streams, force featureColumns to be empty
+    const isTargetStream = role === 'Target';
+    const effectiveColumns = isTargetStream ? [] : locator.featureColumns;
+    
     const [columnInput, setColumnInput] = useState<string>(
-        locator.featureColumns.length === 1 && locator.featureColumns[0].includes(':')
+        !isTargetStream && locator.featureColumns.length === 1 && locator.featureColumns[0].includes(':')
             ? locator.featureColumns[0]
-            : locator.featureColumns.join(', ')
+            : effectiveColumns.join(', ')
     );
 
     const parseColumnRange = (input: string): string[] => {
-        // Parse "ch0:ch11" or "0:11" into array
+        // Parse "ch0:ch11" or "0:11" or "col1, col2, col3" into array
         const trimmed = input.trim();
         
-        // Try range notation first
-        const rangeMatch = trimmed.match(/^(\w+):(\d+):(\w+):(\d+)$/);
-        if (rangeMatch) {
-            const [, p1, n1, p2, n2] = rangeMatch;
-            if (p1 === p2) {
-                const start = parseInt(n1);
-                const end = parseInt(n2);
+        // Try format: "prefix+startNum:prefix+endNum" (e.g., "ch0:ch11")
+        const prefixRangeMatch = trimmed.match(/^(\D+?)(\d+):(\D*?)(\d+)$/);
+        if (prefixRangeMatch) {
+            const [, prefix1, startStr, prefix2, endStr] = prefixRangeMatch;
+            // Both parts should have same prefix
+            if (prefix1 === prefix2) {
+                const start = parseInt(startStr);
+                const end = parseInt(endStr);
                 const result = [];
                 for (let i = start; i <= end; i++) {
-                    result.push(`${p1}${i}`);
+                    result.push(`${prefix1}${i}`);
                 }
                 return result;
             }
         }
 
-        // Try simple numeric range
+        // Try simple numeric range: "0:11"
         const numRangeMatch = trimmed.match(/^(\d+):(\d+)$/);
         if (numRangeMatch) {
             const [, start, end] = numRangeMatch;
@@ -64,7 +71,7 @@ export const CsvDatasetConfigPanel: React.FC<Props> = ({
             return result;
         }
 
-        // Fallback: comma-separated
+        // Fallback: comma-separated list
         return trimmed.split(',').map(s => s.trim()).filter(s => s.length > 0);
     };
 
@@ -189,50 +196,85 @@ export const CsvDatasetConfigPanel: React.FC<Props> = ({
                 </div>
             )}
 
-            {/* Feature Columns */}
-            <div className={styles.inputGroup}>
-                <label>Feature Columns</label>
-                <input
-                    type="text"
-                    value={columnInput}
-                    onChange={handleColumnInputChange}
-                    placeholder='e.g. "ch0:ch11" or "col1, col2, col3" or "0:11" (for indices)'
-                />
-                <small style={{ color: 'var(--color-text-muted)', display: 'block', marginTop: '0.25rem' }}>
-                    Use range notation (ch0:ch11) or comma-separated list. Selected: {locator.featureColumns.length} columns
-                </small>
-            </div>
+            {/* Feature Columns - Only for Input streams */}
+            {!isTargetStream ? (
+                <>
+                    <div className={styles.inputGroup}>
+                        <label>Feature Columns</label>
+                        <input
+                            type="text"
+                            value={columnInput}
+                            onChange={handleColumnInputChange}
+                            placeholder='e.g. "ch0:ch11" or "col1, col2, col3" or "0:11" (for indices)'
+                        />
+                        <small style={{ color: 'var(--color-text-muted)', display: 'block', marginTop: '0.25rem' }}>
+                            Use range notation (ch0:ch11) or comma-separated list. Selected: {locator.featureColumns.length} columns
+                        </small>
+                    </div>
 
-            {/* Feature Columns Preview */}
-            {locator.featureColumns.length > 0 && (
+                    {/* Feature Columns Preview */}
+                    {locator.featureColumns.length > 0 && (
+                        <div style={{ 
+                            background: 'var(--color-bg-secondary)', 
+                            border: '1px solid var(--color-border)', 
+                            borderRadius: '4px',
+                            padding: '0.75rem',
+                            marginBottom: '1rem',
+                            fontSize: '0.85rem'
+                        }}>
+                            <strong style={{ color: 'var(--color-text-secondary)' }}>Columns:</strong> {locator.featureColumns.join(', ')}
+                            <br />
+                            <strong style={{ color: 'var(--color-text-secondary)' }}>Shape inference:</strong> 
+                            {locator.sampleMode === 'row' 
+                                ? ` [${locator.featureColumns.length}]` 
+                                : ` [${locator.windowSize || 50}, ${locator.featureColumns.length}]`
+                            }
+                        </div>
+                    )}
+                </>
+            ) : (
                 <div style={{ 
                     background: 'var(--color-bg-secondary)', 
-                    border: '1px solid var(--color-border)', 
+                    border: '1px solid var(--color-border-warning)', 
                     borderRadius: '4px',
                     padding: '0.75rem',
                     marginBottom: '1rem',
-                    fontSize: '0.85rem'
+                    fontSize: '0.85rem',
+                    color: 'var(--color-text-secondary)'
                 }}>
-                    <strong style={{ color: 'var(--color-text-secondary)' }}>Columns:</strong> {locator.featureColumns.join(', ')}
-                    <br />
-                    <strong style={{ color: 'var(--color-text-secondary)' }}>Shape inference:</strong> 
-                    {locator.sampleMode === 'row' 
-                        ? ` [${locator.featureColumns.length}]` 
-                        : ` [${locator.windowSize || 50}, ${locator.featureColumns.length}]`
-                    }
+                    <strong>Feature Columns: N/A</strong><br />
+                    <small>Target streams use only the Target Column for labels. No feature selection needed.</small>
                 </div>
             )}
 
-            {/* Target Column */}
-            <div className={styles.inputGroup} style={{ marginBottom: '1rem' }}>
-                <label>Target Column (Label/Class)</label>
-                <input
-                    type="text"
-                    value={locator.targetColumn}
-                    onChange={(e) => onChange({ ...locator, targetColumn: e.target.value })}
-                    placeholder={locator.hasHeaders ? 'e.g. gesture, class, label' : 'e.g. column index'}
-                />
-            </div>
+            {/* Target Column - Only for Target streams */}
+            {isTargetStream ? (
+                <div className={styles.inputGroup} style={{ marginBottom: '1rem' }}>
+                    <label>Target Column (Label/Class)</label>
+                    <input
+                        type="text"
+                        value={locator.targetColumn}
+                        onChange={(e) => onChange({ ...locator, targetColumn: e.target.value })}
+                        placeholder={locator.hasHeaders ? 'e.g. gesture, class, label' : 'e.g. column index'}
+                    />
+                    <small style={{ color: 'var(--color-text-muted)', display: 'block', marginTop: '0.25rem' }}>
+                        Column containing class labels for classification tasks
+                    </small>
+                </div>
+            ) : (
+                <div style={{ 
+                    background: 'var(--color-bg-secondary)', 
+                    border: '1px solid var(--color-border-warning)', 
+                    borderRadius: '4px',
+                    padding: '0.75rem',
+                    marginBottom: '1rem',
+                    fontSize: '0.85rem',
+                    color: 'var(--color-text-secondary)'
+                }}>
+                    <strong>Target Column: N/A</strong><br />
+                    <small>Input streams load only Feature Columns. Targets are handled by Target streams.</small>
+                </div>
+            )}
 
             {/* Preprocessing */}
             <div style={{ borderTop: '1px dashed var(--color-border)', paddingTop: '0.75rem' }}>

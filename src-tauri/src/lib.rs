@@ -904,9 +904,18 @@ async fn evaluate_population(
 pub struct StreamLocatorConfig {
     pub stream_id: String,
     pub alias: String,
-    pub locator_type: String, // "GlobPattern" | "FolderMapping" | "CompanionFile" | "None"
+    pub locator_type: String, // "GlobPattern" | "FolderMapping" | "CompanionFile" | "CsvDataset" | "None"
     pub pattern: Option<String>, // for GlobPattern
     pub path_template: Option<String>, // for CompanionFile
+    
+    // CSV Dataset specific
+    pub csv_path: Option<String>,
+    pub has_headers: Option<bool>,
+    pub sample_mode: Option<String>, // "row" | "temporal_window"
+    pub feature_columns: Option<Vec<String>>,
+    pub target_column: Option<String>,
+    pub window_size: Option<usize>,
+    pub stream_role: Option<String>, // "Input" | "Target" | "Ignore"
 }
 
 #[derive(serde::Serialize)]
@@ -987,39 +996,92 @@ async fn scan_dataset(
         return Err(format!("Root path does not exist: {}", root_path));
     }
 
-    // Step 1: Build the anchor — a HashMap<SampleID, PathBuf> from the first
-    // GlobPattern OR FolderMapping stream. FolderMapping auto-globs for common
-    // image extensions so it works standalone (ImageNet-style datasets).
+    // Step 1a: Check if any stream is CsvDataset — if so, use it as anchor
     let mut anchor_ids: HashMap<String, std::path::PathBuf> = HashMap::new();
-
+    let mut anchor_from_csv = false;
+    
     for cfg in &stream_configs {
-        match cfg.locator_type.as_str() {
-            "GlobPattern" => {
-                let pattern = cfg.pattern.as_deref().unwrap_or("**/*.jpg");
-                anchor_ids = collect_glob_ids(root, pattern);
-                break;
-            }
-            "FolderMapping" => {
-                // Auto-glob for common image/data files in subfolders
-                let extensions = ["jpg", "jpeg", "png", "bmp", "webp", "tiff", "csv", "txt"];
-                for ext in &extensions {
-                    let pattern = format!("**/*.{}", ext);
-                    let found = collect_glob_ids(root, &pattern);
-                    for (id, path) in found {
-                        anchor_ids.entry(id).or_insert(path);
+        if cfg.locator_type == "CsvDataset" {
+            let csv_path = cfg.csv_path.as_deref().unwrap_or("data.csv");
+            let has_headers = cfg.has_headers.unwrap_or(true);
+            let feature_columns = cfg.feature_columns.clone().unwrap_or_default();
+            let target_column = cfg.target_column.clone().unwrap_or_else(|| "label".to_string());
+            
+            let full_path = root.join(csv_path);
+            eprintln!(">>> Attempting to load CSV: {} (full path: {})", csv_path, full_path.display());
+            eprintln!("    Config: has_headers={}, feature_cols={:?}, target_col={}", 
+                has_headers, feature_columns, target_column);
+            
+            // For anchor discovery, use dummy feature columns and row mode (we just need sample count)
+            let csv_config = crate::dtos::CsvDatasetDef {
+                csv_path: csv_path.to_string(),
+                has_headers,
+                sample_mode: "row".to_string(), // Always use row mode for anchor discovery
+                feature_columns: if feature_columns.is_empty() { vec!["0".to_string()] } else { feature_columns.clone() },
+                target_column: target_column.clone(),
+                window_size: None,
+                window_stride: None,
+                preprocessing: crate::dtos::CsvPreprocessingConfig {
+                    normalization: "none".to_string(),
+                    handle_missing: "skip".to_string(),
+                },
+            };
+            
+            match crate::csv_loader::CsvDatasetLoader::init(root, csv_config) {
+                Ok(_loader) => {
+                    // For CSV, use row indices as SampleIDs
+                    for i in 0.._loader.num_samples {
+                        let sample_id = format!("csv_row_{}", i);
+                        anchor_ids.insert(sample_id, root.to_path_buf());
                     }
-                }
-                if !anchor_ids.is_empty() {
+                    anchor_from_csv = true;
+                    eprintln!(">>> CSV anchor loaded successfully: {} samples from {}", _loader.num_samples, csv_path);
                     break;
                 }
+                Err(e) => {
+                    eprintln!(">>> Warning: Failed to load CSV '{}' for anchor: {}", csv_path, e);
+                }
             }
-            _ => {}
+        }
+    }
+
+    // Step 1b: If no CSV anchor, try GlobPattern/FolderMapping
+    if !anchor_from_csv {
+        for cfg in &stream_configs {
+            match cfg.locator_type.as_str() {
+                "GlobPattern" => {
+                    let pattern = cfg.pattern.as_deref().unwrap_or("**/*.jpg");
+                    anchor_ids = collect_glob_ids(root, pattern);
+                    break;
+                }
+                "FolderMapping" => {
+                    // Auto-glob for common image/data files in subfolders
+                    let extensions = ["jpg", "jpeg", "png", "bmp", "webp", "tiff", "csv", "txt"];
+                    for ext in &extensions {
+                        let pattern = format!("**/*.{}", ext);
+                        let found = collect_glob_ids(root, &pattern);
+                        for (id, path) in found {
+                            anchor_ids.entry(id).or_insert(path);
+                        }
+                    }
+                    if !anchor_ids.is_empty() {
+                        break;
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
     if anchor_ids.is_empty() {
+        let has_csv = stream_configs.iter().any(|c| c.locator_type == "CsvDataset");
+        let csv_info = if has_csv {
+            "\n\nNote: You have CsvDataset streams. Make sure the CSV file path exists relative to the root folder."
+        } else {
+            ""
+        };
         return Err(
-            "No files found. Check your root directory and stream locator settings.".to_string(),
+            format!("No files found. Check your root directory and stream locator settings.{}", csv_info)
         );
     }
 
@@ -1104,6 +1166,109 @@ async fn scan_dataset(
                     found_count: found.len(),
                     missing_sample_ids: missing,
                     discovered_classes: None,
+                });
+            }
+            "CsvDataset" => {
+                // Load CSV and discover classes OR count samples based on stream role
+                let csv_path = cfg.csv_path.as_deref().unwrap_or("data.csv");
+                let has_headers = cfg.has_headers.unwrap_or(true);
+                let feature_columns = cfg.feature_columns.clone().unwrap_or_default();
+                let target_column = cfg.target_column.clone().unwrap_or_else(|| "label".to_string());
+                let stream_role = cfg.stream_role.as_deref().unwrap_or("Input");
+                
+                let mut class_counts: HashMap<String, usize> = HashMap::new();
+                let mut csv_samples = 0;
+                
+                // Save feature column count for logging
+                let feature_col_count = feature_columns.len();
+                let window_size = cfg.window_size.unwrap_or(1);
+                let sample_mode = cfg.sample_mode.as_deref().unwrap_or("row");
+                
+                // Build CSV config based on stream role
+                // Input streams: use feature columns + sample_mode (row or temporal_window)
+                // Target streams: ignore feature columns, always use row mode for labels
+                let csv_config = if stream_role == "Target" && !target_column.is_empty() {
+                    // For Target streams: use target column for class discovery, always row mode
+                    crate::dtos::CsvDatasetDef {
+                        csv_path: csv_path.to_string(),
+                        has_headers,
+                        sample_mode: "row".to_string(), // Target always uses row mode
+                        feature_columns: vec![], // Target doesn't use features
+                        target_column,
+                        window_size: None,
+                        window_stride: None,
+                        preprocessing: crate::dtos::CsvPreprocessingConfig {
+                            normalization: "none".to_string(),
+                            handle_missing: "skip".to_string(),
+                        },
+                    }
+                } else if stream_role == "Input" && !feature_columns.is_empty() {
+                    // For Input streams: use feature columns + configured sample_mode
+                    crate::dtos::CsvDatasetDef {
+                        csv_path: csv_path.to_string(),
+                        has_headers,
+                        sample_mode: sample_mode.to_string(),
+                        feature_columns,
+                        target_column: String::new(), // Empty for input streams
+                        window_size: if sample_mode == "temporal_window" { Some(cfg.window_size.unwrap_or(50)) } else { None },
+                        window_stride: None,
+                        preprocessing: crate::dtos::CsvPreprocessingConfig {
+                            normalization: "none".to_string(),
+                            handle_missing: "skip".to_string(),
+                        },
+                    }
+                } else {
+                    eprintln!(
+                        ">>> Skipping CSV scan for stream '{}' ({}): Invalid config for role '{}'",
+                        cfg.alias, csv_path, stream_role
+                    );
+                    reports.push(StreamScanReport {
+                        stream_id: cfg.stream_id.clone(),
+                        alias: cfg.alias.clone(),
+                        found_count: 0,
+                        missing_sample_ids: vec![],
+                        discovered_classes: None,
+                    });
+                    continue;
+                };
+                
+                match crate::csv_loader::CsvDatasetLoader::init(root, csv_config) {
+                    Ok(loader) => {
+                        csv_samples = loader.num_samples;
+                        for class in &loader.discovered_classes {
+                            *class_counts.entry(class.clone()).or_insert(0) += 1;
+                        }
+                        
+                        eprintln!(
+                            ">>> CSV scan success: stream '{}' ({}) loaded {} samples, classes: {:?}",
+                            cfg.alias,
+                            if stream_role == "Target" {
+                                format!("Target, classes={}", class_counts.len())
+                            } else {
+                                format!("Input ({}), shape=[{}, {}]", sample_mode, window_size, feature_col_count)
+                            },
+                            csv_samples,
+                            if class_counts.is_empty() {
+                                "none (Input stream)".to_string()
+                            } else {
+                                format!("{:?}", class_counts.keys().collect::<Vec<_>>())
+                            }
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            ">>> CSV scan failed for stream '{}' ({}): {}",
+                            cfg.alias, csv_path, e
+                        );
+                    }
+                }
+                
+                reports.push(StreamScanReport {
+                    stream_id: cfg.stream_id.clone(),
+                    alias: cfg.alias.clone(),
+                    found_count: csv_samples,
+                    missing_sample_ids: vec![],
+                    discovered_classes: if class_counts.is_empty() { None } else { Some(class_counts) },
                 });
             }
             _ => {

@@ -28,13 +28,30 @@ export const DatasetManagerPage: React.FC = () => {
 
         setIsScanning(true);
         try {
-            const streamConfigs = profile.streams.map(s => ({
-                stream_id: s.id,
-                alias: s.alias,
-                locator_type: s.locator.type,
-                pattern: s.locator.type === 'GlobPattern' ? s.locator.pattern : null,
-                path_template: s.locator.type === 'CompanionFile' ? s.locator.pathTemplate : null,
-            }));
+            const streamConfigs = profile.streams.map(s => {
+                const config: any = {
+                    stream_id: s.id,
+                    alias: s.alias,
+                    locator_type: s.locator.type,
+                    pattern: s.locator.type === 'GlobPattern' ? s.locator.pattern : null,
+                    path_template: s.locator.type === 'CompanionFile' ? s.locator.pathTemplate : null,
+                    stream_role: s.role, // ← Send the role
+                };
+                
+                // Add CSV-specific parameters if this is a CSV Dataset locator
+                if (s.locator.type === 'CsvDataset') {
+                    config.csv_path = s.locator.csvPath;
+                    config.has_headers = s.locator.hasHeaders;
+                    config.sample_mode = s.locator.sampleMode;
+                    // Only send feature_columns for Input streams, empty for Target streams
+                    config.feature_columns = s.role === 'Input' ? s.locator.featureColumns : [];
+                    // Only send target_column for Target streams, empty for Input streams
+                    config.target_column = s.role === 'Target' ? s.locator.targetColumn : '';
+                    config.window_size = s.locator.windowSize ?? null;
+                }
+                
+                return config;
+            });
 
             const result = await invoke<{
                 total_matched: number;

@@ -85,7 +85,23 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                         />
                                         <select
                                             value={stream.role}
-                                            onChange={(e) => updateStream(stream.id, { role: e.target.value as any })}
+                                            onChange={(e) => {
+                                                const newRole = e.target.value as any;
+                                                let locatorUpdate = stream.locator;
+                                                
+                                                // Auto-clean CSV config based on new role
+                                                if (stream.locator.type === 'CsvDataset') {
+                                                    if (newRole === 'Input') {
+                                                        // Input streams: clear target column
+                                                        locatorUpdate = { ...stream.locator, targetColumn: '' };
+                                                    } else if (newRole === 'Target') {
+                                                        // Target streams: clear feature columns
+                                                        locatorUpdate = { ...stream.locator, featureColumns: [] };
+                                                    }
+                                                }
+                                                
+                                                updateStream(stream.id, { role: newRole, locator: locatorUpdate });
+                                            }}
                                             style={{ background: 'var(--color-bg-tertiary)', color: 'white', border: 'none', padding: '0.2rem 0.5rem', borderRadius: '4px' }}
                                         >
                                             <option value="Input">Input Layer</option>
@@ -150,6 +166,8 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                                         sampleMode: 'row',
                                                         featureColumns: [],
                                                         targetColumn: '',
+                                                        windowSize: 50,
+                                                        windowStride: 1,
                                                         preprocessing: defaultCsvPreprocessing
                                                     };
                                                 }
@@ -269,6 +287,7 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                         onChange={(updatedLocator) => updateStream(stream.id, { locator: updatedLocator })}
                                         onPreview={() => setPreviewStreamId(stream.id)}
                                         previewDisabled={!profile.sourcePath}
+                                        role={stream.role}
                                     />
                                 )}
 
