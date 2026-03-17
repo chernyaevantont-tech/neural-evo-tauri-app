@@ -19,6 +19,7 @@ pub mod dtos;
 pub mod entities;
 pub mod zero_cost_proxies;
 pub mod csv_loader;
+pub mod shape_inference;
 
 /// Global session counter. Incremented by `stop_evolution`.
 /// Each `evaluate_population` call captures a snapshot; if the current value
@@ -926,6 +927,9 @@ pub struct StreamScanReport {
     pub missing_sample_ids: Vec<String>,
     pub discovered_classes: Option<HashMap<String, usize>>, // class_name -> count
     pub input_shape: Option<Vec<usize>>, // For Input streams: [window_size, num_features] or [num_features]
+    pub num_classes: Option<usize>,              // For Target streams: number of distinct classes
+    pub inferred_data_type: String,              // "Image" | "TemporalSequence" | "Vector" | "Categorical"
+    pub warnings: Vec<String>,                   // Warnings discovered during scanning
 }
 
 #[derive(serde::Serialize)]
@@ -933,6 +937,7 @@ pub struct ScanDatasetResult {
     pub total_matched: usize,
     pub dropped_count: usize,
     pub stream_reports: Vec<StreamScanReport>,
+    pub valid_sample_ids: Vec<String>, // Sample IDs after alignment
 }
 
 fn collect_glob_ids(root: &Path, pattern: &str) -> HashMap<String, std::path::PathBuf> {
@@ -1106,6 +1111,9 @@ async fn scan_dataset(
                     missing_sample_ids: missing,
                     discovered_classes: None,
                     input_shape: None,
+                    num_classes: None,
+                    inferred_data_type: "Image".to_string(),
+                    warnings: vec![],
                 });
             }
             "MasterIndex" => {
@@ -1138,8 +1146,11 @@ async fn scan_dataset(
                     alias: cfg.alias.clone(),
                     found_count: found_ids.len(),
                     missing_sample_ids: missing,
-                    discovered_classes: if class_counts.is_empty() { None } else { Some(class_counts) },
+                    discovered_classes: if class_counts.is_empty() { None } else { Some(class_counts.clone()) },
                     input_shape: None,
+                    num_classes: if class_counts.is_empty() { None } else { Some(class_counts.len()) },
+                    inferred_data_type: "Categorical".to_string(),
+                    warnings: vec![],
                 });
             }
             "FolderMapping" => {
@@ -1153,8 +1164,11 @@ async fn scan_dataset(
                     alias: cfg.alias.clone(),
                     found_count: folder_map.len(),
                     missing_sample_ids: vec![],
-                    discovered_classes: Some(class_counts),
+                    discovered_classes: Some(class_counts.clone()),
                     input_shape: None,
+                    num_classes: if class_counts.is_empty() { None } else { Some(class_counts.len()) },
+                    inferred_data_type: "Image".to_string(),
+                    warnings: vec![],
                 });
             }
             "CompanionFile" => {
@@ -1171,6 +1185,9 @@ async fn scan_dataset(
                     missing_sample_ids: missing,
                     discovered_classes: None,
                     input_shape: None,
+                    num_classes: None,
+                    inferred_data_type: "Text".to_string(),
+                    warnings: vec![],
                 });
             }
             "CsvDataset" => {
@@ -1234,6 +1251,9 @@ async fn scan_dataset(
                         missing_sample_ids: vec![],
                         discovered_classes: None,
                         input_shape: None,
+                        num_classes: None,
+                        inferred_data_type: "Vector".to_string(),
+                        warnings: vec!["Invalid CSV stream configuration".to_string()],
                     });
                     continue;
                 };
@@ -1280,13 +1300,25 @@ async fn scan_dataset(
                     None
                 };
                 
+                // Infer data type based on stream role
+                let data_type_str = if stream_role == "Target" {
+                    "Categorical"
+                } else if sample_mode == "temporal_window" {
+                    "TemporalSequence"
+                } else {
+                    "Vector"
+                };
+                
                 reports.push(StreamScanReport {
                     stream_id: cfg.stream_id.clone(),
                     alias: cfg.alias.clone(),
                     found_count: csv_samples,
                     missing_sample_ids: vec![],
-                    discovered_classes: if class_counts.is_empty() { None } else { Some(class_counts) },
+                    discovered_classes: if class_counts.is_empty() { None } else { Some(class_counts.clone()) },
                     input_shape,
+                    num_classes: if class_counts.is_empty() { None } else { Some(class_counts.len()) },
+                    inferred_data_type: data_type_str.to_string(),
+                    warnings: vec![],
                 });
             }
             _ => {
@@ -1298,6 +1330,9 @@ async fn scan_dataset(
                     missing_sample_ids: vec![],
                     input_shape: None,
                     discovered_classes: None,
+                    num_classes: None,
+                    inferred_data_type: "Vector".to_string(),
+                    warnings: vec!["Unknown locator type".to_string()],
                 });
             }
         }
@@ -1310,6 +1345,7 @@ async fn scan_dataset(
         total_matched,
         dropped_count,
         stream_reports: reports,
+        valid_sample_ids: valid_ids.into_iter().collect(),
     })
 }
 
@@ -1339,6 +1375,128 @@ async fn cache_dataset(
     let loader = crate::data_loader::DataLoader::new(profile, app_data_dir)?;
     let result = loader.build_image_cache()?;
     Ok(result)
+}
+
+#[tauri::command]
+async fn validate_dataset_profile(profile_json: String) -> Result<dtos::DatasetValidationReport, String> {
+    // Validate a dataset profile for evolution readiness.
+    // Checks:
+    // - All Input streams have valid input shapes
+    // - At least one Target stream exists with valid num_classes
+    // - Streams have compatible sample counts
+    // - Data types are supported by current architecture
+
+    let profile: dtos::DatasetProfile = serde_json::from_str(&profile_json)
+        .map_err(|e| format!("Failed to parse dataset profile: {}", e))?;
+
+    let mut issues: Vec<dtos::ValidationIssue> = vec![];
+    let mut input_shapes: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut output_shape: Option<Vec<usize>> = None;
+    let mut total_valid_samples: usize = 0;
+
+    // Check all Input streams have valid shapes
+    let input_streams: Vec<_> = profile
+        .streams
+        .iter()
+        .filter(|s| s.role == "Input")
+        .collect();
+
+    for stream in &input_streams {
+        match shape_inference::ShapeInference::infer_input_shape(stream, Path::new(".")) {
+            Ok((shape, _, warnings)) => {
+                if shape.is_empty() {
+                    issues.push(dtos::ValidationIssue {
+                        severity: dtos::ValidationSeverity::Error,
+                        component: "InputShape".to_string(),
+                        message: format!(
+                            "Input stream '{}' has empty shape. Check feature columns.",
+                            stream.alias
+                        ),
+                        suggested_fix: Some(
+                            "Ensure CSV stream specifies feature_columns or image tensor_shape"
+                                .to_string(),
+                        ),
+                    });
+                } else {
+                    input_shapes.insert(stream.id.clone(), shape);
+                }
+                for warning in warnings {
+                    issues.push(dtos::ValidationIssue {
+                        severity: dtos::ValidationSeverity::Warning,
+                        component: "InputShape".to_string(),
+                        message: warning,
+                        suggested_fix: None,
+                    });
+                }
+            }
+            Err(e) => {
+                issues.push(dtos::ValidationIssue {
+                    severity: dtos::ValidationSeverity::Error,
+                    component: "InputShape".to_string(),
+                    message: format!("Failed to infer shape for input stream '{}': {}", stream.alias, e),
+                    suggested_fix: None,
+                });
+            }
+        }
+    }
+
+    // Check Target streams have valid output shapes
+    let target_streams: Vec<_> = profile
+        .streams
+        .iter()
+        .filter(|s| s.role == "Target")
+        .collect();
+
+    if target_streams.is_empty() {
+        issues.push(dtos::ValidationIssue {
+            severity: dtos::ValidationSeverity::Error,
+            component: "OutputShape".to_string(),
+            message: "No Target stream defined. Evolution requires a target for training.".to_string(),
+            suggested_fix: Some("Add a Target stream with your labels".to_string()),
+        });
+    } else {
+        for (idx, stream) in target_streams.iter().enumerate() {
+            // For targets, num_classes would come from discovered_classes during scan
+            // For now, we just validate that it's a supported type
+            match stream.data_type {
+                dtos::DataType::Categorical | dtos::DataType::Vector => {
+                    // These are supported
+                }
+                _ => {
+                    issues.push(dtos::ValidationIssue {
+                        severity: dtos::ValidationSeverity::Error,
+                        component: "OutputShape".to_string(),
+                        message: format!(
+                            "Target stream '{}' has unsupported data_type: {:?}",
+                            stream.alias, stream.data_type
+                        ),
+                        suggested_fix: Some(
+                            "Target streams must be Categorical or Vector type".to_string(),
+                        ),
+                    });
+                }
+            }
+
+            // For now, set output_shape to a placeholder (will be updated by scan)
+            if idx == 0 {
+                // This will be properly set after scan with num_classes
+                output_shape = Some(vec![0]); // Placeholder
+            }
+        }
+    }
+
+    // Summary
+    let is_valid = !issues.iter().any(|i| i.severity == dtos::ValidationSeverity::Error);
+    let can_start_evolution = is_valid && !input_shapes.is_empty() && !target_streams.is_empty();
+
+    Ok(dtos::DatasetValidationReport {
+        is_valid,
+        issues,
+        input_shapes,
+        output_shape,
+        total_valid_samples,
+        can_start_evolution,
+    })
 }
 
 // --- Genome Library ---

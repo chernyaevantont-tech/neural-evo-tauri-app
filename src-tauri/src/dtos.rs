@@ -1,4 +1,5 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 fn default_relu() -> String {
     "relu".to_string()
@@ -120,7 +121,7 @@ pub struct DatasetProfile {
     pub streams: Vec<DataStream>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq)]
 pub enum DataType {
     Image,
     Vector,
@@ -212,6 +213,37 @@ pub struct TabularSettings {
     pub one_hot: bool,
     #[serde(rename = "fillMissing")]
     pub fill_missing: String, // "mean" | "median" | "mode" | "drop"
+}
+
+// ---------------------------------------------------------------------------
+// Dataset Validation DTOs
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ValidationSeverity {
+    Error,
+    Warning,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationIssue {
+    pub severity: ValidationSeverity,
+    pub component: String, // "InputShape" | "OutputShape" | "SampleAlignment" | "CSV" | "Compatibility"
+    pub message: String,
+    pub suggested_fix: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DatasetValidationReport {
+    pub is_valid: bool,
+    pub issues: Vec<ValidationIssue>,
+    pub input_shapes: HashMap<String, Vec<usize>>, // stream_id -> shape
+    pub output_shape: Option<Vec<usize>>,
+    pub total_valid_samples: usize,
+    pub can_start_evolution: bool,
 }
 
 // ---------------------------------------------------------------------------
