@@ -5,6 +5,7 @@ import { BsDatabaseAdd, BsFolder2Open, BsFiletypeCsv, BsSearch, BsCheckCircle, B
 import { useDatasetManagerStore, DatasetSourceType, ScanResult } from '../../features/dataset-manager/model/store';
 import { CreateDatasetModal } from './CreateDatasetModal';
 import { DataStreamsPanel } from './DataStreamsPanel';
+import { DatasetValidationPanel } from './DatasetValidationPanel';
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -13,6 +14,7 @@ export const DatasetManagerPage: React.FC = () => {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isScanning, setIsScanning] = useState(false);
     const [isCaching, setIsCaching] = useState(false);
+    const [isValidating, setIsValidating] = useState(false);
 
     const getIcon = (type: DatasetSourceType) => {
         switch (type) {
@@ -105,6 +107,9 @@ export const DatasetManagerPage: React.FC = () => {
                 isScanned: true,
                 streams: updatedProfile.streams,
             });
+
+            // Automatically validate after scan
+            await handleValidate(profileId);
         } catch (err) {
             console.error('Scan failed:', err);
         } finally {
@@ -153,6 +158,28 @@ export const DatasetManagerPage: React.FC = () => {
             console.error('Caching failed:', err);
         } finally {
             setIsCaching(false);
+        }
+    };
+
+    const handleValidate = async (profileId: string) => {
+        const profile = useDatasetManagerStore.getState().profiles.find(p => p.id === profileId);
+        if (!profile) return;
+
+        setIsValidating(true);
+        try {
+            const profileJson = JSON.stringify(profile);
+            const validationReport = await invoke<any>('validate_dataset_profile', {
+                profileJson,
+            });
+
+            useDatasetManagerStore.getState().updateProfile(profileId, {
+                validationReport,
+                isValidForEvolution: validationReport.can_start_evolution ?? false,
+            });
+        } catch (err) {
+            console.error('Validation failed:', err);
+        } finally {
+            setIsValidating(false);
         }
     };
 
@@ -321,6 +348,11 @@ export const DatasetManagerPage: React.FC = () => {
                                     </div>
                                 </div>
                             )}
+
+                                    {/* Dataset Validation Panel */}
+                                    {profile.validationReport && (
+                                        <DatasetValidationPanel validationReport={profile.validationReport} />
+                                    )}
 
                                     {/* Data Streams */}
                                     <DataStreamsPanel profile={profile} />

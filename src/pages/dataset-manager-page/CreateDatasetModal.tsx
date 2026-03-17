@@ -39,7 +39,8 @@ export const CreateDatasetModal: React.FC<Props> = ({ onClose }) => {
             streams: [],
             split: { train: 80, val: 10, test: 10 },
             augmentation: { ...defaultAugmentation },
-            isScanned: false
+            isScanned: false,
+            isValidForEvolution: false
         };
 
         addProfile(baseProfile as DatasetProfile);

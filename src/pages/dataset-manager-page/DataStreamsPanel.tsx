@@ -109,11 +109,42 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                             <option value="Ignore">Ignore</option>
                                         </select>
                                     </div>
-                                    <BsTrash
-                                        color="var(--color-text-muted)"
-                                        style={{ cursor: 'pointer' }}
-                                        onClick={() => handleRemoveStream(stream.id)}
-                                    />
+                                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                                        {/* Shape Badge */}
+                                        {stream.tensorShape && stream.tensorShape.length > 0 && (
+                                            <div style={{
+                                                background: stream.role === 'Input' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                                                border: `1px solid ${stream.role === 'Input' ? 'var(--color-accent-primary)' : 'var(--color-danger)'}`,
+                                                color: 'var(--color-text-primary)',
+                                                padding: '0.25rem 0.6rem',
+                                                borderRadius: '12px',
+                                                fontSize: '0.75rem',
+                                                fontFamily: 'monospace',
+                                                fontWeight: 500
+                                            }}>
+                                                Shape: [{stream.tensorShape.join(', ')}]
+                                            </div>
+                                        )}
+                                        {stream.role === 'Target' && stream.numClasses && (
+                                            <div style={{
+                                                background: 'rgba(239, 68, 68, 0.2)',
+                                                border: '1px solid var(--color-danger)',
+                                                color: 'var(--color-text-primary)',
+                                                padding: '0.25rem 0.6rem',
+                                                borderRadius: '12px',
+                                                fontSize: '0.75rem',
+                                                fontFamily: 'monospace',
+                                                fontWeight: 500
+                                            }}>
+                                                Classes: {stream.numClasses}
+                                            </div>
+                                        )}
+                                        <BsTrash
+                                            color="var(--color-text-muted)"
+                                            style={{ cursor: 'pointer' }}
+                                            onClick={() => handleRemoveStream(stream.id)}
+                                        />
+                                    </div>
                                 </div>
 
                                 {/* Stream Config row */}

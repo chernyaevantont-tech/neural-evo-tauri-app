@@ -63,6 +63,7 @@ export interface StreamScanInfo {
     foundCount: number;       // How many SampleIDs this stream resolved
     missingSampleIds: string[]; // SampleIDs that could not be resolved for THIS stream
     discoveredClasses?: Record<string, number>; // class_name -> count (for FolderMapping)
+    inputShape?: number[];    // Inferred shape from ShapeInference backend service
 }
 
 export interface ScanResult {
@@ -70,6 +71,25 @@ export interface ScanResult {
     droppedCount: number;        // Samples dropped due to missing data in at least one stream
     streamReports: StreamScanInfo[];
     timestamp: string;           // ISO string of when the scan happened
+}
+
+// Validation types (from Phase 1 backend)
+export type ValidationSeverity = 'ERROR' | 'WARNING';
+
+export interface ValidationIssue {
+    severity: ValidationSeverity;                          // "ERROR" or "WARNING"
+    component: string;                                     // "InputShape" | "OutputShape" | "SampleAlignment" | "CSV" | "Compatibility"
+    message: string;                                       // Human-readable issue description
+    suggested_fix?: string;                                // Suggested fix for the issue
+}
+
+export interface DatasetValidationReport {
+    is_valid: boolean;                                     // All streams configured correctly
+    issues: ValidationIssue[];                             // Detailed list of issues
+    input_shapes: Record<string, number[]>;                // stream_id -> shape array
+    output_shape?: number[];                               // Output unit count (from num_classes)
+    total_valid_samples: number;                           // After alignment
+    can_start_evolution: boolean;                          // Ready for evolution pipeline
 }
 
 export interface DatasetProfile {
@@ -90,6 +110,8 @@ export interface DatasetProfile {
     // Scan & Validation
     scanResult?: ScanResult;
     isScanned: boolean;
+    validationReport?: DatasetValidationReport;            // Validation result from backend
+    isValidForEvolution: boolean;                          // Can start evolution (all validations passed)
 }
 
 interface DatasetManagerState {

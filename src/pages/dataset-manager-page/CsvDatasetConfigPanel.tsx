@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import styles from './DatasetManagerPage.module.css';
 import { CsvPreprocessingConfig } from '../../features/dataset-manager/model/store';
-import { BsEye } from 'react-icons/bs';
+import { BsEye, BsCheckCircle, BsExclamationTriangle } from 'react-icons/bs';
 
 interface CsvDatasetLocator {
     type: 'CsvDataset';
@@ -93,6 +93,62 @@ export const CsvDatasetConfigPanel: React.FC<Props> = ({
                 <p style={{ margin: '0 0 0.75rem 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
                     Configure how to load data from your CSV file
                 </p>
+            </div>
+
+            {/* Pre-Scan Validation Hints */}
+            <div style={{
+                background: 'var(--color-bg-secondary)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '6px',
+                padding: '0.75rem',
+                marginBottom: '1rem',
+                fontSize: '0.85rem'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <strong style={{ color: 'var(--color-text-secondary)' }}>Required Fields</strong>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    {/* CSV Path check */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        {locator.csvPath.length > 0 ? (
+                            <><BsCheckCircle size={14} color="var(--color-success)" /> CSV Path</>
+                        ) : (
+                            <><BsExclamationTriangle size={14} color="var(--color-warning)" /> CSV Path required</>
+                        )}
+                    </div>
+
+                    {/* Role-specific checks */}
+                    {!isTargetStream ? (
+                        // Input stream validation
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {locator.featureColumns.length > 0 ? (
+                                <><BsCheckCircle size={14} color="var(--color-success)" /> Feature Columns selected</>
+                            ) : (
+                                <><BsExclamationTriangle size={14} color="var(--color-warning)" /> Feature Columns required</>
+                            )}
+                        </div>
+                    ) : (
+                        // Target stream validation
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {locator.targetColumn.length > 0 ? (
+                                <><BsCheckCircle size={14} color="var(--color-success)" /> Target Column selected</>
+                            ) : (
+                                <><BsExclamationTriangle size={14} color="var(--color-warning)" /> Target Column required</>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Temporal window check if needed */}
+                    {locator.sampleMode === 'temporal_window' && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {(locator.windowSize ?? 0) > 0 ? (
+                                <><BsCheckCircle size={14} color="var(--color-success)" /> Window Size set</>
+                            ) : (
+                                <><BsExclamationTriangle size={14} color="var(--color-warning)" /> Window Size required</>
+                            )}
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* CSV Path */}
