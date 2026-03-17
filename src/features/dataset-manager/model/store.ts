@@ -6,7 +6,8 @@ export type DataType =
     | 'Image'
     | 'Vector'
     | 'Categorical'
-    | 'Text';
+    | 'Text'
+    | 'TemporalSequence';
 
 export interface VisionSettings {
     resize: [number, number];
@@ -20,6 +21,11 @@ export interface TabularSettings {
     fillMissing: 'mean' | 'median' | 'mode' | 'drop';
 }
 
+export interface CsvPreprocessingConfig {
+    normalization: 'none' | 'global' | 'per-sample' | 'per-channel';
+    handleMissing: 'skip' | 'interpolate' | 'mean';
+}
+
 export interface AugmentationSettings {
     hFlip: boolean;
     randomRotation: boolean;
@@ -31,6 +37,7 @@ export type DataLocatorDef =
     | { type: 'FolderMapping' } // Uses parent folder name
     | { type: 'CompanionFile'; pathTemplate: string; parser: 'YOLO' | 'Text' | 'COCO_Subset' }
     | { type: 'MasterIndex'; indexPath: string; keyField: string; valueField: string; hasHeaders: boolean }
+    | { type: 'CsvDataset'; csvPath: string; hasHeaders: boolean; sampleMode: 'row' | 'temporal_window'; featureColumns: string[]; targetColumn: string; windowSize?: number; windowStride?: number; preprocessing: CsvPreprocessingConfig }
     | { type: 'None' }; // Fallback
 
 export interface DataStream {
@@ -99,6 +106,17 @@ export const defaultVisionSettings: VisionSettings = {
     resize: [64, 64],
     grayscale: false,
     normalization: '0-1'
+};
+
+export const defaultTabularSettings: TabularSettings = {
+    normalization: 'min-max',
+    oneHot: false,
+    fillMissing: 'mean'
+};
+
+export const defaultCsvPreprocessing: CsvPreprocessingConfig = {
+    normalization: 'per-channel',
+    handleMissing: 'skip'
 };
 
 export const defaultAugmentation: AugmentationSettings = {

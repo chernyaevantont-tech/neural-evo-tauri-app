@@ -18,6 +18,7 @@ pub mod data_loader;
 pub mod dtos;
 pub mod entities;
 pub mod zero_cost_proxies;
+pub mod csv_loader;
 
 /// Global session counter. Incremented by `stop_evolution`.
 /// Each `evaluate_population` call captures a snapshot; if the current value

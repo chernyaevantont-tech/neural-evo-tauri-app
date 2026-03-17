@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::dtos::{DataLocatorDef, DataType, DatasetProfile};
 use crate::entities::DynamicTensor;
+use crate::csv_loader::CsvDatasetLoader;
 
 type Backend = Autodiff<Wgpu>;
 
@@ -33,6 +34,9 @@ pub struct DataLoader {
     pub valid_sample_ids: Vec<String>,
     pub stream_classes: HashMap<usize, usize>,
     pub app_data_dir: Option<PathBuf>,
+    // Cache for CsvDatasetLoader instances (Stream ID -> Loader)
+    #[allow(dead_code)]
+    csv_loaders: HashMap<String, CsvDatasetLoader>,
 }
 
 impl DataLoader {
@@ -53,6 +57,7 @@ impl DataLoader {
             valid_sample_ids: Vec::new(),
             stream_classes: HashMap::new(),
             app_data_dir,
+            csv_loaders: HashMap::new(),
         };
 
         loader.init_locators()?;
@@ -246,6 +251,41 @@ impl DataLoader {
                         }
                     }
                     println!("    MasterIndex found {} samples", stream_map.len());
+                }
+                DataLocatorDef::CsvDataset(csv_def) => {
+                    println!("    Locator: CsvDataset");
+                    
+                    match CsvDatasetLoader::init(&self.root_path, csv_def.clone()) {
+                        Ok(csv_loader) => {
+                            // For each discoverable sample in CSV:
+                            // - Row mode: sample IDs are "0", "1", "2", ... row_count
+                            // - Temporal mode: sample IDs are "0", "1", ... num_windows
+                            
+                            for sample_idx in 0..csv_loader.num_samples {
+                                let sample_id = sample_idx.to_string();
+                                stream_map.insert(sample_id, format!("csv:{}", sample_idx));
+                            }
+                            
+                            // Record discovered classes
+                            if stream.role == "Target" {
+                                self.stream_classes.insert(
+                                    self.profile.streams.iter().position(|s| s.id == stream.id).unwrap_or(0),
+                                    csv_loader.discovered_classes.len()
+                                );
+                            }
+                            
+                            println!("    CsvDataset found {} samples, {} classes",
+                                csv_loader.num_samples,
+                                csv_loader.discovered_classes.len()
+                            );
+                            
+                            // Cache the loader for later use
+                            self.csv_loaders.insert(stream.id.clone(), csv_loader);
+                        }
+                        Err(e) => {
+                            return Err(format!("Failed to init CSV dataset: {}", e));
+                        }
+                    }
                 }
                 _ => {
                     println!("    Locator: Other/Unknown");
@@ -570,6 +610,30 @@ impl DataLoader {
                 },
                 DataType::Text => {
                     // Not fully implemented yet
+                }
+                DataType::TemporalSequence => {
+                    // Load temporal window from CSV dataset
+                    if locator_val.starts_with("csv:") {
+                        let sample_idx_str = &locator_val[4..];
+                        let sample_idx = sample_idx_str.parse::<usize>()
+                            .map_err(|_| format!("Invalid CSV sample index: {}", sample_idx_str))?;
+                        
+                        // Get the cached CSV loader for this stream
+                        if let Some(csv_loader) = self.csv_loaders.get(&stream.id) {
+                            match csv_loader.load_sample(sample_idx, device) {
+                                Ok((tensor, _label)) => {
+                                    tensors.insert(idx, tensor);
+                                }
+                                Err(e) => {
+                                    return Err(format!("Failed to load CSV sample {}: {}", sample_idx, e));
+                                }
+                            }
+                        } else {
+                            return Err(format!("No CSV loader found for stream {}", stream.id));
+                        }
+                    } else {
+                        return Err(format!("Invalid temporal sequence locator format: {}", locator_val));
+                    }
                 }
             }
         }

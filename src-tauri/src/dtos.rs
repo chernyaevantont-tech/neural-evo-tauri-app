@@ -126,6 +126,7 @@ pub enum DataType {
     Vector,
     Categorical,
     Text,
+    TemporalSequence,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -162,9 +163,30 @@ pub enum DataLocatorDef {
         #[serde(rename = "hasHeaders")]
         has_headers: bool,
     },
+    CsvDataset(CsvDatasetDef),
     None,
     #[serde(other)]
     Other,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CsvDatasetDef {
+    pub csv_path: String,
+    pub has_headers: bool,
+    pub sample_mode: String, // "row" | "temporal_window"
+    pub feature_columns: Vec<String>,
+    pub target_column: String,
+    pub window_size: Option<usize>,
+    pub window_stride: Option<usize>,
+    pub preprocessing: CsvPreprocessingConfig,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CsvPreprocessingConfig {
+    pub normalization: String, // "none" | "global" | "per-sample" | "per-channel"
+    pub handle_missing: String, // "skip" | "interpolate" | "mean"
 }
 
 #[derive(Deserialize, Clone, Debug)]

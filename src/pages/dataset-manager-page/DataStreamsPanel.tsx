@@ -1,18 +1,13 @@
 import React, { useState } from 'react';
 import styles from './DatasetManagerPage.module.css';
-import { DataStream, DatasetProfile, useDatasetManagerStore, VisionSettings, TabularSettings, defaultVisionSettings } from '../../features/dataset-manager/model/store';
+import { DataStream, DatasetProfile, useDatasetManagerStore, VisionSettings, TabularSettings, defaultVisionSettings, defaultTabularSettings, CsvPreprocessingConfig } from '../../features/dataset-manager/model/store';
 import { BsPlusLg, BsTrash, BsBoxArrowInRight, BsBullseye, BsGearFill, BsEye } from 'react-icons/bs';
 import { CsvPreviewModal } from './CsvPreviewModal';
+import { CsvDatasetConfigPanel } from './CsvDatasetConfigPanel';
 
 interface Props {
     profile: DatasetProfile;
 }
-
-const defaultTabularSettings: TabularSettings = {
-    normalization: 'min-max',
-    oneHot: false,
-    fillMissing: 'mean'
-};
 
 export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
     const updateProfile = useDatasetManagerStore(s => s.updateProfile);
@@ -129,6 +124,7 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                             <option value="Vector">Vector (Tensor 2D)</option>
                                             <option value="Categorical">Categorical (Class Label)</option>
                                             <option value="Text">Text (Tokens)</option>
+                                            <option value="TemporalSequence">Temporal Sequence (Time Series)</option>
                                         </select>
                                     </div>
                                     <div className={styles.inputGroup} style={{ flex: 2 }}>
@@ -142,6 +138,21 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                                 if (type === 'FolderMapping') newLocator = { type: 'FolderMapping' };
                                                 if (type === 'CompanionFile') newLocator = { type: 'CompanionFile', pathTemplate: '../labels/{id}.txt', parser: 'YOLO' };
                                                 if (type === 'MasterIndex') newLocator = { type: 'MasterIndex', indexPath: 'data.csv', keyField: '', valueField: '*', hasHeaders: true };
+                                                if (type === 'CsvDataset') {
+                                                    const defaultCsvPreprocessing: CsvPreprocessingConfig = {
+                                                        normalization: 'per-channel',
+                                                        handleMissing: 'skip'
+                                                    };
+                                                    newLocator = {
+                                                        type: 'CsvDataset',
+                                                        csvPath: 'data.csv',
+                                                        hasHeaders: true,
+                                                        sampleMode: 'row',
+                                                        featureColumns: [],
+                                                        targetColumn: '',
+                                                        preprocessing: defaultCsvPreprocessing
+                                                    };
+                                                }
 
                                                 updateStream(stream.id, { locator: newLocator });
                                             }}
@@ -150,6 +161,7 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                             <option value="FolderMapping">Folder Mapping (Class from Parent Dir)</option>
                                             <option value="CompanionFile">Companion File (Neighbor file)</option>
                                             <option value="MasterIndex">CSV Column Mapping (MasterIndex)</option>
+                                            <option value="CsvDataset">CSV Dataset (Complete Configuration)</option>
                                             <option value="None">None / Manual</option>
                                         </select>
                                     </div>
@@ -250,6 +262,16 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                     </div>
                                 )}
 
+                                {/* CSV Dataset Configuration Panel */}
+                                {stream.locator.type === 'CsvDataset' && (
+                                    <CsvDatasetConfigPanel
+                                        locator={stream.locator as any}
+                                        onChange={(updatedLocator) => updateStream(stream.id, { locator: updatedLocator })}
+                                        onPreview={() => setPreviewStreamId(stream.id)}
+                                        previewDisabled={!profile.sourcePath}
+                                    />
+                                )}
+
                                 {/* Per-stream Preprocessing: Vision */}
                                 {stream.dataType === 'Image' && stream.preprocessing?.vision && (() => {
                                     const v = stream.preprocessing.vision!;
@@ -334,15 +356,31 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
             {/* CSV Preview Modal */}
             {previewStreamId && (() => {
                 const stream = profile.streams.find(s => s.id === previewStreamId);
-                if (!stream || stream.locator.type !== 'MasterIndex') return null;
-                return (
-                    <CsvPreviewModal
-                        rootPath={profile.sourcePath || ''}
-                        indexPath={stream.locator.indexPath}
-                        hasHeaders={stream.locator.hasHeaders}
-                        onClose={() => setPreviewStreamId(null)}
-                    />
-                );
+                if (!stream) return null;
+                
+                if (stream.locator.type === 'MasterIndex') {
+                    return (
+                        <CsvPreviewModal
+                            rootPath={profile.sourcePath || ''}
+                            indexPath={stream.locator.indexPath}
+                            hasHeaders={stream.locator.hasHeaders}
+                            onClose={() => setPreviewStreamId(null)}
+                        />
+                    );
+                }
+                
+                if (stream.locator.type === 'CsvDataset') {
+                    return (
+                        <CsvPreviewModal
+                            rootPath={profile.sourcePath || ''}
+                            indexPath={stream.locator.csvPath}
+                            hasHeaders={stream.locator.hasHeaders}
+                            onClose={() => setPreviewStreamId(null)}
+                        />
+                    );
+                }
+                
+                return null;
             })()}
         </>
     );
