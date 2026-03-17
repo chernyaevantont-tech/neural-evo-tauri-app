@@ -186,6 +186,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             // Get dataset profile for random generation
             let inputShape: number[] | null = null;
             let outputShape: number[] | null = null;
+            let dataTypeHint: 'Image' | 'TemporalSequence' | 'Vector' | undefined = undefined;
 
             if (numRandom > 0) {
                 const profiles = useDatasetManagerStore.getState().profiles;
@@ -196,7 +197,10 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                     if (shapes) {
                         inputShape = shapes.inputShape;
                         outputShape = shapes.outputShape;
-                        addLog(`Detected input shape: [${inputShape.join(',')}], output shape: [${outputShape.join(',')}]`, "info");
+                        dataTypeHint = shapes.dataTypeHint;
+                        
+                        const typeHintStr = dataTypeHint ? ` (${dataTypeHint})` : '';
+                        addLog(`Detected input shape: [${inputShape.join(',')}]${typeHintStr}, output shape: [${outputShape.join(',')}]`, "info");
                     }
                 }
             }
@@ -209,7 +213,8 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                     try {
                         const randomGenome = generateRandomArchitecture(inputShape, outputShape, {
                             maxDepth: 8,
-                            useAttention: false
+                            useAttention: false,
+                            dataTypeHint: dataTypeHint
                         });
                         const nodes = randomGenome.getAllNodes();
 
@@ -761,9 +766,50 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             return;
         }
 
-        // Validate dataset percentage vs splits
+        // === PHASE 3: Validate dataset profile before evolution ===
         const profiles = useDatasetManagerStore.getState().profiles;
         const profile = profiles.find(p => p.id === datasetProfileId);
+        
+        if (profile) {
+            // Check if dataset has been scanned and validated
+            if (!profile.isScanned) {
+                addLog(
+                    "Cannot start: Dataset has not been scanned. " +
+                    "Go to Dataset Manager, select the dataset, and click 'Scan Dataset'.",
+                    "error"
+                );
+                return;
+            }
+
+            // Check if dataset validation passed
+            if (!profile.isValidForEvolution) {
+                const issues = profile.validationReport?.issues || [];
+                const issueMessages = issues
+                    .map(issue => `${issue.component}: ${issue.message}`)
+                    .join('; ');
+                
+                addLog(
+                    `Cannot start: Dataset validation failed. Issues: ${issueMessages || 'Unknown validation error'}. ` +
+                    `Please fix issues in Dataset Manager before starting evolution.`,
+                    "error"
+                );
+                return;
+            }
+
+            // Log dataset validation success
+            if (profile.validationReport) {
+                const inputShapes = Object.entries(profile.validationReport.input_shapes)
+                    .map(([streamId, shape]) => `${streamId}: [${shape.join(',')}]`)
+                    .join('; ');
+                const outputShape = profile.validationReport.output_shape || [];
+                addLog(
+                    `✓ Dataset validated. Input shapes: ${inputShapes}. Output shape: [${outputShape.join(',')}]`,
+                    "success"
+                );
+            }
+        }
+
+        // Validate dataset percentage vs splits
         if (profile) {
             const totalSamples = profile.totalSamples || profile.scanResult?.totalMatched || 0;
             const usedSamples = Math.floor((totalSamples * (settings.datasetPercent || 100)) / 100);

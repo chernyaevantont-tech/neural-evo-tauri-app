@@ -24,6 +24,16 @@ const randomChoice = <T,>(array: T[]): T => array[randomInt(0, array.length - 1)
 /**
  * Generates a random neural network architecture based on input and output shapes.
  * Uses the input shape to determine the appropriate layer types.
+ * 
+ * @param inputShape - The input tensor dimensions (e.g., [50, 12] for temporal, [4] for vector)
+ * @param outputShape - The output tensor dimensions (e.g., [5] for 5-class classification)
+ * @param options - Configuration options:
+ *   - maxDepth: Maximum network depth (default: 8)
+ *   - useAttention: Whether to use attention layers (default: false)
+ *   - dataTypeHint: Override dimension-based inference with explicit data type hint:
+ *       - 'TemporalSequence': Route 2D input to Conv1D/LSTM/GRU (temporal paths)
+ *       - 'Vector': Route 2D input to Dense layers (tabular data)
+ *       - 'Image': Route 3D input to Conv2D (image data)
  */
 export const generateRandomArchitecture = (
     inputShape: number[],
@@ -31,14 +41,16 @@ export const generateRandomArchitecture = (
     options?: {
         maxDepth?: number;
         useAttention?: boolean;
+        dataTypeHint?: 'Image' | 'TemporalSequence' | 'Vector';
     }
 ): Genome => {
     const maxDepth = options?.maxDepth ?? 8;
     const useAttention = options?.useAttention ?? false;
+    const dataTypeHint = options?.dataTypeHint;
 
     const nodes: BaseNode[] = [];
 
-    // Infer data type from input shape
+    // Infer data type from input shape or use hint
     const inputDimensions = inputShape.length;
     const inputNode = new InputNode(inputShape);
     nodes.push(inputNode);
@@ -50,8 +62,15 @@ export const generateRandomArchitecture = (
         // Image data: [height, width, channels]
         currentNode = buildConvolutionalPath(nodes, currentNode, depth);
     } else if (inputDimensions === 2) {
-        // Sequence or matrix data: [seq_len, features]
-        currentNode = buildSequentialPath(nodes, currentNode, depth, useAttention);
+        // 2D data: Could be temporal sequence or tabular vector
+        // Use dataTypeHint if provided, else default to temporal/sequential
+        if (dataTypeHint === 'Vector') {
+            // Tabular data: route to Dense-only path
+            currentNode = buildTabularPath(nodes, currentNode, depth);
+        } else if (dataTypeHint === 'TemporalSequence' || !dataTypeHint) {
+            // Temporal data: route to Conv1D/LSTM/GRU path
+            currentNode = buildSequentialPath(nodes, currentNode, depth, useAttention);
+        }
     } else if (inputDimensions === 1) {
         // Dense vector: [features]
         currentNode = buildDensePath(nodes, currentNode, depth);
@@ -237,6 +256,50 @@ const buildDensePath = (
 };
 
 /**
+ * Build a tabular path for 2D vector data (e.g., multi-feature tabular datasets)
+ * Uses only Dense, Dropout, and BatchNorm layers (no Conv1D/LSTM/GRU)
+ * Suitable for non-temporal 2D data like CSV with multiple feature columns
+ */
+const buildTabularPath = (
+    nodes: BaseNode[],
+    currentNode: BaseNode,
+    depth: number
+): BaseNode => {
+    let currentDepth = 0;
+
+    while (currentDepth < depth && currentDepth < 6) {
+        const choice = randomInt(0, 100);
+
+        if (choice < 65) {
+            // Add Dense layer (higher probability than in buildDensePath)
+            const units = randomChoice([32, 64, 128, 256, 512]);
+            const activation = randomChoice(['relu', 'relu', 'leaky_relu', 'tanh'] as const);
+
+            const dense = new DenseNode(units, activation, true);
+            currentNode.AddNext(dense);
+            nodes.push(dense);
+            currentNode = dense;
+        } else if (choice < 80) {
+            // Add Dropout
+            const dropout = new DropoutNode(randomChoice([0.2, 0.3, 0.4]));
+            currentNode.AddNext(dropout);
+            nodes.push(dropout);
+            currentNode = dropout;
+        } else {
+            // Add BatchNorm
+            const bn = new BatchNormNode(1e-5, 0.1);
+            currentNode.AddNext(bn);
+            nodes.push(bn);
+            currentNode = bn;
+        }
+
+        currentDepth++;
+    }
+
+    return currentNode;
+};
+
+/**
  * Add dense layers to adapt from hidden features to output shape
  */
 const adaptToOutputShape = (
@@ -275,14 +338,20 @@ const adaptToOutputShape = (
 
 /**
  * Helper to extract input and output shapes from dataset profile
+ * Also infers the appropriate dataTypeHint for generateRandomArchitecture
  */
 export const extractShapesFromDatasetProfile = (
     streams: Array<{ 
         role: 'Input' | 'Target' | 'Ignore'; 
         tensorShape: number[],
+        dataType?: 'Image' | 'Vector' | 'Categorical' | 'Text' | 'TemporalSequence',
         numClasses?: number,
     }>
-): { inputShape: number[]; outputShape: number[] } | null => {
+): { 
+    inputShape: number[]; 
+    outputShape: number[],
+    dataTypeHint?: 'Image' | 'TemporalSequence' | 'Vector'
+} | null => {
     const inputStreams = streams.filter(s => s.role === 'Input');
     const targetStreams = streams.filter(s => s.role === 'Target');
 
@@ -293,10 +362,23 @@ export const extractShapesFromDatasetProfile = (
     // For simplicity, use first input and target stream
     // In future: could support multi-input/output by concatenating shapes
     const inputShape = inputStreams[0].tensorShape;
+    const inputDataType = inputStreams[0].dataType;
+    
+    // Infer dataTypeHint from the input stream's dataType
+    // Map DataType enum to generateRandomArchitecture's dataTypeHint
+    let dataTypeHint: 'Image' | 'TemporalSequence' | 'Vector' | undefined;
+    if (inputDataType === 'Image') {
+        dataTypeHint = 'Image';
+    } else if (inputDataType === 'TemporalSequence') {
+        dataTypeHint = 'TemporalSequence';
+    } else if (inputDataType === 'Vector') {
+        dataTypeHint = 'Vector';
+    }
+    // If inputDataType is 'Text' or undefined, don't set hint (falls back to dimension-based inference)
     
     // For Target stream: outputShape should be [num_classes] for classification
     const numClasses = targetStreams[0].numClasses || 2; // Default to 2 if not specified
     const outputShape = [numClasses];
 
-    return { inputShape, outputShape };
+    return { inputShape, outputShape, dataTypeHint };
 };
