@@ -925,6 +925,7 @@ pub struct StreamScanReport {
     pub found_count: usize,
     pub missing_sample_ids: Vec<String>,
     pub discovered_classes: Option<HashMap<String, usize>>, // class_name -> count
+    pub input_shape: Option<Vec<usize>>, // For Input streams: [window_size, num_features] or [num_features]
 }
 
 #[derive(serde::Serialize)]
@@ -1104,6 +1105,7 @@ async fn scan_dataset(
                     found_count: found_set.len(),
                     missing_sample_ids: missing,
                     discovered_classes: None,
+                    input_shape: None,
                 });
             }
             "MasterIndex" => {
@@ -1137,6 +1139,7 @@ async fn scan_dataset(
                     found_count: found_ids.len(),
                     missing_sample_ids: missing,
                     discovered_classes: if class_counts.is_empty() { None } else { Some(class_counts) },
+                    input_shape: None,
                 });
             }
             "FolderMapping" => {
@@ -1151,6 +1154,7 @@ async fn scan_dataset(
                     found_count: folder_map.len(),
                     missing_sample_ids: vec![],
                     discovered_classes: Some(class_counts),
+                    input_shape: None,
                 });
             }
             "CompanionFile" => {
@@ -1166,6 +1170,7 @@ async fn scan_dataset(
                     found_count: found.len(),
                     missing_sample_ids: missing,
                     discovered_classes: None,
+                    input_shape: None,
                 });
             }
             "CsvDataset" => {
@@ -1228,6 +1233,7 @@ async fn scan_dataset(
                         found_count: 0,
                         missing_sample_ids: vec![],
                         discovered_classes: None,
+                        input_shape: None,
                     });
                     continue;
                 };
@@ -1263,12 +1269,24 @@ async fn scan_dataset(
                     }
                 }
                 
+                // Calculate input_shape for Input streams
+                let input_shape = if stream_role == "Input" {
+                    if sample_mode == "temporal_window" {
+                        Some(vec![window_size, feature_col_count])
+                    } else {
+                        Some(vec![feature_col_count])
+                    }
+                } else {
+                    None
+                };
+                
                 reports.push(StreamScanReport {
                     stream_id: cfg.stream_id.clone(),
                     alias: cfg.alias.clone(),
                     found_count: csv_samples,
                     missing_sample_ids: vec![],
                     discovered_classes: if class_counts.is_empty() { None } else { Some(class_counts) },
+                    input_shape,
                 });
             }
             _ => {
@@ -1278,6 +1296,7 @@ async fn scan_dataset(
                     alias: cfg.alias.clone(),
                     found_count: 0,
                     missing_sample_ids: vec![],
+                    input_shape: None,
                     discovered_classes: None,
                 });
             }

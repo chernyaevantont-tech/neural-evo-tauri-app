@@ -165,15 +165,29 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
         const genomes: PopulatedGenome[] = [];
         try {
             // Determine how many genomes to generate randomly vs from seeds
-            const useRandom = settings.useRandomInitialization && seedJSONs.length > 0;
-            const numRandom = useRandom ? Math.floor((popSize * settings.randomInitRatio) / 100) : 0;
-            const numFromSeeds = popSize - numRandom;
+            // Case 1: useRandomInitialization enabled with seeds → split by ratio
+            // Case 2: useRandomInitialization enabled without seeds → all random
+            // Case 3: useRandomInitialization disabled → all from seeds
+            let numRandom = 0;
+            let numFromSeeds = popSize;
+            
+            if (settings.useRandomInitialization) {
+                if (seedJSONs.length > 0) {
+                    // Split between random and seeded
+                    numRandom = Math.floor((popSize * settings.randomInitRatio) / 100);
+                    numFromSeeds = popSize - numRandom;
+                } else {
+                    // Pure random initialization (no seeds available)
+                    numRandom = popSize;
+                    numFromSeeds = 0;
+                }
+            }
 
             // Get dataset profile for random generation
             let inputShape: number[] | null = null;
             let outputShape: number[] | null = null;
 
-            if (useRandom) {
+            if (numRandom > 0) {
                 const profiles = useDatasetManagerStore.getState().profiles;
                 const profile = profiles.find(p => p.id === datasetProfileId);
 
@@ -188,7 +202,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             }
 
             // First pass: generate random architectures if enabled
-            if (useRandom && inputShape && outputShape) {
+            if (numRandom > 0 && inputShape && outputShape) {
                 let randomAttempts = 0;
                 while (genomes.length < numRandom && randomAttempts < numRandom * 5) {
                     randomAttempts++;
@@ -377,8 +391,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                 evaluated: false
             }]);
 
-            const randomCount = useRandom ? genomes.filter(g => !seedJSONs.some(s => s === g.genome.toString())).length : 0;
-            addLog(`Spawned Generation 0: ${seedJSONs.length} direct seeds, ${randomCount} random archs, ${genomes.length - seedJSONs.length - randomCount} mutated clones.`, "info");
+            addLog(`Spawned Generation 0: ${numFromSeeds} direct seeds, ${numRandom} random archs, ${Math.max(0, genomes.length - numFromSeeds - numRandom)} mutated clones.`, "info");
         } catch (e) {
             addLog(`Failed to initialize population: ${String(e)}`, "error");
         }
@@ -729,9 +742,10 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             }, 100);
 
         } catch (err) {
-            console.error(err);
-            addLog(`Evolution Error: ${String(err)}`, "error");
-            stopEvolution();
+            console.error('evaluate_population error:', err);
+            addLog(`Evaluation failed: ${String(err)}`, "error");
+            // Don't auto-stop - let user manually click Stop to investigate
+            // stopEvolution();
         }
 
     }, [datasetProfileId, generation, population, settings, addLog, stopEvolution]);
@@ -742,8 +756,8 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             return;
         }
 
-        if (seedGenomes.length === 0) {
-            addLog("Cannot start: No seeds provided!", "error");
+        if (seedGenomes.length === 0 && !settings.useRandomInitialization) {
+            addLog("Cannot start: No seeds provided and Random Initialization disabled!", "error");
             return;
         }
 

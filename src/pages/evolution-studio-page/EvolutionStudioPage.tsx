@@ -4,6 +4,7 @@ import styles from './EvolutionStudioPage.module.css';
 import { useNavigate } from 'react-router-dom';
 import { BsArrowLeft, BsPlay, BsStop, BsPlus, BsX } from 'react-icons/bs';
 import { useEvolutionLoop } from '../../features/evolution-studio/model/useEvolutionLoop';
+import { useEvolutionSettingsStore } from '../../features/evolution-manager/model/store';
 import { useDatasetManagerStore } from '../../features/dataset-manager/model/store';
 import { useCanvasGenomeStore, serializeGenome } from '../../entities/canvas-genome';
 import { GenomeCatalogPicker } from '../../features/genome-library';
@@ -59,6 +60,7 @@ export const EvolutionStudioPage: React.FC = () => {
     const genomes = useCanvasGenomeStore(state => state.genomes);
     const { entries, loadGenomeContent } = useGenomeLibraryStore();
     const profiles = useDatasetManagerStore(state => state.profiles);
+    const settings = useEvolutionSettingsStore();
 
     const [showCatalogPicker, setShowCatalogPicker] = useState(false);
     const [selectedSeedIds, setSelectedSeedIds] = useState<string[]>([]);
@@ -100,6 +102,12 @@ export const EvolutionStudioPage: React.FC = () => {
     const activeProfile = profiles.find(p => p.id === datasetProfileId);
 
     const handleStart = async () => {
+        // First, ensure a dataset profile is selected
+        if (!datasetProfileId) {
+            alert("Please select a Dataset Profile first!");
+            return;
+        }
+
         const seedJsonList: string[] = [];
 
         if (selectedSeedIds.length > 0) {
@@ -115,16 +123,20 @@ export const EvolutionStudioPage: React.FC = () => {
         } else {
             // Fallback to active sandbox genome
             const activeGenomes = Array.from(genomes.values());
-            if (activeGenomes.length === 0) {
-                alert("Please add seeds from the Library or create a starting architecture in the Sandbox first!");
+            if (activeGenomes.length > 0) {
+                const seedGenome = activeGenomes[0];
+                const seedJson = await serializeGenome(seedGenome.genome);
+                seedJsonList.push(seedJson);
+            }
+            // If no seeds and no active genomes, check if random initialization is enabled
+            else if (!settings.useRandomInitialization) {
+                alert("Please either:\n1. Add seeds from the Library, OR\n2. Create an architecture in the Sandbox, OR\n3. Enable 'Random Initialization' to generate random architectures");
                 return;
             }
-            const seedGenome = activeGenomes[0];
-            const seedJson = await serializeGenome(seedGenome.genome);
-            seedJsonList.push(seedJson);
         }
 
-        if (seedJsonList.length > 0) {
+        // Allow evolution with or without seeds if random initialization is enabled
+        if (seedJsonList.length > 0 || settings.useRandomInitialization) {
             startEvolution(seedJsonList);
         }
     };

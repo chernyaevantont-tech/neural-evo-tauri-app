@@ -11,6 +11,7 @@ type Backend = Autodiff<Wgpu>;
 
 /// Loads CSV-based datasets in both row-wise and temporal-window modes
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct CsvDatasetLoader {
     csv_path: PathBuf,
     config: CsvDatasetDef,

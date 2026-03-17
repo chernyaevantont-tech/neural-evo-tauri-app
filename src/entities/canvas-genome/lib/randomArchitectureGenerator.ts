@@ -277,7 +277,11 @@ const adaptToOutputShape = (
  * Helper to extract input and output shapes from dataset profile
  */
 export const extractShapesFromDatasetProfile = (
-    streams: Array<{ role: 'Input' | 'Target' | 'Ignore'; tensorShape: number[] }>
+    streams: Array<{ 
+        role: 'Input' | 'Target' | 'Ignore'; 
+        tensorShape: number[],
+        numClasses?: number,
+    }>
 ): { inputShape: number[]; outputShape: number[] } | null => {
     const inputStreams = streams.filter(s => s.role === 'Input');
     const targetStreams = streams.filter(s => s.role === 'Target');
@@ -289,7 +293,10 @@ export const extractShapesFromDatasetProfile = (
     // For simplicity, use first input and target stream
     // In future: could support multi-input/output by concatenating shapes
     const inputShape = inputStreams[0].tensorShape;
-    const outputShape = targetStreams[0].tensorShape;
+    
+    // For Target stream: outputShape should be [num_classes] for classification
+    const numClasses = targetStreams[0].numClasses || 2; // Default to 2 if not specified
+    const outputShape = [numClasses];
 
     return { inputShape, outputShape };
 };

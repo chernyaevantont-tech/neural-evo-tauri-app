@@ -46,6 +46,7 @@ export interface DataStream {
     role: 'Input' | 'Target' | 'Ignore';
     dataType: DataType;
     tensorShape: number[]; // Explicit shape expected by the model
+    numClasses?: number;   // Number of output classes (for Target/classification streams)
 
     // How the data is found and aligned by SampleID
     locator: DataLocatorDef;

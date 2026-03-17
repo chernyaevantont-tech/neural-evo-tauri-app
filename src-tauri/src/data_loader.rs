@@ -101,6 +101,43 @@ impl DataLoader {
             self.root_path
         );
 
+        // First pass: Pre-load all CSV datasets to determine temporal window alignment
+        let mut temporal_window_count: Option<usize> = None;
+        let mut csv_cache: HashMap<String, CsvDatasetLoader> = HashMap::new();
+        
+        for stream in &self.profile.streams {
+            if let DataLocatorDef::CsvDataset(csv_def) = &stream.locator {
+                let key = csv_def.csv_path.clone();
+                
+                // Only load once per unique CSV file
+                if !csv_cache.contains_key(&key) {
+                    // For temporal window mode, ensure window_size is set
+                    let mut adjusted_def = csv_def.clone();
+                    if adjusted_def.sample_mode == "temporal_window" && adjusted_def.window_size.is_none() {
+                        adjusted_def.window_size = Some(50); // Default window size
+                        eprintln!(">>> Warning: Temporal window mode without window_size, using default: 50");
+                    }
+                    
+                    match CsvDatasetLoader::init(&self.root_path, adjusted_def.clone()) {
+                        Ok(loader) => {
+                            if stream.role == "Input" && adjusted_def.sample_mode == "temporal_window" {
+                                temporal_window_count = Some(loader.num_samples);
+                                eprintln!(
+                                    ">>> Detected temporal_window Input stream: window_size={}, sample count={}",
+                                    adjusted_def.window_size.unwrap_or(1),
+                                    loader.num_samples
+                                );
+                            }
+                            csv_cache.insert(key, loader);
+                        }
+                        Err(e) => {
+                            eprintln!(">>> Error loading CSV {}: {}", csv_def.csv_path, e);
+                        }
+                    }
+                }
+            }
+        }
+
         for stream in &self.profile.streams {
             let mut stream_map = HashMap::new();
             println!(
@@ -255,36 +292,60 @@ impl DataLoader {
                 DataLocatorDef::CsvDataset(csv_def) => {
                     println!("    Locator: CsvDataset");
                     
-                    match CsvDatasetLoader::init(&self.root_path, csv_def.clone()) {
-                        Ok(csv_loader) => {
-                            // For each discoverable sample in CSV:
-                            // - Row mode: sample IDs are "0", "1", "2", ... row_count
-                            // - Temporal mode: sample IDs are "0", "1", ... num_windows
-                            
-                            for sample_idx in 0..csv_loader.num_samples {
-                                let sample_id = sample_idx.to_string();
-                                stream_map.insert(sample_id, format!("csv:{}", sample_idx));
+                    let key = csv_def.csv_path.clone();
+                    if let Some(csv_loader) = csv_cache.get(&key).cloned() {
+                        // For Target streams, ensure no feature columns are used
+                        let mut config = csv_def.clone();
+                        if stream.role == "Target" {
+                            config.feature_columns = vec![];
+                        } else {
+                            // For temporal window mode, ensure window_size is set
+                            if config.sample_mode == "temporal_window" && config.window_size.is_none() {
+                                config.window_size = Some(50);
                             }
-                            
-                            // Record discovered classes
-                            if stream.role == "Target" {
-                                self.stream_classes.insert(
-                                    self.profile.streams.iter().position(|s| s.id == stream.id).unwrap_or(0),
-                                    csv_loader.discovered_classes.len()
-                                );
-                            }
-                            
-                            println!("    CsvDataset found {} samples, {} classes",
-                                csv_loader.num_samples,
+                        }
+                        
+                        // For each discoverable sample in CSV:
+                        // - Row mode: sample IDs are "0", "1", "2", ... row_count (or temporal count if aligned)
+                        // - Temporal mode: sample IDs are "0", "1", ... num_windows
+                        
+                        // If this is a Target stream and a temporal Input stream exists, 
+                        // use the temporal window count for alignment
+                        let sample_count = if stream.role == "Target" && temporal_window_count.is_some() {
+                            temporal_window_count.unwrap()
+                        } else {
+                            csv_loader.num_samples
+                        };
+                        
+                        for sample_idx in 0..sample_count {
+                            let sample_id = sample_idx.to_string();
+                            stream_map.insert(sample_id, format!("csv:{}", sample_idx));
+                        }
+                        
+                        // Record discovered classes
+                        if stream.role == "Target" {
+                            self.stream_classes.insert(
+                                self.profile.streams.iter().position(|s| s.id == stream.id).unwrap_or(0),
                                 csv_loader.discovered_classes.len()
                             );
-                            
-                            // Cache the loader for later use
-                            self.csv_loaders.insert(stream.id.clone(), csv_loader);
                         }
-                        Err(e) => {
-                            return Err(format!("Failed to init CSV dataset: {}", e));
-                        }
+                        
+                        let actual_sample_count = if stream.role == "Target" && temporal_window_count.is_some() {
+                            temporal_window_count.unwrap()
+                        } else {
+                            csv_loader.num_samples
+                        };
+                        
+                        println!("    CsvDataset found {} raw rows, {} actual samples for this stream, {} classes",
+                            csv_loader.num_samples,
+                            actual_sample_count,
+                            csv_loader.discovered_classes.len()
+                        );
+                        
+                        // Cache the loader for later use
+                        self.csv_loaders.insert(stream.id.clone(), csv_loader);
+                    } else {
+                        return Err(format!("CSV dataset not pre-loaded: {}", csv_def.csv_path));
                     }
                 }
                 _ => {

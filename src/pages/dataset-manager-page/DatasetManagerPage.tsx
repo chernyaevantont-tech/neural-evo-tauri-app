@@ -62,6 +62,7 @@ export const DatasetManagerPage: React.FC = () => {
                     found_count: number;
                     missing_sample_ids: string[];
                     discovered_classes: Record<string, number> | null;
+                    input_shape: number[] | null;
                 }>;
             }>('scan_dataset', {
                 rootPath: profile.sourcePath,
@@ -77,14 +78,32 @@ export const DatasetManagerPage: React.FC = () => {
                     foundCount: r.found_count,
                     missingSampleIds: r.missing_sample_ids,
                     discoveredClasses: r.discovered_classes ?? undefined,
+                    inputShape: r.input_shape ?? undefined,
                 })),
                 timestamp: new Date().toISOString(),
             };
+
+            // Update profile streams with tensorShape and num_classes from scan results
+            const updatedProfile = { ...profile };
+            updatedProfile.streams = profile.streams.map(stream => {
+                const report = result.stream_reports.find(r => r.stream_id === stream.id);
+                if (report) {
+                    return {
+                        ...stream,
+                        // Set tensorShape from input_shape for Input streams
+                        tensorShape: report.input_shape ? report.input_shape : stream.tensorShape,
+                        // Set num_classes for Target streams from discovered_classes
+                        numClasses: report.discovered_classes ? Object.keys(report.discovered_classes).length : stream.numClasses,
+                    } as any;
+                }
+                return stream;
+            });
 
             useDatasetManagerStore.getState().updateProfile(profileId, {
                 scanResult,
                 totalSamples: scanResult.totalMatched,
                 isScanned: true,
+                streams: updatedProfile.streams,
             });
         } catch (err) {
             console.error('Scan failed:', err);
