@@ -1401,8 +1401,6 @@ async fn compute_zero_cost_score(
     genome_json: String,
     config_json: String,
 ) -> Result<ZeroCostMetrics, String> {
-    use burn::tensor::backend::AutodiffBackend;
-    
     type Backend = Autodiff<Wgpu>;
     let device = burn::backend::wgpu::WgpuDevice::DiscreteGpu(0);
     
@@ -1473,7 +1471,7 @@ async fn compute_zero_cost_score(
     let batch = DynamicBatch { inputs, targets };
     
     // Compute forward pass and loss
-    let _output = model.forward_batch(&batch);
+    let _output = model.forward(&batch.inputs);
     
     // For now, compute a heuristic based on model architecture properties
     // In a full implementation, this would compute SynFlow properly
@@ -1527,7 +1525,7 @@ fn compute_synflow_heuristic<B: burn::prelude::Backend>(model: &GraphModel<B>) -
     let score = base_score * (1.0 + conn_factor * 0.2);
     
     // Add deterministic noise based on layer counts
-    let noise = ((model.denses.len() as f32 * 1.73) % 2.0) - 1.0) * 0.3;
+    let noise = (((model.denses.len() as f32 * 1.73) % 2.0) - 1.0) * 0.3;
     
     (score + noise).max(0.5).min(15.0) // clamp to reasonable range
 }
