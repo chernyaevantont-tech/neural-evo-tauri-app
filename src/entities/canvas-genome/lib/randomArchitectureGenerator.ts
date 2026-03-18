@@ -210,6 +210,12 @@ const buildSequentialPath = (
         currentDepth++;
     }
 
+    // Flatten for transition to dense layers
+    const flatten = new FlattenNode();
+    currentNode.AddNext(flatten);
+    nodes.push(flatten);
+    currentNode = flatten;
+
     return currentNode;
 };
 

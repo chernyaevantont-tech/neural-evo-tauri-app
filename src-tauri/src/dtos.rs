@@ -138,6 +138,8 @@ pub struct DataStream {
     pub role: String, // "Input" | "Target" | "Ignore"
     pub data_type: DataType,
     pub tensor_shape: Vec<usize>,
+    #[serde(rename = "numClasses")]
+    pub num_classes: Option<usize>,
     pub locator: DataLocatorDef,
     pub preprocessing: Option<PreprocessingSettings>,
 }

@@ -157,6 +157,15 @@ impl CsvDatasetLoader {
         })
     }
 
+    /// Retrieve raw label string for stratification
+    pub fn get_label(&self, sample_idx: usize) -> Option<String> {
+        if sample_idx < self.labels.len() {
+            Some(self.labels[sample_idx].clone())
+        } else {
+            None
+        }
+    }
+
     /// Load a single sample by index
     pub fn load_sample(
         &self,
@@ -173,12 +182,18 @@ impl CsvDatasetLoader {
                 let features = &self.rows[sample_idx];
                 let label = &self.labels[sample_idx];
 
-                // Normalize if configured
-                let features = self.normalize_row(features)?;
+                // If no features (e.g., Target stream), return a dummy tensor
+                let tensor_2d = if self.feature_indices.is_empty() {
+                    let tensor = Tensor::<Backend, 2>::from_data([[0.0]], device);
+                    tensor // Dummy tensor
+                } else {
+                    // Normalize if configured
+                    let features = self.normalize_row(features)?;
 
-                // Create tensor [num_features]
-                let tensor = Tensor::<Backend, 1>::from_floats(features.as_slice(), device);
-                let tensor_2d = tensor.reshape([1, features.len()]);
+                    // Create tensor [1, num_features]
+                    let tensor = Tensor::<Backend, 1>::from_floats(features.as_slice(), device);
+                    tensor.reshape([1, features.len()])
+                };
 
                 Ok((DynamicTensor::Dim2(tensor_2d), label.clone()))
             }
@@ -203,17 +218,23 @@ impl CsvDatasetLoader {
                     window_data.extend(&self.rows[row_idx]);
                 }
 
-                // Apply normalization
-                let window_data = self.normalize_temporal(&window_data, ws)?;
+                // If no features (e.g., Target stream), return a dummy 3D tensor
+                let tensor_3d = if self.feature_indices.is_empty() {
+                    let tensor = Tensor::<Backend, 3>::from_data([[[0.0]]], device);
+                    tensor // Dummy tensor
+                } else {
+                    // Apply normalization
+                    let window_data = self.normalize_temporal(&window_data, ws)?;
 
-                // Create tensor [ws, num_features]
-                let tensor = Tensor::<Backend, 1>::from_floats(window_data.as_slice(), device);
-                let tensor_2d = tensor.reshape([ws, self.feature_indices.len()]);
+                    // Create tensor [1, ws, num_features]
+                    let tensor = Tensor::<Backend, 1>::from_floats(window_data.as_slice(), device);
+                    tensor.reshape([1, ws, self.feature_indices.len()])
+                };
 
                 // Use label from first row of window
                 let label = self.labels[start_row].clone();
 
-                Ok((DynamicTensor::Dim2(tensor_2d), label))
+                Ok((DynamicTensor::Dim3(tensor_3d), label))
             }
 
             _ => Err(format!("Unknown sample_mode: {}", self.config.sample_mode)),

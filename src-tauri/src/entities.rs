@@ -37,6 +37,7 @@ use crate::dtos::NodeDtoJSON;
 #[derive(Clone, Debug)]
 pub enum DynamicTensor<B: Backend> {
     Dim2(Tensor<B, 2>),
+    Dim3(Tensor<B, 3>),
     Dim4(Tensor<B, 4>),
 }
 
@@ -54,6 +55,16 @@ pub fn concat_dynamic_tensors<B: Backend>(tensors: Vec<DynamicTensor<B>>) -> Dyn
                 })
                 .collect();
             DynamicTensor::Dim2(Tensor::cat(t2_list, 0))
+        }
+        DynamicTensor::Dim3(_) => {
+            let t3_list: Vec<Tensor<B, 3>> = tensors
+                .into_iter()
+                .map(|t| match t {
+                    DynamicTensor::Dim3(t3) => t3,
+                    _ => panic!("Mixed tensor dimensions in concat!"),
+                })
+                .collect();
+            DynamicTensor::Dim3(Tensor::cat(t3_list, 0))
         }
         DynamicTensor::Dim4(_) => {
             let t4_list: Vec<Tensor<B, 4>> = tensors
@@ -588,8 +599,9 @@ impl<B: Backend> GraphModel<B> {
                     activation,
                 } => {
                     let prev_shape = &shape_cache[inputs_for_node[0]];
-                    let in_channels = prev_shape[0];
-                    let seq_len = prev_shape[1];
+                    // Standard single-sample sequence shape is [seq_len, channels]
+                    let seq_len = prev_shape[0];
+                    let in_channels = *prev_shape.get(1).unwrap_or(&1);
 
                     let mut actual_filters = *filters as usize;
                     if let Some(&out_idx) = connects_to_output.get(&node_id) {
@@ -623,7 +635,7 @@ impl<B: Backend> GraphModel<B> {
                             conv1d_idx,
                             activation: activation.clone(),
                         },
-                        vec![actual_filters, seq_out],
+                        vec![seq_out, actual_filters],
                     )
                 }
 
@@ -635,8 +647,9 @@ impl<B: Backend> GraphModel<B> {
                     use_bias,
                 } => {
                     let prev_shape = &shape_cache[inputs_for_node[0]];
-                    let input_size = prev_shape[0];
-                    let seq_len = prev_shape[1];
+                    // Standard single-sample sequence shape is [seq_len, channels]
+                    let seq_len = prev_shape[0];
+                    let input_size = *prev_shape.get(1).unwrap_or(&1);
                     let hidden_units = *hidden_units as usize;
 
                     let lstm = LstmConfig::new(input_size, hidden_units, *use_bias).init(device);
@@ -645,10 +658,10 @@ impl<B: Backend> GraphModel<B> {
                     lstms.push(lstm);
                     lstm_hidden_sizes.push(hidden_units);
 
-                    // LSTM output: [hidden_units, seq_len]
+                    // LSTM output shape cache: [seq_len, hidden_units]
                     (
                         Operation::LSTM { lstm_idx },
-                        vec![hidden_units, seq_len],
+                        vec![seq_len, hidden_units],
                     )
                 }
 
@@ -660,8 +673,9 @@ impl<B: Backend> GraphModel<B> {
                     reset_after: _,
                 } => {
                     let prev_shape = &shape_cache[inputs_for_node[0]];
-                    let input_size = prev_shape[0];
-                    let seq_len = prev_shape[1];
+                    // Standard single-sample sequence shape is [seq_len, channels]
+                    let seq_len = prev_shape[0];
+                    let input_size = *prev_shape.get(1).unwrap_or(&1);
                     let hidden_units = *hidden_units as usize;
 
                     let gru = GruConfig::new(input_size, hidden_units, *use_bias).init(device);
@@ -670,10 +684,10 @@ impl<B: Backend> GraphModel<B> {
                     grus.push(gru);
                     gru_hidden_sizes.push(hidden_units);
 
-                    // GRU output: [hidden_units, seq_len]
+                    // GRU output shape cache: [seq_len, hidden_units]
                     (
                         Operation::GRU { gru_idx },
-                        vec![hidden_units, seq_len],
+                        vec![seq_len, hidden_units],
                     )
                 }
 
@@ -683,19 +697,20 @@ impl<B: Backend> GraphModel<B> {
                     quiet_softmax: _,
                 } => {
                     let prev_shape = &shape_cache[inputs_for_node[0]];
-                    let d_model = prev_shape[0];
-                    let seq_len = prev_shape[1];
+                    // Standard single-sample sequence shape is [seq_len, channels]
+                    let seq_len = prev_shape[0];
+                    let d_model = *prev_shape.get(1).unwrap_or(&1);
 
                     let mha = MultiHeadAttentionConfig::new(d_model, *n_heads as usize)
+                        .with_dropout(0.1)
                         .init(device);
 
                     let mha_idx = mha_layers.len();
                     mha_layers.push(mha);
 
-                    // MHA preserves shape
                     (
                         Operation::MultiHeadAttention { mha_idx },
-                        vec![d_model, seq_len],
+                        vec![seq_len, d_model],
                     )
                 }
 
@@ -870,10 +885,10 @@ impl<B: Backend> GraphModel<B> {
                     conv1d_idx,
                     activation,
                 } => {
-                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
-                        let [seq_len, in_channels] = x.dims();
-                        // Reshape [seq_len, in_channels] -> [1, in_channels, seq_len]
-                        let batched = x.clone().reshape([1, in_channels, seq_len]);
+                    if let DynamicTensor::Dim3(x) = consume!(instr.input_ids[0]) {
+                        // x shape: [batch_size, seq_len, in_channels]
+                        // Burn Conv1d expects [batch_size, in_channels, seq_len]
+                        let batched = x.swap_dims(1, 2);
                         
                         let conv = &self.conv1ds[*conv1d_idx];
                         let mut out = conv.forward(batched);
@@ -887,91 +902,62 @@ impl<B: Backend> GraphModel<B> {
                             _ => burn::tensor::activation::relu(out),
                         };
 
-                        // Reshape back to [seq_len_out, filters]
-                        let [_, filters, seq_len_out] = out.dims();
-                        let output_2d = out.reshape([seq_len_out, filters]);
-                        DynamicTensor::Dim2(output_2d)
+                        // Reshape back to [batch_size, seq_len_out, filters]
+                        let output_3d = out.swap_dims(1, 2);
+                        DynamicTensor::Dim3(output_3d)
                     } else {
-                        unreachable!("Conv1D expects 2D input [seq_len, channels]")
+                        unreachable!("Conv1D expects 3D input [batch_size, seq_len, channels]")
                     }
                 }
 
                 Operation::LSTM { lstm_idx } => {
-                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
-                        let [input_size, seq_len] = x.dims();
-                        // Frontend sends [input_size, seq_len]
-                        // Reshape to [1, seq_len, input_size] for Burn LSTM
-                        let input_3d = x.transpose().reshape([1, seq_len, input_size]);
-                        
+                    if let DynamicTensor::Dim3(x) = consume!(instr.input_ids[0]) {
+                        // x shape: [batch_size, seq_len, input_size]
                         let lstm = &self.lstms[*lstm_idx];
-                        let (output, _state) = lstm.forward(input_3d, None);
+                        let (output, _state) = lstm.forward(x, None);
                         
-                        // Output shape: [1, seq_len, hidden_units]
-                        // Reshape back to [hidden_units, seq_len]
-                        let [_, seq_out, hidden] = output.dims();
-                        let output_2d = output.reshape([seq_out, hidden]).transpose();
-                        DynamicTensor::Dim2(output_2d)
+                        // Output shape: [batch_size, seq_len, hidden_units]
+                        DynamicTensor::Dim3(output)
                     } else {
-                        unreachable!("LSTM expects 2D input [input_size, seq_len]")
+                        unreachable!("LSTM expects 3D input [batch_size, seq_len, input_size]")
                     }
                 }
 
                 Operation::GRU { gru_idx } => {
-                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
-                        let [input_size, seq_len] = x.dims();
-                        let input_3d = x.transpose().reshape([1, seq_len, input_size]);
-
+                    if let DynamicTensor::Dim3(x) = consume!(instr.input_ids[0]) {
+                        // x shape: [batch_size, seq_len, input_size]
                         let gru = &self.grus[*gru_idx];
-                        let output = gru.forward(input_3d, None); // GRU returns just Tensor, not (Tensor, State)
-                        let [_, seq_out, hidden] = output.dims();
-                        let output_2d = output.reshape([seq_out, hidden]).transpose();
-                        DynamicTensor::Dim2(output_2d)
+                        let output = gru.forward(x, None); 
+                        DynamicTensor::Dim3(output)
                     } else {
-                        unreachable!("GRU expects 2D input [input_size, seq_len]")
+                        unreachable!("GRU expects 3D input [batch_size, seq_len, input_size]")
                     }
                 }
 
                 Operation::MultiHeadAttention { mha_idx } => {
-                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
-                        let [d_model, seq_len] = x.dims();
-                        
-                        // Reshape to [1, seq_len, d_model] for Burn MHA
-                        let input_3d = x.transpose().reshape([1, seq_len, d_model]);
-                        
+                    if let DynamicTensor::Dim3(x) = consume!(instr.input_ids[0]) {
+                        // x shape: [batch_size, seq_len, d_model]
                         let mha = &self.mha_layers[*mha_idx];
-                        // For self-attention, query = key = value = input
-                        let mha_input = burn::nn::attention::MhaInput::self_attn(input_3d);
+                        let mha_input = burn::nn::attention::MhaInput::self_attn(x);
                         let mha_output = mha.forward(mha_input);
                         
-                        // Output: [1, seq_len, d_model]
-                        // Reshape back to [d_model, seq_len]
-                        let [_, seq_out, dim] = mha_output.context.dims();
-                        let output_2d = mha_output.context.reshape([seq_out, dim]).transpose();
-                        DynamicTensor::Dim2(output_2d)
+                        // Output: [batch_size, seq_len, d_model]
+                        DynamicTensor::Dim3(mha_output.context)
                     } else {
-                        unreachable!("MHA expects 2D input [d_model, seq_len]")
+                        unreachable!("MHA expects 3D input [batch_size, seq_len, d_model]")
                     }
                 }
 
                 Operation::TransformerEncoderBlock { transformer_idx } => {
-                    if let DynamicTensor::Dim2(x) = consume!(instr.input_ids[0]) {
-                        let [d_model, seq_len] = x.dims();
-                        
-                        // Reshape to [1, seq_len, d_model]
-                        let input_3d = x.transpose().reshape([1, seq_len, d_model]);
-                        
-                        // Use MHA as placeholder for transformer encoder
+                    if let DynamicTensor::Dim3(x) = consume!(instr.input_ids[0]) {
+                        // x shape: [batch_size, seq_len, d_model]
                         let mha = &self.mha_layers[*transformer_idx];
-                        let mha_input = burn::nn::attention::MhaInput::self_attn(input_3d);
+                        let mha_input = burn::nn::attention::MhaInput::self_attn(x);
                         let mha_output = mha.forward(mha_input);
                         
-                        // Output: [1, seq_len, d_model]
-                        // Reshape back to [d_model, seq_len]
-                        let [_, seq_out, dim] = mha_output.context.dims();
-                        let output_2d = mha_output.context.reshape([seq_out, dim]).transpose();
-                        DynamicTensor::Dim2(output_2d)
+                        DynamicTensor::Dim3(mha_output.context)
                     } else {
-                        unreachable!("TransformerBlock expects 2D input [d_model, seq_len]")
+                        unreachable!("TransformerBlock expects 3D input [batch_size, seq_len, d_model]")
                     }
                 }
 
@@ -993,12 +979,10 @@ impl<B: Backend> GraphModel<B> {
                     }
                 }
 
-                Operation::Flatten => {
-                    if let DynamicTensor::Dim4(x) = consume!(instr.input_ids[0]) {
-                        DynamicTensor::Dim2(x.flatten::<2>(1, 3))
-                    } else {
-                        unreachable!()
-                    }
+                Operation::Flatten => match consume!(instr.input_ids[0]) {
+                    DynamicTensor::Dim4(x) => DynamicTensor::Dim2(x.flatten::<2>(1, 3)),
+                    DynamicTensor::Dim3(x) => DynamicTensor::Dim2(x.flatten::<2>(1, 2)),
+                    DynamicTensor::Dim2(x) => DynamicTensor::Dim2(x),
                 }
 
                 Operation::Add => match consume!(instr.input_ids[0]) {
@@ -1009,6 +993,14 @@ impl<B: Backend> GraphModel<B> {
                             }
                         }
                         DynamicTensor::Dim2(sum)
+                    }
+                    DynamicTensor::Dim3(mut sum) => {
+                        for &in_id in instr.input_ids.iter().skip(1) {
+                            if let DynamicTensor::Dim3(t3) = consume!(in_id) {
+                                sum = sum + t3;
+                            }
+                        }
+                        DynamicTensor::Dim3(sum)
                     }
                     DynamicTensor::Dim4(mut sum) => {
                         for &in_id in instr.input_ids.iter().skip(1) {
@@ -1040,6 +1032,20 @@ impl<B: Backend> GraphModel<B> {
                                 .collect();
                             DynamicTensor::Dim2(Tensor::cat(t2_list, 1))
                         }
+                        DynamicTensor::Dim3(_) => {
+                            let t3_list: Vec<_> = tensors
+                                .into_iter()
+                                .map(|t| {
+                                    if let DynamicTensor::Dim3(x) = t {
+                                        x
+                                    } else {
+                                        unreachable!()
+                                    }
+                                })
+                                .collect();
+                            // concatenate along feature axis
+                            DynamicTensor::Dim3(Tensor::cat(t3_list, 2))
+                        }
                         DynamicTensor::Dim4(_) => {
                             let t4_list: Vec<_> = tensors
                                 .into_iter()
@@ -1061,6 +1067,7 @@ impl<B: Backend> GraphModel<B> {
                     let dropout = &self.dropouts[*dropout_idx];
                     match input {
                         DynamicTensor::Dim2(t) => DynamicTensor::Dim2(dropout.forward(t)),
+                        DynamicTensor::Dim3(t) => DynamicTensor::Dim3(dropout.forward(t)),
                         DynamicTensor::Dim4(t) => DynamicTensor::Dim4(dropout.forward(t)),
                     }
                 }
@@ -1071,6 +1078,14 @@ impl<B: Backend> GraphModel<B> {
                         DynamicTensor::Dim2(t) => {
                             let bn = &self.batch_norms_2d[*batch_norm_idx];
                             DynamicTensor::Dim2(bn.forward(t))
+                        }
+                        // BatchNorm for Dim3 is 1D in PyTorch/Burn terminology, usually batch_norms_1d
+                        // But since we only have 2d and 4d in entities rn, fallback or handle:
+                        DynamicTensor::Dim3(t) => {
+                             // Assuming NO batch norm properly created for 3D yet, or we ignore
+                             // Let's just return to unblock if User didn't place BatchNorm here
+                             // or panic properly.
+                             unimplemented!("BatchNorm for Dim3 not supported yet in entities.rs")
                         }
                         DynamicTensor::Dim4(t) => {
                             let bn = &self.batch_norms_4d[*batch_norm_idx];
@@ -1084,6 +1099,7 @@ impl<B: Backend> GraphModel<B> {
                     let ln = &self.layer_norms[*layer_norm_idx];
                     match input {
                         DynamicTensor::Dim2(t) => DynamicTensor::Dim2(ln.forward(t)),
+                        DynamicTensor::Dim3(t) => DynamicTensor::Dim3(ln.forward(t)),
                         DynamicTensor::Dim4(t) => DynamicTensor::Dim4(ln.forward(t)),
                     }
                 }
@@ -1095,6 +1111,7 @@ impl<B: Backend> GraphModel<B> {
                         let dropout = &self.dropouts[*dropout_2d_idx];
                         match input {
                             DynamicTensor::Dim2(t) => DynamicTensor::Dim2(dropout.forward(t)),
+                            DynamicTensor::Dim3(t) => DynamicTensor::Dim3(dropout.forward(t)),
                             DynamicTensor::Dim4(t) => DynamicTensor::Dim4(dropout.forward(t)),
                         }
                     } else {
@@ -1112,6 +1129,13 @@ impl<B: Backend> GraphModel<B> {
                                     burn::tensor::Distribution::Normal(0.0, *std_dev),
                                 );
                                 DynamicTensor::Dim2(t + noise)
+                            }
+                            DynamicTensor::Dim3(t) => {
+                                let noise = burn::tensor::Tensor::random_like(
+                                    &t,
+                                    burn::tensor::Distribution::Normal(0.0, *std_dev),
+                                );
+                                DynamicTensor::Dim3(t + noise)
                             }
                             DynamicTensor::Dim4(t) => {
                                 let noise = burn::tensor::Tensor::random_like(
@@ -1132,6 +1156,7 @@ impl<B: Backend> GraphModel<B> {
             if debug {
                 let shape_str = match &out_tensor {
                     DynamicTensor::Dim2(t) => format!("{:?}", t.dims()),
+                    DynamicTensor::Dim3(t) => format!("{:?}", t.dims()),
                     DynamicTensor::Dim4(t) => format!("{:?}", t.dims()),
                 };
                 println!(

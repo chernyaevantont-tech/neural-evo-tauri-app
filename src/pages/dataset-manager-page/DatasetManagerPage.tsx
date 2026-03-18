@@ -38,6 +38,7 @@ export const DatasetManagerPage: React.FC = () => {
                     pattern: s.locator.type === 'GlobPattern' ? s.locator.pattern : null,
                     path_template: s.locator.type === 'CompanionFile' ? s.locator.pathTemplate : null,
                     stream_role: s.role, // ← Send the role
+                    data_type: s.dataType,
                 };
                 
                 // Add CSV-specific parameters if this is a CSV Dataset locator
@@ -65,6 +66,7 @@ export const DatasetManagerPage: React.FC = () => {
                     missing_sample_ids: string[];
                     discovered_classes: Record<string, number> | null;
                     input_shape: number[] | null;
+                    inferred_data_type: string;
                 }>;
             }>('scan_dataset', {
                 rootPath: profile.sourcePath,
@@ -88,14 +90,14 @@ export const DatasetManagerPage: React.FC = () => {
             // Update profile streams with tensorShape and num_classes from scan results
             const updatedProfile = { ...profile };
             updatedProfile.streams = profile.streams.map(stream => {
-                const report = result.stream_reports.find(r => r.stream_id === stream.id);
+                const report = scanResult.streamReports.find(r => r.streamId === stream.id);
                 if (report) {
                     return {
                         ...stream,
                         // Set tensorShape from input_shape for Input streams
-                        tensorShape: report.input_shape ? report.input_shape : stream.tensorShape,
+                        tensorShape: report.inputShape ?? stream.tensorShape,
                         // Set num_classes for Target streams from discovered_classes
-                        numClasses: report.discovered_classes ? Object.keys(report.discovered_classes).length : stream.numClasses,
+                        numClasses: report.discoveredClasses ? Object.keys(report.discoveredClasses).length : stream.numClasses,
                     } as any;
                 }
                 return stream;
@@ -108,8 +110,13 @@ export const DatasetManagerPage: React.FC = () => {
                 streams: updatedProfile.streams,
             });
 
-            // Automatically validate after scan
-            await handleValidate(profileId);
+            // Automatically validate after scan, using the updated profile from store
+            // Re-fetch the profile to ensure it has the updated streams with tensorShape
+            await new Promise(resolve => setTimeout(resolve, 50)); // Small delay to ensure state is committed
+            const updatedProfileState = useDatasetManagerStore.getState().profiles.find(p => p.id === profileId);
+            if (updatedProfileState) {
+                await handleValidate(profileId);
+            }
         } catch (err) {
             console.error('Scan failed:', err);
         } finally {
@@ -118,21 +125,31 @@ export const DatasetManagerPage: React.FC = () => {
     };
 
     const handleCache = async (profileId: string) => {
+        const profile = useDatasetManagerStore.getState().profiles.find(p => p.id === profileId);
+        if (!profile) return;
+
+        // AoT cache currently targets image data cache. Do not run for pure CSV/time-series datasets.
+        const hasImageInput = profile.streams.some(s => s.role === 'Input' && s.dataType === 'Image');
+        if (!hasImageInput) {
+            console.warn('Build AoT Cache is only applicable to image input streams.');
+            return;
+        }
+
         setIsCaching(true);
         try {
+            const profileJson = JSON.stringify(profile);
             const result = await invoke<{
                 total_cached: number;
                 total_dropped: number;
                 dropped_sample_ids: string[];
                 class_counts: Record<string, number>;
-            }>('cache_dataset', { datasetProfileId: profileId });
+            }>('cache_dataset', { profileJson });
 
-            const profile = useDatasetManagerStore.getState().profiles.find(p => p.id === profileId);
+            // We update the ScanResult with cached values to reflect the successfully cached samples.
+            // This relies on build_image_cache correctly finding the valid images.
             if (profile) {
-                // Build updated stream reports with real per-class counts from cache
                 const updatedStreamReports = (profile.scanResult?.streamReports || []).map(report => {
                     if (report.discoveredClasses) {
-                        // Replace with actual per-class counts from cached data
                         return {
                             ...report,
                             foundCount: result.total_cached,
@@ -154,6 +171,7 @@ export const DatasetManagerPage: React.FC = () => {
                     totalSamples: result.total_cached,
                 });
             }
+            console.log(`AoT cache built: cached=${result.total_cached}, dropped=${result.total_dropped}`);
         } catch (err) {
             console.error('Caching failed:', err);
         } finally {
@@ -168,9 +186,32 @@ export const DatasetManagerPage: React.FC = () => {
         setIsValidating(true);
         try {
             const profileJson = JSON.stringify(profile);
-            const validationReport = await invoke<any>('validate_dataset_profile', {
+            const validationReportRaw = await invoke<any>('validate_dataset_profile', {
                 profileJson,
             });
+
+            // Rust serializes validation report using camelCase via serde(rename_all="camelCase")
+            // But TypeScript expects snake_case for several fields based on the store.ts interface.
+            const rawIssues = Array.isArray(validationReportRaw?.issues) ? validationReportRaw.issues : [];
+            const mappedIssues = rawIssues.map((i: any) => ({
+                severity: i.severity || i.Severity,
+                component: i.component,
+                message: i.message,
+                suggested_fix: i.suggestedFix ?? i.suggested_fix,
+            }));
+
+            const inputShapesObj = validationReportRaw?.inputShapes || validationReportRaw?.input_shapes;
+
+            const validationReport = {
+                is_valid: Boolean(validationReportRaw?.isValid ?? validationReportRaw?.is_valid),
+                issues: mappedIssues,
+                input_shapes: inputShapesObj && typeof inputShapesObj === 'object' ? inputShapesObj : {},
+                output_shape: Array.isArray(validationReportRaw?.outputShape || validationReportRaw?.output_shape)
+                    ? (validationReportRaw.outputShape || validationReportRaw.output_shape)
+                    : undefined,
+                total_valid_samples: Number(validationReportRaw?.totalValidSamples ?? validationReportRaw?.total_valid_samples ?? 0),
+                can_start_evolution: Boolean(validationReportRaw?.canStartEvolution ?? validationReportRaw?.can_start_evolution),
+            };
 
             useDatasetManagerStore.getState().updateProfile(profileId, {
                 validationReport,
@@ -244,7 +285,13 @@ export const DatasetManagerPage: React.FC = () => {
                                                 className={styles.saveBtn}
                                                 style={{ background: 'var(--color-accent-secondary)', padding: '0.5rem 1rem', fontSize: '0.85rem' }}
                                                 onClick={() => handleCache(profile.id)}
-                                                disabled={isScanning || isCaching || !profile.isScanned}
+                                                disabled={
+                                                    isScanning ||
+                                                    isCaching ||
+                                                    !profile.isScanned ||
+                                                    !profile.streams.some(s => s.role === 'Input' && s.dataType === 'Image')
+                                                }
+                                                title={!profile.streams.some(s => s.role === 'Input' && s.dataType === 'Image') ? "AoT Cache is only available for Image datasets" : "Build static dataset cache"}
                                             >
                                                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                                                     <BsLightningCharge /> {isCaching ? 'Caching...' : 'Build AoT Cache'}

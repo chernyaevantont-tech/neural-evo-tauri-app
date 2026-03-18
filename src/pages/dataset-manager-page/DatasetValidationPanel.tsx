@@ -8,8 +8,16 @@ interface Props {
 }
 
 export const DatasetValidationPanel: React.FC<Props> = ({ validationReport }) => {
-    const hasErrors = validationReport.issues.some(i => i.severity === 'ERROR');
-    const hasWarnings = validationReport.issues.some(i => i.severity === 'WARNING');
+    // Be defensive: persisted profiles may contain partial/legacy validation payloads.
+    const issues = validationReport?.issues ?? [];
+    const inputShapes = validationReport?.input_shapes ?? {};
+    const outputShape = validationReport?.output_shape;
+    const totalValidSamples = validationReport?.total_valid_samples ?? 0;
+    const canStartEvolution = validationReport?.can_start_evolution ?? false;
+    const isValid = validationReport?.is_valid ?? false;
+
+    const hasErrors = issues.some(i => i.severity === 'ERROR');
+    const hasWarnings = issues.some(i => i.severity === 'WARNING');
 
     return (
         <div style={{
@@ -21,7 +29,7 @@ export const DatasetValidationPanel: React.FC<Props> = ({ validationReport }) =>
         }}>
             {/* Header with status */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-                {validationReport.is_valid ? (
+                {isValid ? (
                     <>
                         <BsCheckCircle color="var(--color-success)" size={24} />
                         <div>
@@ -80,8 +88,8 @@ export const DatasetValidationPanel: React.FC<Props> = ({ validationReport }) =>
                         Input Shape(s)
                     </h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        {Object.entries(validationReport.input_shapes).length > 0 ? (
-                            Object.entries(validationReport.input_shapes).map(([streamId, shape]) => (
+                        {Object.entries(inputShapes).length > 0 ? (
+                            Object.entries(inputShapes).map(([streamId, shape]) => (
                                 <div key={streamId} style={{
                                     background: 'var(--color-bg-tertiary)',
                                     padding: '0.5rem 0.75rem',
@@ -106,7 +114,7 @@ export const DatasetValidationPanel: React.FC<Props> = ({ validationReport }) =>
                     <h4 style={{ margin: '0 0 0.75rem 0', color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
                         Output Shape
                     </h4>
-                    {validationReport.output_shape ? (
+                    {outputShape ? (
                         <div style={{
                             background: 'var(--color-bg-tertiary)',
                             padding: '0.5rem 0.75rem',
@@ -115,7 +123,7 @@ export const DatasetValidationPanel: React.FC<Props> = ({ validationReport }) =>
                             fontSize: '0.85rem',
                             color: 'var(--color-text-primary)'
                         }}>
-                            [{validationReport.output_shape.join(', ')}]
+                            [{outputShape.join(', ')}]
                         </div>
                     ) : (
                         <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
@@ -128,19 +136,19 @@ export const DatasetValidationPanel: React.FC<Props> = ({ validationReport }) =>
                         color: 'var(--color-text-muted)',
                         fontSize: '0.75rem'
                     }}>
-                        {validationReport.total_valid_samples} valid samples
+                        {totalValidSamples} valid samples
                     </p>
                 </div>
             </div>
 
             {/* Issues List */}
-            {validationReport.issues.length > 0 && (
+            {issues.length > 0 && (
                 <div>
                     <h4 style={{ margin: '0 0 1rem 0', color: 'var(--color-text-secondary)' }}>
-                        Issues ({validationReport.issues.length})
+                        Issues ({issues.length})
                     </h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        {validationReport.issues.map((issue, idx) => (
+                        {issues.map((issue, idx) => (
                             <div key={idx} style={{
                                 background: issue.severity === 'ERROR'
                                     ? 'rgba(231, 76, 60, 0.1)'
@@ -226,7 +234,7 @@ export const DatasetValidationPanel: React.FC<Props> = ({ validationReport }) =>
             )}
 
             {/* No issues message */}
-            {validationReport.issues.length === 0 && (
+            {issues.length === 0 && (
                 <div style={{
                     padding: '1rem',
                     background: 'var(--color-bg-secondary)',
@@ -257,7 +265,7 @@ export const DatasetValidationPanel: React.FC<Props> = ({ validationReport }) =>
                     color: 'var(--color-text-muted)',
                     fontSize: '0.85rem'
                 }}>
-                    {validationReport.can_start_evolution ? (
+                    {canStartEvolution ? (
                         <span style={{ color: 'var(--color-success)' }}>✓ Ready for evolution</span>
                     ) : (
                         <span style={{ color: 'var(--color-danger)' }}>✕ Cannot start evolution yet</span>

@@ -102,42 +102,48 @@ export const EvolutionStudioPage: React.FC = () => {
     const activeProfile = profiles.find(p => p.id === datasetProfileId);
 
     const handleStart = async () => {
-        // First, ensure a dataset profile is selected
-        if (!datasetProfileId) {
-            alert("Please select a Dataset Profile first!");
-            return;
-        }
-
-        const seedJsonList: string[] = [];
-
-        if (selectedSeedIds.length > 0) {
-            // Load selected seeds from library
-            for (const id of selectedSeedIds) {
-                try {
-                    const json = await loadGenomeContent(id);
-                    seedJsonList.push(json);
-                } catch (e) {
-                    console.error("Failed to load seed content for", id, e);
-                }
-            }
-        } else {
-            // Fallback to active sandbox genome
-            const activeGenomes = Array.from(genomes.values());
-            if (activeGenomes.length > 0) {
-                const seedGenome = activeGenomes[0];
-                const seedJson = await serializeGenome(seedGenome.genome);
-                seedJsonList.push(seedJson);
-            }
-            // If no seeds and no active genomes, check if random initialization is enabled
-            else if (!settings.useRandomInitialization) {
-                alert("Please either:\n1. Add seeds from the Library, OR\n2. Create an architecture in the Sandbox, OR\n3. Enable 'Random Initialization' to generate random architectures");
+        try {
+            setBottomTab('log'); // Automatically switch to log tab to show generation info or errors
+            // First, ensure a dataset profile is selected
+            if (!datasetProfileId) {
+                alert("Please select a Dataset Profile first!");
                 return;
             }
-        }
 
-        // Allow evolution with or without seeds if random initialization is enabled
-        if (seedJsonList.length > 0 || settings.useRandomInitialization) {
-            startEvolution(seedJsonList);
+            const seedJsonList: string[] = [];
+
+            if (selectedSeedIds.length > 0) {
+                // Load selected seeds from library
+                for (const id of selectedSeedIds) {
+                    try {
+                        const json = await loadGenomeContent(id);
+                        seedJsonList.push(json);
+                    } catch (e) {
+                        console.error("Failed to load seed content for", id, e);
+                    }
+                }
+            } else {
+                // Fallback to active sandbox genome
+                const activeGenomes = Array.from(genomes.values());
+                if (activeGenomes.length > 0) {
+                    const seedGenome = activeGenomes[0];
+                    const seedJson = await serializeGenome(seedGenome.genome);
+                    seedJsonList.push(seedJson);
+                }
+                // If no seeds and no active genomes, check if random initialization is enabled
+                else if (!settings.useRandomInitialization) {
+                    alert("Please either:\n1. Add seeds from the Library, OR\n2. Create an architecture in the Sandbox, OR\n3. Enable 'Random Initialization' to generate random architectures");
+                    return;
+                }
+            }
+
+            // Allow evolution with or without seeds if random initialization is enabled
+            if (seedJsonList.length > 0 || settings.useRandomInitialization) {
+                startEvolution(seedJsonList);
+            }
+        } catch (err: any) {
+            console.error(err);
+            alert("Error in handleStart: " + (err.message || String(err)));
         }
     };
 

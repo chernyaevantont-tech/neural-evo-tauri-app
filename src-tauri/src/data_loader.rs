@@ -103,38 +103,40 @@ impl DataLoader {
 
         // First pass: Pre-load all CSV datasets to determine temporal window alignment
         let mut temporal_window_count: Option<usize> = None;
-        let mut csv_cache: HashMap<String, CsvDatasetLoader> = HashMap::new();
         
         for stream in &self.profile.streams {
             if let DataLocatorDef::CsvDataset(csv_def) = &stream.locator {
-                let key = csv_def.csv_path.clone();
+                // For temporal window mode, ensure window_size is set
+                let mut adjusted_def = csv_def.clone();
+                if adjusted_def.sample_mode == "temporal_window" && adjusted_def.window_size.is_none() {
+                    adjusted_def.window_size = Some(50); // Default window size
+                    eprintln!(">>> Warning: Temporal window mode without window_size, using default: 50");
+                }
                 
-                // Only load once per unique CSV file
-                if !csv_cache.contains_key(&key) {
-                    // For temporal window mode, ensure window_size is set
-                    let mut adjusted_def = csv_def.clone();
-                    if adjusted_def.sample_mode == "temporal_window" && adjusted_def.window_size.is_none() {
-                        adjusted_def.window_size = Some(50); // Default window size
-                        eprintln!(">>> Warning: Temporal window mode without window_size, using default: 50");
+                // For Target streams, ensure no feature columns are used
+                if stream.role == "Target" {
+                    adjusted_def.feature_columns = vec![];
+                }
+                
+                match CsvDatasetLoader::init(&self.root_path, adjusted_def.clone()) {
+                    Ok(loader) => {
+                        eprintln!(">>> Pre-loaded CSV for stream {}: {} (found {} samples)", stream.id, adjusted_def.csv_path, loader.num_samples);
+                        if stream.role == "Input" && adjusted_def.sample_mode == "temporal_window" {
+                            temporal_window_count = Some(loader.num_samples);
+                            eprintln!(
+                                ">>> Detected temporal_window Input stream: window_size={}, sample count={}",
+                                adjusted_def.window_size.unwrap_or(1),
+                                loader.num_samples
+                            );
+                        }
+                        self.csv_loaders.insert(stream.id.clone(), loader);
                     }
-                    
-                    match CsvDatasetLoader::init(&self.root_path, adjusted_def.clone()) {
-                        Ok(loader) => {
-                            if stream.role == "Input" && adjusted_def.sample_mode == "temporal_window" {
-                                temporal_window_count = Some(loader.num_samples);
-                                eprintln!(
-                                    ">>> Detected temporal_window Input stream: window_size={}, sample count={}",
-                                    adjusted_def.window_size.unwrap_or(1),
-                                    loader.num_samples
-                                );
-                            }
-                            csv_cache.insert(key, loader);
-                        }
-                        Err(e) => {
-                            eprintln!(">>> Error loading CSV {}: {}", csv_def.csv_path, e);
-                        }
+                    Err(e) => {
+                        eprintln!(">>> Error pre-loading CSV for stream {}: {}", stream.id, e);
                     }
                 }
+            } else {
+                eprintln!(">>> Stream {} is NOT a CsvDataset (locator: {:?})", stream.id, stream.locator);
             }
         }
 
@@ -290,10 +292,9 @@ impl DataLoader {
                     println!("    MasterIndex found {} samples", stream_map.len());
                 }
                 DataLocatorDef::CsvDataset(csv_def) => {
-                    println!("    Locator: CsvDataset");
+                    eprintln!("    Locator: CsvDataset for stream {}", stream.id);
                     
-                    let key = csv_def.csv_path.clone();
-                    if let Some(csv_loader) = csv_cache.get(&key).cloned() {
+                    if let Some(csv_loader) = self.csv_loaders.get(&stream.id).cloned() {
                         // For Target streams, ensure no feature columns are used
                         let mut config = csv_def.clone();
                         if stream.role == "Target" {
@@ -309,9 +310,9 @@ impl DataLoader {
                         // - Row mode: sample IDs are "0", "1", "2", ... row_count (or temporal count if aligned)
                         // - Temporal mode: sample IDs are "0", "1", ... num_windows
                         
-                        // If this is a Target stream and a temporal Input stream exists, 
-                        // use the temporal window count for alignment
-                        let sample_count = if stream.role == "Target" && temporal_window_count.is_some() {
+                        // If a temporal Input stream exists, 
+                        // use the temporal window count for alignment for ALL csv streams
+                        let sample_count = if temporal_window_count.is_some() {
                             temporal_window_count.unwrap()
                         } else {
                             csv_loader.num_samples
@@ -330,7 +331,7 @@ impl DataLoader {
                             );
                         }
                         
-                        let actual_sample_count = if stream.role == "Target" && temporal_window_count.is_some() {
+                        let actual_sample_count = if temporal_window_count.is_some() {
                             temporal_window_count.unwrap()
                         } else {
                             csv_loader.num_samples
@@ -345,6 +346,7 @@ impl DataLoader {
                         // Cache the loader for later use
                         self.csv_loaders.insert(stream.id.clone(), csv_loader);
                     } else {
+                        eprintln!(">>> CSV LOAD ERROR: Stream {} not found in pre-loaded csv_loaders! Available keys: {:?}", stream.id, self.csv_loaders.keys().collect::<Vec<_>>());
                         return Err(format!("CSV dataset not pre-loaded: {}", csv_def.csv_path));
                     }
                 }
@@ -388,6 +390,11 @@ impl DataLoader {
         // Generate categorical mappings for FolderMapping or Categorical types
         for (idx, stream) in self.profile.streams.iter().enumerate() {
             if let DataType::Categorical = stream.data_type {
+                // Skip categorical mapping for CsvDataset format - CsvDatasetLoader handles it internally!
+                if matches!(stream.locator, DataLocatorDef::CsvDataset(_)) {
+                    continue;
+                }
+
                 // Build vocabulary
                 let mut classes = HashSet::new();
                 if let Some(map) = self.stream_files.get(&stream.id) {
@@ -527,6 +534,19 @@ impl DataLoader {
         })
     }
 
+    pub fn get_class_label(&self, stream_id: &str, sample_id: &str) -> Option<String> {
+        let locator_val = self.stream_files.get(stream_id)?.get(sample_id)?;
+        if locator_val.starts_with("csv:") {
+            let sample_idx = locator_val[4..].parse::<usize>().ok()?;
+            if let Some(csv_loader) = self.csv_loaders.get(stream_id) {
+                if let Some(label) = csv_loader.get_label(sample_idx) {
+                    return Some(label);
+                }
+            }
+        }
+        Some(locator_val.clone())
+    }
+
     pub fn load_sample(&self, sample_id: &str, device: &WgpuDevice) -> Result<SampleData, String> {
         let mut tensors = HashMap::new();
 
@@ -641,34 +661,64 @@ impl DataLoader {
                     tensors.insert(idx, DynamicTensor::Dim4(tensor_4d));
                 }
                 DataType::Vector => {
-                    let vals: Vec<f32> = locator_val
-                        .split(',')
-                        .filter_map(|s| s.trim().parse::<f32>().ok())
-                        .collect();
-
-                    if !vals.is_empty() {
-                        let tensor = Tensor::<Backend, 1>::from_floats(vals.as_slice(), device);
-                        let tensor_2d = tensor.reshape([1, vals.len()]);
-                        tensors.insert(idx, DynamicTensor::Dim2(tensor_2d));
+                    if locator_val.starts_with("csv:") {
+                        let sample_idx = locator_val[4..].parse::<usize>().unwrap_or(0);
+                        if let Some(csv_loader) = self.csv_loaders.get(&stream.id) {
+                            let tensor = csv_loader.load_sample(sample_idx, device).map(|(t, _)| t)?;
+                            tensors.insert(idx, tensor);
+                        } else {
+                            return Err(format!("No CSV loader found for stream {}", stream.id));
+                        }
                     } else {
-                        return Err(format!(
-                            "Failed to parse vector (CSV) values for stream {} from string: '{}'",
-                            stream.id, locator_val
-                        ));
+                        let vals: Vec<f32> = locator_val
+                            .split(',')
+                            .filter_map(|s| s.trim().parse::<f32>().ok())
+                            .collect();
+
+                        if !vals.is_empty() {
+                            let tensor = Tensor::<Backend, 1>::from_floats(vals.as_slice(), device);
+                            let tensor_2d = tensor.reshape([1, vals.len()]);
+                            tensors.insert(idx, DynamicTensor::Dim2(tensor_2d));
+                        } else {
+                            return Err(format!(
+                                "Failed to parse vector (CSV) values for stream {} from string: '{}'",
+                                stream.id, locator_val
+                            ));
+                        }
                     }
                 }
-                DataType::Categorical => match locator_val.parse::<f32>() {
-                    Ok(val) => {
-                        let tensor = Tensor::<Backend, 2>::from_data([[val]], device);
-                        tensors.insert(idx, DynamicTensor::Dim2(tensor));
+                DataType::Categorical => {
+                    if locator_val.starts_with("csv:") {
+                        let sample_idx = locator_val[4..].parse::<usize>().unwrap_or(0);
+                        if let Some(csv_loader) = self.csv_loaders.get(&stream.id) {
+                            match csv_loader.load_sample(sample_idx, device) {
+                                Ok((_, label_str)) => {
+                                    let class_idx = csv_loader.discovered_classes.iter()
+                                        .position(|c| c == &label_str)
+                                        .unwrap_or(0) as f32;
+                                    let tensor = Tensor::<Backend, 2>::from_data([[class_idx]], device);
+                                    tensors.insert(idx, DynamicTensor::Dim2(tensor));
+                                }
+                                Err(e) => return Err(format!("Failed to load CSV label {}: {}", sample_idx, e)),
+                            }
+                        } else {
+                            return Err(format!("No CSV loader found for stream {}", stream.id));
+                        }
+                    } else {
+                        match locator_val.parse::<f32>() {
+                            Ok(val) => {
+                                let tensor = Tensor::<Backend, 2>::from_data([[val]], device);
+                                tensors.insert(idx, DynamicTensor::Dim2(tensor));
+                            }
+                            Err(e) => {
+                                return Err(format!(
+                                    "Failed to parse categorical float for stream {} from string: '{}': {:?}",
+                                    stream.id, locator_val, e
+                                ));
+                            }
+                        }
                     }
-                    Err(e) => {
-                        return Err(format!(
-                            "Failed to parse categorical float for stream {} from string: '{}': {:?}",
-                            stream.id, locator_val, e
-                        ));
-                    }
-                },
+                }
                 DataType::Text => {
                     // Not fully implemented yet
                 }

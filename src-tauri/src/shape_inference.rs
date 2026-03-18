@@ -3,7 +3,7 @@
 /// Provides unified shape calculation for datasets across all stream types.
 /// This is the single source of truth for determining input/output dimensions.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::csv_loader::CsvDatasetLoader;
@@ -45,10 +45,10 @@ impl ShapeInference {
 
         match &stream.locator {
             DataLocatorDef::CsvDataset(csv_def) => {
-                ShapeInference::infer_csv_input_shape(csv_def, root_path, &mut warnings)
+                ShapeInference::infer_csv_input_shape(csv_def, &stream.data_type, root_path, &mut warnings)
             }
 
-            DataLocatorDef::GlobPattern { pattern } => {
+            DataLocatorDef::GlobPattern { pattern: _ } => {
                 // For images, return shape from tensor_shape
                 if stream.data_type == DataType::Image {
                     if stream.tensor_shape.is_empty() {
@@ -87,14 +87,45 @@ impl ShapeInference {
         }
     }
 
-    /// Infer CSV input shape based on sample mode and feature columns
+    /// Infer CSV input shape based on data type (which determines sample mode)
+    /// 
+    /// IMPORTANT: This function resolves the Phase 3 design issue where users had to 
+    /// configure both DataType AND SampleMode separately. Now:
+    /// 
+    /// **DataType is the source of truth**, not SampleMode:
+    /// - If you set DataType = TemporalSequence → we FORCE temporal_window mode
+    /// - If you set DataType = Vector → we FORCE row mode
+    /// 
+    /// The csv_def.sample_mode field is now ignored for shape calculation.
+    /// Users only need to set DataType, and the shape inference automatically 
+    /// uses the correct sampling strategy.
+    /// 
+    /// # Example
+    /// ```
+    /// User sets:  DataType="TemporalSequence", window_size=50, features=12
+    /// Result:     input_shape = [50, 12]  (temporal window forced automatically)
+    /// 
+    /// User sets:  DataType="Vector", features=12
+    /// Result:     input_shape = [12]  (row mode forced automatically)
+    /// ```
     fn infer_csv_input_shape(
         csv_def: &CsvDatasetDef,
-        root_path: &Path,
+        data_type: &DataType,
+        _root_path: &Path,
         warnings: &mut Vec<String>,
     ) -> Result<(Vec<usize>, String, Vec<String>), String> {
+        // Determine effective sample mode from data_type
+        // This eliminates the confusing dual-configuration (dataType + sampleMode)
+        let effective_mode = match data_type {
+            DataType::TemporalSequence => "temporal_window",
+            DataType::Vector => "row",
+            DataType::Categorical => "row", // Target should not reach here
+            DataType::Image => "row",         // Target should not reach here
+            DataType::Text => "row",          // Default to row
+        };
+
         // For temporal window mode: [window_size, num_features]
-        if csv_def.sample_mode == "temporal_window" {
+        if effective_mode == "temporal_window" {
             let window_size = csv_def
                 .window_size
                 .ok_or("Temporal window mode requires window_size")?;
@@ -112,7 +143,7 @@ impl ShapeInference {
         }
 
         // For row mode: [num_features]
-        if csv_def.sample_mode == "row" {
+        if effective_mode == "row" {
             let num_features = csv_def.feature_columns.len();
 
             if num_features == 0 {
@@ -127,7 +158,11 @@ impl ShapeInference {
             ));
         }
 
-        Err(format!("Unknown CSV sample_mode: {}", csv_def.sample_mode))
+        // Should not reach here if data_type is properly set
+        Err(format!(
+            "Unexpected effective mode: {} for data_type: {:?}",
+            effective_mode, data_type
+        ))
     }
 
     /// Infer output shape for a Target stream
@@ -210,13 +245,13 @@ impl ShapeInference {
                 return Err("No CSV loaders found to validate alignment".to_string());
             }
 
-            // Return sample IDs as "csv_row_0", "csv_row_1", etc.
-            return Ok((0..min_count).map(|i| format!("csv_row_{}", i)).collect());
+            // Return sample IDs as "0", "1", etc.
+            return Ok((0..min_count).map(|i| i.to_string()).collect());
         }
 
         // Temporal window exists: align all other streams to this count
         let temporal_count = temporal_window_count.unwrap();
-        Ok((0..temporal_count).map(|i| format!("csv_row_{}", i)).collect())
+        Ok((0..temporal_count).map(|i| i.to_string()).collect())
     }
 
     /// Check if two streams have compatible sample counts
@@ -281,7 +316,7 @@ mod tests {
 
         let mut warnings = vec![];
         let (shape, data_type, _) =
-            ShapeInference::infer_csv_input_shape(&csv_def, Path::new("."), &mut warnings)
+            ShapeInference::infer_csv_input_shape(&csv_def, &DataType::TemporalSequence, Path::new("."), &mut warnings)
                 .expect("Should infer shape");
 
         assert_eq!(shape, vec![50, 12]);
@@ -311,7 +346,7 @@ mod tests {
 
         let mut warnings = vec![];
         let (shape, data_type, _) =
-            ShapeInference::infer_csv_input_shape(&csv_def, Path::new("."), &mut warnings)
+            ShapeInference::infer_csv_input_shape(&csv_def, &DataType::Vector, Path::new("."), &mut warnings)
                 .expect("Should infer shape");
 
         assert_eq!(shape, vec![4]);
@@ -326,6 +361,7 @@ mod tests {
             role: "Target".to_string(),
             data_type: DataType::Categorical,
             tensor_shape: vec![],
+            num_classes: None,
             locator: DataLocatorDef::CsvDataset(CsvDatasetDef {
                 csv_path: "test.csv".to_string(),
                 has_headers: true,
@@ -355,6 +391,7 @@ mod tests {
             role: "Target".to_string(),
             data_type: DataType::Categorical,
             tensor_shape: vec![],
+            num_classes: None,
             locator: DataLocatorDef::CsvDataset(CsvDatasetDef {
                 csv_path: "test.csv".to_string(),
                 has_headers: true,

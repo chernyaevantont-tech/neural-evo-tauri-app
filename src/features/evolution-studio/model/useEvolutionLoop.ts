@@ -219,6 +219,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                         const nodes = randomGenome.getAllNodes();
 
                         if (!Genome.isGenomeFeasible(nodes)) {
+                            addLog(`isGenomeFeasible returned false.`, "warn");
                             continue;
                         }
 
@@ -238,6 +239,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                         });
                     } catch (e) {
                         console.warn(`[initPopulation] Random generation failed. Attempt ${randomAttempts}/${numRandom * 5}`, e);
+                        addLog(`Exception: ${e}`, "error");
                         continue;
                     }
                 }
@@ -756,97 +758,103 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
     }, [datasetProfileId, generation, population, settings, addLog, stopEvolution]);
 
     const startEvolution = useCallback((seedGenomes: string[]) => {
-        if (!datasetProfileId) {
-            addLog("Cannot start: No dataset selected!", "error");
-            return;
-        }
-
-        if (seedGenomes.length === 0 && !settings.useRandomInitialization) {
-            addLog("Cannot start: No seeds provided and Random Initialization disabled!", "error");
-            return;
-        }
-
-        // === PHASE 3: Validate dataset profile before evolution ===
-        const profiles = useDatasetManagerStore.getState().profiles;
-        const profile = profiles.find(p => p.id === datasetProfileId);
-        
-        if (profile) {
-            // Check if dataset has been scanned and validated
-            if (!profile.isScanned) {
-                addLog(
-                    "Cannot start: Dataset has not been scanned. " +
-                    "Go to Dataset Manager, select the dataset, and click 'Scan Dataset'.",
-                    "error"
-                );
+        try {
+            if (!datasetProfileId) {
+                addLog("Cannot start: No dataset selected!", "error");
                 return;
             }
 
-            // Check if dataset validation passed
-            if (!profile.isValidForEvolution) {
-                const issues = profile.validationReport?.issues || [];
-                const issueMessages = issues
-                    .map(issue => `${issue.component}: ${issue.message}`)
-                    .join('; ');
-                
-                addLog(
-                    `Cannot start: Dataset validation failed. Issues: ${issueMessages || 'Unknown validation error'}. ` +
-                    `Please fix issues in Dataset Manager before starting evolution.`,
-                    "error"
-                );
+            if (seedGenomes.length === 0 && !settings.useRandomInitialization) {
+                addLog("Cannot start: No seeds provided and Random Initialization disabled!", "error");
                 return;
             }
 
-            // Log dataset validation success
-            if (profile.validationReport) {
-                const inputShapes = Object.entries(profile.validationReport.input_shapes)
-                    .map(([streamId, shape]) => `${streamId}: [${shape.join(',')}]`)
-                    .join('; ');
-                const outputShape = profile.validationReport.output_shape || [];
-                addLog(
-                    `✓ Dataset validated. Input shapes: ${inputShapes}. Output shape: [${outputShape.join(',')}]`,
-                    "success"
-                );
-            }
-        }
-
-        // Validate dataset percentage vs splits
-        if (profile) {
-            const totalSamples = profile.totalSamples || profile.scanResult?.totalMatched || 0;
-            const usedSamples = Math.floor((totalSamples * (settings.datasetPercent || 100)) / 100);
-            const { train, val, test } = profile.split;
-            const splitSum = train + val + test;
-
-            if (splitSum > 0 && usedSamples > 0) {
-                const trainCount = Math.floor((usedSamples * train) / splitSum);
-                const valCount = Math.floor((usedSamples * val) / splitSum);
-                const testCount = Math.floor((usedSamples * test) / splitSum);
-
-                const errors: string[] = [];
-                if (train > 0 && trainCount < 1) errors.push(`Train (${train}%): 0 samples`);
-                if (val > 0 && valCount < 1) errors.push(`Validation (${val}%): 0 samples`);
-                if (test > 0 && testCount < 1) errors.push(`Test (${test}%): 0 samples`);
-
-                if (errors.length > 0) {
+            // === PHASE 3: Validate dataset profile before evolution ===
+            const profiles = useDatasetManagerStore.getState().profiles;
+            const profile = profiles.find(p => p.id === datasetProfileId);
+            
+            if (profile) {
+                // Check if dataset has been scanned and validated
+                if (!profile.isScanned) {
                     addLog(
-                        `Cannot start: Dataset percentage ${settings.datasetPercent}% (${usedSamples} samples) ` +
-                        `is too low for the configured splits. ${errors.join('; ')}. ` +
-                        `Increase Dataset Usage % or adjust splits in Dataset Manager.`,
+                        "Cannot start: Dataset has not been scanned. " +
+                        "Go to Dataset Manager, select the dataset, and click 'Scan Dataset'.",
                         "error"
                     );
                     return;
                 }
 
-                addLog(
-                    `Dataset: ${usedSamples} samples → Train: ${trainCount}, Val: ${valCount}, Test: ${testCount}`,
-                    "info"
-                );
+                // Check if dataset validation passed
+                if (!profile.isValidForEvolution) {
+                    const issues = profile.validationReport?.issues || [];
+                    const issueMessages = issues
+                        .map(issue => `${issue.component}: ${issue.message}`)
+                        .join('; ');
+                    
+                    addLog(
+                        `Cannot start: Dataset validation failed. Issues: ${issueMessages || 'Unknown validation error'}. ` +
+                        `Please fix issues in Dataset Manager before starting evolution.`,
+                        "error"
+                    );
+                    return;
+                }
+
+                // Log dataset validation success
+                if (profile.validationReport) {
+                    const inputShapesObj = profile.validationReport.input_shapes || {};
+                    const inputShapes = Object.entries(inputShapesObj)
+                        .map(([streamId, shape]) => `${streamId}: [${(shape || []).join(',')}]`)
+                        .join('; ');
+                    const outputShape = profile.validationReport.output_shape || [];
+                    addLog(
+                        `✓ Dataset validated. Input shapes: ${inputShapes}. Output shape: [${outputShape.join(',')}]`,
+                        "success"
+                    );
+                }
             }
+
+            // Validate dataset percentage vs splits
+            if (profile) {
+                const totalSamples = profile.totalSamples || profile.scanResult?.totalMatched || 0;
+                const usedSamples = Math.floor((totalSamples * (settings.datasetPercent || 100)) / 100);
+                const { train, val, test } = profile.split;
+                const splitSum = train + val + test;
+
+                if (splitSum > 0 && usedSamples > 0) {
+                    const trainCount = Math.floor((usedSamples * train) / splitSum);
+                    const valCount = Math.floor((usedSamples * val) / splitSum);
+                    const testCount = Math.floor((usedSamples * test) / splitSum);
+
+                    const errors: string[] = [];
+                    if (train > 0 && trainCount < 1) errors.push(`Train (${train}%): 0 samples`);
+                    if (val > 0 && valCount < 1) errors.push(`Validation (${val}%): 0 samples`);
+                    if (test > 0 && testCount < 1) errors.push(`Test (${test}%): 0 samples`);
+
+                    if (errors.length > 0) {
+                        addLog(
+                            `Cannot start: Dataset percentage ${settings.datasetPercent}% (${usedSamples} samples) ` +
+                            `is too low for the configured splits. ${errors.join('; ')}. ` +
+                            `Increase Dataset Usage % or adjust splits in Dataset Manager.`,
+                            "error"
+                        );
+                        return;
+                    }
+
+                    addLog(
+                        `Dataset: ${usedSamples} samples → Train: ${trainCount}, Val: ${valCount}, Test: ${testCount}`,
+                        "info"
+                    );
+                }
+            }
+
+            setIsRunning(true);
+            isRunningRef.current = true;
+
+            initPopulation(seedGenomes);
+        } catch (err: any) {
+            console.error("startEvolution error:", err);
+            addLog(`Error during startEvolution: ${err.message || String(err)}`, "error");
         }
-
-        setIsRunning(true);
-        isRunningRef.current = true;
-
-        initPopulation(seedGenomes);
     }, [datasetProfileId, addLog, initPopulation, settings]);
 
     useEffect(() => {

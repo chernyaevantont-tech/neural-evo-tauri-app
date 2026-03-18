@@ -289,11 +289,12 @@ async fn test_train_on_image_folder(genome_str: String) -> Result<(), String> {
         .map(|b| vec![b])
         .unwrap_or_default();
     let test_batches = create_batch(test_data).map(|b| vec![b]).unwrap_or_default();
-
+    // Helper to get batch size from first input tensor
     let get_batch_size = |batch: Option<&DynamicBatch<Backend>>| -> usize {
         batch
             .map(|b| match &b.inputs[0] {
                 DynamicTensor::Dim2(t) => t.dims()[0],
+                DynamicTensor::Dim3(t) => t.dims()[0],
                 DynamicTensor::Dim4(t) => t.dims()[0],
             })
             .unwrap_or(0)
@@ -434,9 +435,9 @@ async fn evaluate_population(
         let stream_id = &profile.streams[s_idx].id;
         let mut groups: HashMap<String, Vec<String>> = HashMap::new();
 
-        if let Some(map) = loader.stream_files.get(stream_id) {
+        if loader.stream_files.contains_key(stream_id) {
             for id in &valid_ids {
-                let label = map.get(id).cloned().unwrap_or_else(|| "unknown".to_string());
+                let label = loader.get_class_label(stream_id, id).unwrap_or_else(|| "unknown".to_string());
                 groups.entry(label).or_default().push(id.clone());
             }
         }
@@ -528,6 +529,9 @@ async fn evaluate_population(
             crate::dtos::DataType::Vector => {
                 let dim = stream.tensor_shape.get(0).cloned().unwrap_or(1);
                 input_overrides.push(vec![dim]);
+            }
+            crate::dtos::DataType::TemporalSequence => {
+                input_overrides.push(stream.tensor_shape.clone());
             }
             _ => input_overrides.push(vec![1]),
         }
@@ -917,6 +921,7 @@ pub struct StreamLocatorConfig {
     pub target_column: Option<String>,
     pub window_size: Option<usize>,
     pub stream_role: Option<String>, // "Input" | "Target" | "Ignore"
+    pub data_type: Option<String>,   // "Image" | "Vector" | "Categorical" | "Text" | "TemporalSequence"
 }
 
 #[derive(serde::Serialize)]
@@ -1037,7 +1042,7 @@ async fn scan_dataset(
                 Ok(_loader) => {
                     // For CSV, use row indices as SampleIDs
                     for i in 0.._loader.num_samples {
-                        let sample_id = format!("csv_row_{}", i);
+                        let sample_id = i.to_string();
                         anchor_ids.insert(sample_id, root.to_path_buf());
                     }
                     anchor_from_csv = true;
@@ -1197,14 +1202,25 @@ async fn scan_dataset(
                 let feature_columns = cfg.feature_columns.clone().unwrap_or_default();
                 let target_column = cfg.target_column.clone().unwrap_or_else(|| "label".to_string());
                 let stream_role = cfg.stream_role.as_deref().unwrap_or("Input");
+                let data_type = cfg.data_type.as_deref().unwrap_or("Vector");
                 
                 let mut class_counts: HashMap<String, usize> = HashMap::new();
                 let mut csv_samples = 0;
-                
+
                 // Save feature column count for logging
                 let feature_col_count = feature_columns.len();
-                let window_size = cfg.window_size.unwrap_or(1);
                 let sample_mode = cfg.sample_mode.as_deref().unwrap_or("row");
+                let effective_sample_mode = if stream_role == "Input" && data_type == "TemporalSequence" {
+                    "temporal_window"
+                } else {
+                    sample_mode
+                };
+                // Never default temporal windows to 1; use 50 as safe fallback to match UI default.
+                let window_size = if effective_sample_mode == "temporal_window" {
+                    cfg.window_size.unwrap_or(50)
+                } else {
+                    cfg.window_size.unwrap_or(1)
+                };
                 
                 // Build CSV config based on stream role
                 // Input streams: use feature columns + sample_mode (row or temporal_window)
@@ -1229,10 +1245,10 @@ async fn scan_dataset(
                     crate::dtos::CsvDatasetDef {
                         csv_path: csv_path.to_string(),
                         has_headers,
-                        sample_mode: sample_mode.to_string(),
+                        sample_mode: effective_sample_mode.to_string(),
                         feature_columns,
                         target_column: String::new(), // Empty for input streams
-                        window_size: if sample_mode == "temporal_window" { Some(cfg.window_size.unwrap_or(50)) } else { None },
+                        window_size: if effective_sample_mode == "temporal_window" { Some(window_size) } else { None },
                         window_stride: None,
                         preprocessing: crate::dtos::CsvPreprocessingConfig {
                             normalization: "none".to_string(),
@@ -1261,8 +1277,11 @@ async fn scan_dataset(
                 match crate::csv_loader::CsvDatasetLoader::init(root, csv_config) {
                     Ok(loader) => {
                         csv_samples = loader.num_samples;
-                        for class in &loader.discovered_classes {
-                            *class_counts.entry(class.clone()).or_insert(0) += 1;
+                        // Only Target streams should report classes.
+                        if stream_role == "Target" {
+                            for class in &loader.discovered_classes {
+                                *class_counts.entry(class.clone()).or_insert(0) += 1;
+                            }
                         }
                         
                         eprintln!(
@@ -1271,7 +1290,7 @@ async fn scan_dataset(
                             if stream_role == "Target" {
                                 format!("Target, classes={}", class_counts.len())
                             } else {
-                                format!("Input ({}), shape=[{}, {}]", sample_mode, window_size, feature_col_count)
+                                format!("Input ({}, data_type={}), shape=[{}, {}]", effective_sample_mode, data_type, window_size, feature_col_count)
                             },
                             csv_samples,
                             if class_counts.is_empty() {
@@ -1291,7 +1310,7 @@ async fn scan_dataset(
                 
                 // Calculate input_shape for Input streams
                 let input_shape = if stream_role == "Input" {
-                    if sample_mode == "temporal_window" {
+                    if effective_sample_mode == "temporal_window" {
                         Some(vec![window_size, feature_col_count])
                     } else {
                         Some(vec![feature_col_count])
@@ -1303,11 +1322,21 @@ async fn scan_dataset(
                 // Infer data type based on stream role
                 let data_type_str = if stream_role == "Target" {
                     "Categorical"
-                } else if sample_mode == "temporal_window" {
+                } else if effective_sample_mode == "temporal_window" || data_type == "TemporalSequence" {
                     "TemporalSequence"
                 } else {
                     "Vector"
                 };
+
+                // Truncate valid_ids to match csv_samples if this is a temporal stream
+                // since temporal windows produce fewer samples than rows.
+                valid_ids.retain(|id| {
+                    if let Ok(idx) = id.parse::<usize>() {
+                        idx < csv_samples
+                    } else {
+                        false // Must be numeric to match CSV index
+                    }
+                });
                 
                 reports.push(StreamScanReport {
                     stream_id: cfg.stream_id.clone(),
@@ -1352,24 +1381,11 @@ async fn scan_dataset(
 #[tauri::command]
 async fn cache_dataset(
     app_handle: tauri::AppHandle,
-    dataset_profile_id: String,
+    profile_json: String,
 ) -> Result<crate::data_loader::CacheResult, String> {
     use tauri::Manager;
-    let profiles_json = load_dataset_profiles().await?;
-    let root: crate::dtos::DatasetProfilesRoot = serde_json::from_str(&profiles_json)
-        .map_err(|e| format!("Failed to parse dataset_profiles.json: {}", e))?;
-
-    let profile = root
-        .state
-        .profiles
-        .into_iter()
-        .find(|p| p.id == dataset_profile_id)
-        .ok_or_else(|| {
-            format!(
-                "Dataset profile '{}' not found in profiles JSON",
-                dataset_profile_id
-            )
-        })?;
+    let profile: crate::dtos::DatasetProfile = serde_json::from_str(&profile_json)
+        .map_err(|e| format!("Failed to parse profile JSON: {}", e))?;
 
     let app_data_dir = app_handle.path().app_data_dir().ok();
     let loader = crate::data_loader::DataLoader::new(profile, app_data_dir)?;
@@ -1392,51 +1408,31 @@ async fn validate_dataset_profile(profile_json: String) -> Result<dtos::DatasetV
     let mut issues: Vec<dtos::ValidationIssue> = vec![];
     let mut input_shapes: HashMap<String, Vec<usize>> = HashMap::new();
     let mut output_shape: Option<Vec<usize>> = None;
-    let mut total_valid_samples: usize = 0;
+    let total_valid_samples: usize = 0;
 
-    // Check all Input streams have valid shapes
+    // Collect input shapes from profile streams
+    // After "Scan & Validate", tensor_shape is populated by the scan operation
     let input_streams: Vec<_> = profile
         .streams
         .iter()
         .filter(|s| s.role == "Input")
         .collect();
 
+    // Extract shapes from Input streams (populated by scan)
     for stream in &input_streams {
-        match shape_inference::ShapeInference::infer_input_shape(stream, Path::new(".")) {
-            Ok((shape, _, warnings)) => {
-                if shape.is_empty() {
-                    issues.push(dtos::ValidationIssue {
-                        severity: dtos::ValidationSeverity::Error,
-                        component: "InputShape".to_string(),
-                        message: format!(
-                            "Input stream '{}' has empty shape. Check feature columns.",
-                            stream.alias
-                        ),
-                        suggested_fix: Some(
-                            "Ensure CSV stream specifies feature_columns or image tensor_shape"
-                                .to_string(),
-                        ),
-                    });
-                } else {
-                    input_shapes.insert(stream.id.clone(), shape);
-                }
-                for warning in warnings {
-                    issues.push(dtos::ValidationIssue {
-                        severity: dtos::ValidationSeverity::Warning,
-                        component: "InputShape".to_string(),
-                        message: warning,
-                        suggested_fix: None,
-                    });
-                }
-            }
-            Err(e) => {
-                issues.push(dtos::ValidationIssue {
-                    severity: dtos::ValidationSeverity::Error,
-                    component: "InputShape".to_string(),
-                    message: format!("Failed to infer shape for input stream '{}': {}", stream.alias, e),
-                    suggested_fix: None,
-                });
-            }
+        if !stream.tensor_shape.is_empty() {
+            input_shapes.insert(stream.id.clone(), stream.tensor_shape.clone());
+        } else {
+            // Shape was not populated, likely because scan hasn't run yet
+            issues.push(dtos::ValidationIssue {
+                severity: dtos::ValidationSeverity::Error,
+                component: "InputShape".to_string(),
+                message: format!(
+                    "Input stream '{}' has no inferred shape. Run 'Scan & Validate' first.",
+                    stream.alias
+                ),
+                suggested_fix: Some("Click 'Scan & Validate' to infer shapes from your data".to_string()),
+            });
         }
     }
 
@@ -1477,10 +1473,16 @@ async fn validate_dataset_profile(profile_json: String) -> Result<dtos::DatasetV
                 }
             }
 
-            // For now, set output_shape to a placeholder (will be updated by scan)
             if idx == 0 {
-                // This will be properly set after scan with num_classes
-                output_shape = Some(vec![0]); // Placeholder
+                if let Some(num_c) = stream.num_classes {
+                    if let Ok(shape) = crate::shape_inference::ShapeInference::infer_output_shape(stream, num_c) {
+                        output_shape = Some(shape);
+                    } else {
+                        output_shape = Some(vec![num_c]);
+                    }
+                } else {
+                    output_shape = Some(vec![0]); // Placeholder
+                }
             }
         }
     }
@@ -1887,6 +1889,7 @@ pub fn run() {
             stop_evolution,
             scan_dataset,
             cache_dataset,
+            validate_dataset_profile,
             list_library_genomes,
             save_to_library,
             delete_from_library,

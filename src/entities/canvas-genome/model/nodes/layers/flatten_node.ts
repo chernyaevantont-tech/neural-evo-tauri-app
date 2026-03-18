@@ -3,11 +3,12 @@ import { BaseNode, ResourceCriteria } from "../base_node";
 export class FlattenNode extends BaseNode {
     constructor() {
         super();
-        this.inputShape = new Array<number>(3);
+        this.inputShape = [];
     }
 
     protected CalculateOutputShape(): void {
-        this.outputShape = [this.inputShape[0] * this.inputShape[1] * this.inputShape[2]]
+        const total = this.inputShape.reduce((a, b) => a * b, 1);
+        this.outputShape = [total];
     }
     GetInfo(): string {
         return JSON.stringify({
@@ -21,7 +22,7 @@ export class FlattenNode extends BaseNode {
     protected Mutate(mutation_options: Map<string, number>): void { }
 
     public GetExpectedInputDimensions(): number | "any" {
-        return 3;
+        return "any";
     }
 
     public GetOutputDimensions(): number | "any" {
