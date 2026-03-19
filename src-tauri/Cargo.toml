@@ -28,6 +28,7 @@ burn-dataset = { version = "0.20.1", features = ["vision"] }
 image = "0.25.9"
 reqwest = "0.13.2"
 futures = "0.3.32"
+tokio = { version = "1.43", features = ["full"] }
 tokio-stream = "0.1.18"
 rand = "0.10.0"
 glob = "0.3.3"

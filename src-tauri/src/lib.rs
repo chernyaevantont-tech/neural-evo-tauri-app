@@ -1,3 +1,4 @@
+#![recursion_limit = "512"]
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -7,7 +8,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use rfd::AsyncFileDialog;
 
+use tokio;
 use burn::backend::{Autodiff, Wgpu};
+use burn::backend::wgpu::WgpuDevice;
+type Backend = Autodiff<Wgpu>;
 use burn::tensor::Distribution;
 use burn::tensor::Tensor;
 use entities::{DynamicBatch, DynamicTensor, GraphModel, train_simple};
@@ -90,7 +94,7 @@ async fn pick_folder() -> Result<String, String> {
 #[tauri::command]
 async fn test_neural_net_training(genome_str: String) -> Result<(), String> {
     type Backend = Autodiff<Wgpu>;
-    let device = burn::backend::wgpu::WgpuDevice::DiscreteGpu(0);
+    let device = WgpuDevice::default();
 
     println!("Building model from genome...");
     let model = GraphModel::<Backend>::build(&genome_str, &device, None, None);
@@ -170,7 +174,7 @@ async fn test_train_on_image_folder(genome_str: String) -> Result<(), String> {
     };
 
     type Backend = Autodiff<Wgpu>;
-    let device = burn::backend::wgpu::WgpuDevice::DiscreteGpu(0);
+    let device = WgpuDevice::default();
 
     println!("Building model from genome...");
     let model = GraphModel::<Backend>::build(&genome_str, &device, None, None);
@@ -334,7 +338,7 @@ async fn evaluate_population(
     genomes: Vec<String>,
     dataset_profile: String,
     batch_size: usize,
-    eval_epochs: usize,
+    per_genome_epochs: Vec<usize>,
     dataset_percent: usize,
     train_split: usize,
     val_split: usize,
@@ -351,7 +355,8 @@ async fn evaluate_population(
     let session_snapshot = EVOLUTION_SESSION.load(Ordering::SeqCst);
 
     type Backend = Autodiff<Wgpu>;
-    let device = burn::backend::wgpu::WgpuDevice::DiscreteGpu(0);
+    let device = WgpuDevice::default();
+    println!(">>> Wgpu device initialized (default)");
     let mut results = Vec::new();
 
     // 1. Read dataset_profiles.json to find the requested profile
@@ -387,9 +392,16 @@ async fn evaluate_population(
     use tauri::{Emitter, Manager};
     let app_data_dir = app_handle.path().app_data_dir().ok();
 
+    println!(">>> Starting DataLoader creation...");
     let loader = match crate::data_loader::DataLoader::new(profile.clone(), app_data_dir) {
-        Ok(l) => l,
-        Err(e) => return Err(e),
+        Ok(l) => {
+            println!(">>> DataLoader created successfully!");
+            l
+        },
+        Err(e) => {
+            println!(">>> DataLoader creation FAILED: {}", e);
+            return Err(e);
+        },
     };
 
     println!(
@@ -398,7 +410,7 @@ async fn evaluate_population(
         profile.name,
         source_path_str,
         batch_size,
-        eval_epochs
+        per_genome_epochs.iter().max().unwrap_or(&0)
     );
 
     let mut valid_ids = loader.valid_sample_ids.clone();
@@ -409,9 +421,11 @@ async fn evaluate_population(
         ));
     }
 
-    use rand::seq::SliceRandom;
-    let mut rng = rand::rng();
-    valid_ids.shuffle(&mut rng);
+    {
+        use rand::seq::SliceRandom;
+        let mut rng = rand::rng();
+        valid_ids.shuffle(&mut rng);
+    }
 
     // Apply pct
     let pct = dataset_percent.clamp(1, 100);
@@ -443,7 +457,10 @@ async fn evaluate_population(
         }
 
         for (label, mut members) in groups {
-            members.shuffle(&mut rng);
+            {
+                use rand::seq::SliceRandom;
+                members.shuffle(&mut rand::rng());
+            }
             let n = members.len();
             let t_count = ((n as f32) * train_ratio).round() as usize;
             let v_count = ((n as f32) * val_ratio).round() as usize;
@@ -459,9 +476,13 @@ async fn evaluate_population(
         }
 
         // Final shuffle of the split sets
-        train_ids.shuffle(&mut rng);
-        val_ids.shuffle(&mut rng);
-        test_ids.shuffle(&mut rng);
+        {
+            use rand::seq::SliceRandom;
+            let mut local_rng = rand::rng();
+            train_ids.shuffle(&mut local_rng);
+            val_ids.shuffle(&mut local_rng);
+            test_ids.shuffle(&mut local_rng);
+        }
     } else {
         // Fallback to random split
         let train_count = ((valid_ids.len() as f32) * train_ratio).round() as usize;
@@ -659,10 +680,11 @@ async fn evaluate_population(
         // Compute a cache key from genome content + all training params
         let cache_key = {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            let epochs = *per_genome_epochs.get(i).unwrap_or(&0) as usize;
             genome_str.hash(&mut hasher);
             dataset_profile.hash(&mut hasher);
             batch_size.hash(&mut hasher);
-            eval_epochs.hash(&mut hasher);
+            epochs.hash(&mut hasher);
             dataset_percent.hash(&mut hasher);
             train_split.hash(&mut hasher);
             val_split.hash(&mut hasher);
@@ -748,17 +770,31 @@ async fn evaluate_population(
                         );
                     }
 
-                    // Train on training set
-                    crate::entities::run_eval_pass(
-                        &app_handle,
-                        &mut model,
-                        &train_batches,
-                        eval_epochs,
-                        0.001,
-                        is_classification,
-                        &EVOLUTION_SESSION,
-                        session_snapshot,
-                    );
+                    // Get individual epochs for this genome
+                    let epochs = *per_genome_epochs.get(i).unwrap_or(&0) as usize;
+
+                    if epochs > 0 {
+                        // Train on training set
+                        let app_handle_clone = app_handle.clone();
+                        let train_batches_local = train_batches.clone();
+                        let mut model_local = model;
+                        
+                        model = tokio::task::spawn_blocking(move || {
+                            crate::entities::run_eval_pass(
+                                &app_handle_clone,
+                                &mut model_local,
+                                &train_batches_local,
+                                epochs,
+                                0.001,
+                                is_classification,
+                                &EVOLUTION_SESSION,
+                                session_snapshot,
+                            );
+                            model_local
+                        }).await.map_err(|e| format!("Training task failed: {}", e))?;
+                    } else {
+                        println!(">>> Genome {}: Skipping training (0 epochs requested)", i);
+                    }
 
                     // Check cancellation after training
                     if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
@@ -769,41 +805,55 @@ async fn evaluate_population(
                         break;
                     }
 
-                    crate::entities::run_validation_pass(
-                        &model,
-                        &val_batches,
-                        "Validation",
-                        is_classification,
-                    );
+                    let val_batches_local = val_batches.clone();
+                    let test_batches_local = test_batches.clone();
+                    let train_batches_local = train_batches.clone();
+                    
+                    let (val_loss, val_acc) = if !val_batches_local.is_empty() {
+                         let val_batches_for_closure = val_batches_local.clone();
+                         tokio::task::spawn_blocking({
+                            let model_clone = model.clone();
+                            let is_class = is_classification;
+                            move || {
+                                crate::entities::run_validation_pass(
+                                    &model_clone,
+                                    &val_batches_for_closure,
+                                    "Validation",
+                                    is_class,
+                                )
+                            }
+                         }).await.map_err(|e| format!("Validation task failed: {}", e))?
+                    } else { (0.0, 0.0) };
 
                     // Evaluate fitness on test set (or val if no test batches, or train)
-                    let (final_loss, final_acc) = if !test_batches.is_empty() {
-                        crate::entities::run_validation_pass(
-                            &model,
-                            &test_batches,
-                            "Test",
-                            is_classification,
-                        )
-                    } else if !val_batches.is_empty() {
-                        eprintln!(
-                            ">>> WARNING: No test batches. Using validation metrics for fitness."
-                        );
-                        crate::entities::run_validation_pass(
-                            &model,
-                            &val_batches,
-                            "Validation",
-                            is_classification,
-                        )
+                    let (final_loss, final_acc) = if !test_batches_local.is_empty() {
+                        tokio::task::spawn_blocking({
+                            let model_clone = model.clone();
+                            let is_class = is_classification;
+                            move || {
+                                crate::entities::run_validation_pass(
+                                    &model_clone,
+                                    &test_batches_local,
+                                    "Test",
+                                    is_class,
+                                )
+                            }
+                        }).await.map_err(|e| format!("Test task failed: {}", e))?
+                    } else if !val_batches_local.is_empty() {
+                        (val_loss, val_acc)
                     } else {
-                        eprintln!(
-                            ">>> WARNING: No validation/test batches. Using train metrics for fitness."
-                        );
-                        crate::entities::run_validation_pass(
-                            &model,
-                            &train_batches,
-                            "Train",
-                            is_classification,
-                        )
+                        tokio::task::spawn_blocking({
+                            let model_clone = model.clone();
+                            let is_class = is_classification;
+                            move || {
+                                crate::entities::run_validation_pass(
+                                    &model_clone,
+                                    &train_batches_local,
+                                    "Train",
+                                    is_class,
+                                )
+                            }
+                        }).await.map_err(|e| format!("Fallback task failed: {}", e))?
                     };
 
                     // Keep the best attempt
@@ -1007,7 +1057,7 @@ async fn scan_dataset(
         return Err(format!("Root path does not exist: {}", root_path));
     }
 
-    // Step 1a: Check if any stream is CsvDataset — if so, use it as anchor
+    // Step 1a: Check if any stream is CsvDataset вЂ” if so, use it as anchor
     let mut anchor_ids: HashMap<String, std::path::PathBuf> = HashMap::new();
     let mut anchor_from_csv = false;
     
@@ -1746,134 +1796,88 @@ async fn compute_zero_cost_score(
     genome_json: String,
     config_json: String,
 ) -> Result<ZeroCostMetrics, String> {
-    type Backend = Autodiff<Wgpu>;
-    let device = burn::backend::wgpu::WgpuDevice::DiscreteGpu(0);
+    println!(">>> compute_zero_cost_score: start");
+    let result = tokio::task::spawn_blocking(move || -> Result<ZeroCostMetrics, String> {
+        let device = WgpuDevice::default();
+        // Parse config
+        let config: ZeroCostConfig = serde_json::from_str(&config_json)
+            .map_err(|e| format!("Failed to parse config: {}", e))?;
+        
+        if !config.enabled {
+            return Ok(ZeroCostMetrics {
+                synflow: 5.0,
+                normalized_score: 0.5,
+                strategy_decision: "full_train".to_string(),
+            });
+        }
+        
+        // Build model from genome
+        let model = GraphModel::<Backend>::build(&genome_json, &device, None, None);
+        
+        // Create a minimal sample batch (1 sample with dummy data)
+        let mut inputs = Vec::new();
+        for shape in &model.input_shapes {
+            let tensor = if shape.len() == 1 {
+                DynamicTensor::Dim2(Tensor::<Backend, 2>::random(
+                    [1, shape[0]],
+                    Distribution::Normal(0.0, 1.0),
+                    &device,
+                ))
+            } else if shape.len() == 2 {
+                DynamicTensor::Dim3(Tensor::<Backend, 3>::random(
+                    [1, shape[0], shape[1]],
+                    Distribution::Normal(0.0, 1.0),
+                    &device,
+                ))
+            } else if shape.len() == 3 {
+                DynamicTensor::Dim4(Tensor::<Backend, 4>::random(
+                    [1, shape[2], shape[0], shape[1]],
+                    Distribution::Normal(0.0, 1.0),
+                    &device,
+                ))
+            } else {
+                return Err("Unsupported input shape for zero-cost scoring".to_string());
+            };
+            inputs.push(tensor);
+        }
+        
+        // Create dummy targets
+        let mut targets = Vec::new();
+        for shape in &model.output_shapes {
+            let tensor = if shape.len() == 1 {
+                let num_classes = if shape[0] > 0 { shape[0] as f64 } else { 1.0 };
+                let class_idx = (rand::random::<f64>() * num_classes).floor();
+                DynamicTensor::Dim2(Tensor::<Backend, 2>::from_data([[class_idx]], &device))
+            } else if shape.len() == 2 {
+                DynamicTensor::Dim3(Tensor::<Backend, 3>::random(
+                    [1, shape[0], shape[1]],
+                    Distribution::Normal(0.0, 1.0),
+                    &device,
+                ))
+            } else if shape.len() == 3 {
+                DynamicTensor::Dim4(Tensor::<Backend, 4>::random(
+                    [1, shape[2], shape[0], shape[1]],
+                    Distribution::Normal(0.0, 1.0),
+                    &device,
+                ))
+            } else {
+                return Err("Unsupported output shape for zero-cost scoring".to_string());
+            };
+            targets.push(tensor);
+        }
+        
+        let batch = DynamicBatch { inputs, targets };
+        
+        // Compute real SynFlow score
+        let synflow_score = zero_cost_proxies::compute_synflow(&model, &batch);
+        println!(">>> compute_zero_cost_score: score = {}", synflow_score);
+        
+        Ok(ZeroCostMetrics::from_synflow(synflow_score, &config))
+    }).await.map_err(|e| format!("Task failed to join: {}", e))??;
     
-    // Parse config
-    let config: ZeroCostConfig = serde_json::from_str(&config_json)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
-    
-    if !config.enabled {
-        return Ok(ZeroCostMetrics {
-            synflow: 5.0,
-            normalized_score: 0.5,
-            strategy_decision: "full_train".to_string(),
-        });
-    }
-    
-    // Build model from genome
-    let model = GraphModel::<Backend>::build(&genome_json, &device, None, None);
-    
-    // Create a minimal sample batch (1 sample with dummy data)
-    let mut inputs = Vec::new();
-    for shape in &model.input_shapes {
-        let tensor = if shape.len() == 1 {
-            DynamicTensor::Dim2(Tensor::<Backend, 2>::random(
-                [1, shape[0]],
-                Distribution::Normal(0.0, 1.0),
-                &device,
-            ))
-        } else if shape.len() == 3 {
-            // [H, W, C] -> [Batch, C, H, W]
-            DynamicTensor::Dim4(Tensor::<Backend, 4>::random(
-                [1, shape[2], shape[0], shape[1]],
-                Distribution::Normal(0.0, 1.0),
-                &device,
-            ))
-        } else {
-            return Err("Unsupported input shape for zero-cost scoring".to_string());
-        };
-        inputs.push(tensor);
-    }
-    
-    // Create dummy targets
-    let mut targets = Vec::new();
-    for shape in &model.output_shapes {
-        let tensor = if shape.len() == 1 {
-            let num_classes = if shape[0] > 0 { shape[0] as f64 } else { 1.0 };
-            let random_class = Tensor::<Backend, 1>::random(
-                [1],
-                Distribution::Uniform(0.0, num_classes),
-                &device,
-            )
-            .into_data()
-            .to_vec::<f32>()
-            .map_err(|_| "Failed to convert tensor to vec".to_string())?[0];
-            let class_idx = random_class.floor();
-            DynamicTensor::Dim2(Tensor::<Backend, 2>::from_data([[class_idx]], &device))
-        } else if shape.len() == 3 {
-            DynamicTensor::Dim4(Tensor::<Backend, 4>::random(
-                [1, shape[2], shape[0], shape[1]],
-                Distribution::Normal(0.0, 1.0),
-                &device,
-            ))
-        } else {
-            return Err("Unsupported output shape for zero-cost scoring".to_string());
-        };
-        targets.push(tensor);
-    }
-    
-    let batch = DynamicBatch { inputs, targets };
-    
-    // Compute forward pass and loss
-    let _output = model.forward(&batch.inputs);
-    
-    // For now, compute a heuristic based on model architecture properties
-    // In a full implementation, this would compute SynFlow properly
-    let synflow_score = compute_synflow_heuristic(&model);
-    
-    // Create metrics with decision logic
-    let metrics = ZeroCostMetrics::from_synflow(synflow_score, &config);
-    
-    Ok(metrics)
+    Ok(result)
 }
 
-/// Heuristic for SynFlow score based on model architecture
-/// 
-/// In a full autodiff implementation, this would compute:
-/// SynFlow = Σ |∇w ⊙ w| (gradient-weight product)
-/// 
-/// For now, we use a proxy metric based on layer connectivity and depth
-fn compute_synflow_heuristic<B: burn::prelude::Backend>(model: &GraphModel<B>) -> f32 {
-    // Count total layers
-    let total_layers = (
-        model.conv1ds.len() +
-        model.conv2ds.len() +
-        model.denses.len() +
-        model.lstms.len() +
-        model.grus.len() +
-        model.mha_layers.len() +
-        model.dropouts.len() +
-        model.batch_norms_2d.len() +
-        model.batch_norms_4d.len() +
-        model.layer_norms.len()
-    ) as f32;
-    
-    // Estimate connectivity from execution plan length (rough proxy)
-    let connectivity = model.execution_plan.len() as f32;
-    
-    // Early layers benefit more from signal flow
-    let has_conv = !model.conv1ds.is_empty() || !model.conv2ds.is_empty();
-    let has_rnn = !model.lstms.is_empty() || !model.grus.is_empty();
-    let has_attention = !model.mha_layers.is_empty();
-    
-    // Base score
-    let mut base_score = 3.0 + (total_layers * 0.3);
-    
-    // Architecture-specific bonuses
-    if has_conv { base_score += 2.0; }
-    if has_rnn { base_score += 1.5; }
-    if has_attention { base_score += 2.5; }
-    
-    // Connectivity factor
-    let conn_factor = (connectivity / 10.0).sqrt().min(3.0);
-    let score = base_score * (1.0 + conn_factor * 0.2);
-    
-    // Add deterministic noise based on layer counts
-    let noise = (((model.denses.len() as f32 * 1.73) % 2.0) - 1.0) * 0.3;
-    
-    (score + noise).max(0.5).min(15.0) // clamp to reasonable range
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

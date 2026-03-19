@@ -1081,10 +1081,7 @@ impl<B: Backend> GraphModel<B> {
                         }
                         // BatchNorm for Dim3 is 1D in PyTorch/Burn terminology, usually batch_norms_1d
                         // But since we only have 2d and 4d in entities rn, fallback or handle:
-                        DynamicTensor::Dim3(t) => {
-                             // Assuming NO batch norm properly created for 3D yet, or we ignore
-                             // Let's just return to unblock if User didn't place BatchNorm here
-                             // or panic properly.
+                        DynamicTensor::Dim3(_t) => {
                              unimplemented!("BatchNorm for Dim3 not supported yet in entities.rs")
                         }
                         DynamicTensor::Dim4(t) => {
@@ -1644,6 +1641,11 @@ pub fn run_eval_pass<B: AutodiffBackend>(
                     },
                 );
             }
+
+            // Yield to avoid blocking the executor and let the GPU/OS breathe
+            std::thread::yield_now();
+            // Tiny sleep to prevent "GPU command queue saturation" which causes monitor lag on display-driving cards
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
         final_loss = train_loss_sum / total_batches.max(1) as f32;
@@ -1679,6 +1681,7 @@ pub fn run_validation_pass<B: AutodiffBackend>(
     split_name: &str,
     is_classification: bool,
 ) -> (f32, f32) {
+    println!(">>> [{}] starting with {} batches...", split_name, batches.len());
     let mut val_loss_sum = 0.0f32;
     let mut val_correct = 0usize;
     let mut val_total = 0usize;
@@ -1692,11 +1695,12 @@ pub fn run_validation_pass<B: AutodiffBackend>(
         let loss = model.compute_loss(&predictions, &cloned_targets);
 
         val_loss_sum += loss.into_data().to_vec::<f32>().unwrap()[0];
+        let (correct, count) = compute_accuracy(&predictions, &cloned_targets, is_classification);
+        val_correct += correct;
+        val_total += count;
 
-        let (batch_correct, batch_total) =
-            compute_accuracy(&predictions, &cloned_targets, is_classification);
-        val_correct += batch_correct;
-        val_total += batch_total;
+        // Yield during validation too, especially for large test sets
+        std::thread::yield_now();
     }
 
     let avg_loss = val_loss_sum / batches.len().max(1) as f32;
@@ -1710,6 +1714,7 @@ pub fn run_validation_pass<B: AutodiffBackend>(
         "  [{}] Loss = {:.4}, Acc = {:.2}%",
         split_name, avg_loss, acc
     );
+    println!(">>> [{}] finished with loss={:.4}, acc={:.2}%", split_name, avg_loss, acc);
 
     (avg_loss, acc)
 }

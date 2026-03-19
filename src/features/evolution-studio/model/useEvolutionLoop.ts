@@ -468,11 +468,11 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                 const skipped = zeroCostScores.filter(s => s.strategy_decision === 'skip').length;
                 const partial = zeroCostScores.filter(s => s.strategy_decision === 'partial_train').length;
                 const full = zeroCostScores.filter(s => s.strategy_decision === 'full_train').length;
-                const avgScore = zeroCostScores.reduce((sum, s) => sum + s.normalized_score, 0) / zeroCostScores.length;
+                const avgSynFlow = zeroCostScores.reduce((sum, s) => sum + s.synflow, 0) / zeroCostScores.length;
                 
                 addLog(
                     `Zero-Cost Summary: ${full} full + ${partial} partial + ${skipped} skipped | ` +
-                    `Avg SynFlow: ${(avgScore * 10).toFixed(2)}`,
+                    `Avg SynFlow: ${avgSynFlow.toFixed(2)}`,
                     "success"
                 );
             } else {
@@ -492,16 +492,15 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             // 2. Call Rust Evaluator
             // For now, we use a global evalEpochs value
             // In a more advanced implementation, we'd modify evaluate_population to accept per-genome epochs
-            const avgAdjustedEpochs = Math.ceil(
-                Array.from(evalEpochsAdjustments.values()).reduce((a, b) => a + b, 0) / 
-                evalEpochsAdjustments.size
+            const perGenomeEpochs = Array.from({ length: serializedGenomes.length }, (_, i) => 
+                evalEpochsAdjustments.get(i) ?? settings.evalEpochs
             );
             
             const results = await invoke<EvaluationResult[]>('evaluate_population', {
                 genomes: serializedGenomes,
                 datasetProfile: datasetProfileId,
                 batchSize: settings.batchSize || 32,
-                evalEpochs: avgAdjustedEpochs,
+                perGenomeEpochs,
                 datasetPercent: settings.datasetPercent || 100,
                 trainSplit,
                 valSplit,
