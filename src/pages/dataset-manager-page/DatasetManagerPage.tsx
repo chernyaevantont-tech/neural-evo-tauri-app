@@ -92,10 +92,16 @@ export const DatasetManagerPage: React.FC = () => {
             updatedProfile.streams = profile.streams.map(stream => {
                 const report = scanResult.streamReports.find(r => r.streamId === stream.id);
                 if (report) {
+                    let calculatedShape = report.inputShape ?? stream.tensorShape;
+                    if ((!calculatedShape || calculatedShape.length === 0) && stream.dataType === 'Image' && stream.preprocessing?.vision) {
+                        const v = stream.preprocessing.vision;
+                        calculatedShape = [v.grayscale ? 1 : 3, v.resize[1], v.resize[0]];
+                    }
+
                     return {
                         ...stream,
                         // Set tensorShape from input_shape for Input streams
-                        tensorShape: report.inputShape ?? stream.tensorShape,
+                        tensorShape: calculatedShape,
                         // Set num_classes for Target streams from discovered_classes
                         numClasses: report.discoveredClasses ? Object.keys(report.discoveredClasses).length : stream.numClasses,
                     } as any;

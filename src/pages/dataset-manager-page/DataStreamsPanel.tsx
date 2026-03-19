@@ -23,7 +23,7 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
             alias: `New Stream ${profile.streams.length + 1}`,
             role: 'Input',
             dataType: 'Image',
-            tensorShape: [],
+            tensorShape: [3, 64, 64],
             locator: { type: 'GlobPattern', pattern: '**/*.jpg' },
             preprocessing: { vision: { ...defaultVisionSettings } }
         };
@@ -159,12 +159,14 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                                 let preprocessing = stream.preprocessing;
                                                 if (dataType === 'Image') {
                                                     preprocessing = { vision: { ...defaultVisionSettings } };
+                                                    updateStream(stream.id, { dataType, preprocessing, tensorShape: [3, 64, 64] });
                                                 } else if (dataType === 'Vector') {
                                                     preprocessing = { tabular: { ...defaultTabularSettings } };
+                                                    updateStream(stream.id, { dataType, preprocessing });
                                                 } else {
                                                     preprocessing = undefined;
+                                                    updateStream(stream.id, { dataType, preprocessing });
                                                 }
-                                                updateStream(stream.id, { dataType, preprocessing });
                                             }}
                                         >
                                             <option value="Image">Image (Tensor 4D)</option>
@@ -326,7 +328,11 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                 {stream.dataType === 'Image' && stream.preprocessing?.vision && (() => {
                                     const v = stream.preprocessing.vision!;
                                     const updateVision = (patch: Partial<VisionSettings>) => {
-                                        updateStream(stream.id, { preprocessing: { ...stream.preprocessing, vision: { ...v, ...patch } } });
+                                        const newVision = { ...v, ...patch };
+                                        updateStream(stream.id, { 
+                                            preprocessing: { ...stream.preprocessing, vision: newVision },
+                                            tensorShape: [newVision.grayscale ? 1 : 3, newVision.resize[1], newVision.resize[0]]
+                                        });
                                     };
                                     return (
                                         <div style={{ borderTop: '1px dashed var(--color-border)', paddingTop: '0.75rem' }}>
