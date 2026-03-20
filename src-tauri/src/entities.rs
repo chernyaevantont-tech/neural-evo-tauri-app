@@ -1686,7 +1686,14 @@ pub fn run_validation_pass<B: AutodiffBackend>(
     let mut val_correct = 0usize;
     let mut val_total = 0usize;
 
-    for batch in batches {
+    let total_batches = batches.len();
+    let log_interval = (total_batches / 10).max(1);
+
+    for (batch_idx, batch) in batches.iter().enumerate() {
+        if batch_idx % log_interval == 0 || batch_idx == total_batches - 1 {
+            println!("  [{}] Batch {}/{}", split_name, batch_idx + 1, total_batches);
+        }
+
         let cloned_inputs: Vec<DynamicTensor<B>> = batch.inputs.iter().map(|t| t.clone()).collect();
         let cloned_targets: Vec<DynamicTensor<B>> =
             batch.targets.iter().map(|t| t.clone()).collect();
@@ -1701,6 +1708,8 @@ pub fn run_validation_pass<B: AutodiffBackend>(
 
         // Yield during validation too, especially for large test sets
         std::thread::yield_now();
+        // Tiny sleep to prevent "GPU command queue saturation" consistent with the training loop
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 
     let avg_loss = val_loss_sum / batches.len().max(1) as f32;
