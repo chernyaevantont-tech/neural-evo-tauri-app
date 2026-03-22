@@ -3,7 +3,7 @@
 /// Provides unified shape calculation for datasets across all stream types.
 /// This is the single source of truth for determining input/output dimensions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::csv_loader::CsvDatasetLoader;
@@ -48,7 +48,7 @@ impl ShapeInference {
                 ShapeInference::infer_csv_input_shape(csv_def, &stream.data_type, root_path, &mut warnings)
             }
 
-            DataLocatorDef::GlobPattern { pattern: _ } => {
+            DataLocatorDef::GlobPattern { pattern } => {
                 // For images, return shape from tensor_shape
                 if stream.data_type == DataType::Image {
                     if stream.tensor_shape.is_empty() {
@@ -111,7 +111,7 @@ impl ShapeInference {
     fn infer_csv_input_shape(
         csv_def: &CsvDatasetDef,
         data_type: &DataType,
-        _root_path: &Path,
+        root_path: &Path,
         warnings: &mut Vec<String>,
     ) -> Result<(Vec<usize>, String, Vec<String>), String> {
         // Determine effective sample mode from data_type
@@ -245,13 +245,13 @@ impl ShapeInference {
                 return Err("No CSV loaders found to validate alignment".to_string());
             }
 
-            // Return sample IDs as "0", "1", etc.
-            return Ok((0..min_count).map(|i| i.to_string()).collect());
+            // Return sample IDs as "csv_row_0", "csv_row_1", etc.
+            return Ok((0..min_count).map(|i| format!("csv_row_{}", i)).collect());
         }
 
         // Temporal window exists: align all other streams to this count
         let temporal_count = temporal_window_count.unwrap();
-        Ok((0..temporal_count).map(|i| i.to_string()).collect())
+        Ok((0..temporal_count).map(|i| format!("csv_row_{}", i)).collect())
     }
 
     /// Check if two streams have compatible sample counts
@@ -361,7 +361,6 @@ mod tests {
             role: "Target".to_string(),
             data_type: DataType::Categorical,
             tensor_shape: vec![],
-            num_classes: None,
             locator: DataLocatorDef::CsvDataset(CsvDatasetDef {
                 csv_path: "test.csv".to_string(),
                 has_headers: true,
@@ -391,7 +390,6 @@ mod tests {
             role: "Target".to_string(),
             data_type: DataType::Categorical,
             tensor_shape: vec![],
-            num_classes: None,
             locator: DataLocatorDef::CsvDataset(CsvDatasetDef {
                 csv_path: "test.csv".to_string(),
                 has_headers: true,
