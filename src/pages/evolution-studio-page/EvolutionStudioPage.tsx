@@ -18,6 +18,7 @@ import { InspectGenomeModal } from './InspectGenomeModal';
 import { GenomeProfilerModal } from '../../features/evolution-studio/ui/GenomeProfilerModal';
 import { GenerationStatsTable } from '../../features/evolution-studio/ui/GenerationStatsTable';
 import { ComparisonCharts } from '../../widgets/genome-comparison/ComparisonCharts';
+import { GenerationsModal } from './GenerationsModal';
 import {
     Chart as ChartJS,
     CategoryScale,
@@ -75,43 +76,9 @@ export const EvolutionStudioPage: React.FC = () => {
     const [selectedSeedIds, setSelectedSeedIds] = useState<string[]>([]);
     const [inspectingGenome, setInspectingGenome] = useState<PopulatedGenome | null>(null);
     const [profilerGenome, setProfilerGenome] = useState<PopulatedGenome | null>(null);
-
-    // Bottom panel state
-    const [bottomTab, setBottomTab] = useState<'generations' | 'log'>('generations');
-    const [viewingGenIndex, setViewingGenIndex] = useState(0);
-    const [autoFollow, setAutoFollow] = useState(true);
-    type SortKey = 'evalOrder' | 'accuracy' | 'fitness' | 'nodes';
-    const [sortKey, setSortKey] = useState<SortKey>('evalOrder');
-    const [sortAsc, setSortAsc] = useState(false);
+    const [showGenerationsModal, setShowGenerationsModal] = useState(false);
 
     // Auto-follow latest generation
-    useEffect(() => {
-        if (autoFollow && generationHistory.length > 0) {
-            setViewingGenIndex(generationHistory.length - 1);
-        }
-    }, [autoFollow, generationHistory.length]);
-
-    // Sorted genomes for the currently viewed generation
-    const viewingSnapshot = generationHistory[viewingGenIndex] as GenerationSnapshot | undefined;
-    const profilerStats = useProfilerStats(viewingSnapshot?.genomes ?? []);
-    const sortedGenomes = useMemo(() => {
-        if (!viewingSnapshot) return [];
-        const genomes = [...viewingSnapshot.genomes];
-        if (sortKey === 'evalOrder') {
-            return sortAsc ? genomes : [...genomes].reverse();
-        }
-        const comparator = (a: PopulatedGenome, b: PopulatedGenome) => {
-            let valA = 0, valB = 0;
-            if (sortKey === 'accuracy') { valA = a.accuracy || 0; valB = b.accuracy || 0; }
-            else if (sortKey === 'fitness') { valA = a.adjustedFitness || 0; valB = b.adjustedFitness || 0; }
-            else if (sortKey === 'nodes') { valA = a.nodes.length; valB = b.nodes.length; }
-            return sortAsc ? valA - valB : valB - valA;
-        };
-        return genomes.sort(comparator);
-    }, [viewingSnapshot, sortKey, sortAsc]);
-
-    const activeProfile = profiles.find(p => p.id === datasetProfileId);
-
     useEffect(() => {
         if (generationHistory.length === 0) {
             return;
@@ -138,9 +105,20 @@ export const EvolutionStudioPage: React.FC = () => {
         });
     }, [generationHistory, settings]);
 
+    // Current snapshot (latest generation)
+    const currentSnapshot = generationHistory.length > 0 
+        ? generationHistory[generationHistory.length - 1] 
+        : undefined;
+    const profilerStats = useProfilerStats(currentSnapshot?.genomes ?? []);
+    const sortedGenomes = useMemo(() => {
+        if (!currentSnapshot) return [];
+        return [...currentSnapshot.genomes];
+    }, [currentSnapshot]);
+
+    const activeProfile = profiles.find(p => p.id === datasetProfileId);
+
     const handleStart = async () => {
         try {
-            setBottomTab('log'); // Automatically switch to log tab to show generation info or errors
             // First, ensure a dataset profile is selected
             if (!datasetProfileId) {
                 alert("Please select a Dataset Profile first!");
@@ -510,177 +488,42 @@ export const EvolutionStudioPage: React.FC = () => {
                     <div className={styles.chartArea}>
                         <h3 className={styles.sectionTitle}>Profiler Comparisons</h3>
                         <div style={{ padding: '0.2rem 0 0.4rem', color: 'var(--color-text-secondary)', fontSize: '0.82rem' }}>
-                            Snapshot summary: Total train {((viewingSnapshot?.totalTrainingMs ?? 0) / 1000).toFixed(2)}s | Avg inference {((viewingSnapshot?.totalInferenceMs ?? 0) / Math.max(1, viewingSnapshot?.genomes.length ?? 1)).toFixed(3)}ms | Avg throughput {(viewingSnapshot?.avgSamplesPerSec ?? 0).toFixed(1)} samples/s
+                            <button 
+                                onClick={() => setShowGenerationsModal(true)}
+                                className={styles.viewGenerationsBtn}
+                            >
+                                📊 View All Generations ({generationHistory.length})
+                            </button>
+                            {currentSnapshot && (
+                                <>
+                                    Total train {((currentSnapshot.totalTrainingMs ?? 0) / 1000).toFixed(2)}s | 
+                                    Avg inference {((currentSnapshot.totalInferenceMs ?? 0) / Math.max(1, currentSnapshot.genomes.length ?? 1)).toFixed(3)}ms | 
+                                    Avg throughput {(currentSnapshot.avgSamplesPerSec ?? 0).toFixed(1)} samples/s
+                                </>
+                            )}
                         </div>
                         <ComparisonCharts genomes={sortedGenomes} />
                     </div>
 
                     {/* Bottom Tabbed Panel: Generations / Event Log */}
+                    {/* Bottom Panel: Event Log */}
                     <div className={styles.logArea}>
-                        <div className={styles.tabBar}>
-                            <button
-                                className={`${styles.tabBtn} ${bottomTab === 'generations' ? styles.tabBtnActive : ''}`}
-                                onClick={() => setBottomTab('generations')}
-                            >
-                                Generations {generationHistory.length > 0 ? `(${generationHistory.length})` : ''}
-                            </button>
-                            <button
-                                className={`${styles.tabBtn} ${bottomTab === 'log' ? styles.tabBtnActive : ''}`}
-                                onClick={() => setBottomTab('log')}
-                            >
-                                Event Log
-                            </button>
+                        <div className={styles.logHeader}>
+                            <h4 className={styles.logTitle}>Event Log</h4>
                         </div>
-
-                        {bottomTab === 'log' && (
-                            <div className={styles.logConsole}>
-                                {logs.map((log, idx) => (
-                                    <div key={idx} className={styles.logEntry} style={{
-                                        color: log.type === 'error' ? 'var(--color-danger)' :
-                                            log.type === 'warn' ? 'var(--color-warning)' :
-                                                log.type === 'success' ? 'var(--color-success)' : 'inherit'
-                                    }}>
-                                        <span style={{ opacity: 0.5, marginRight: '8px' }}>[{log.time}]</span>
-                                        {log.message}
-                                    </div>
-                                ))}
-                                {logs.length === 0 && <div className={styles.logEntry}>[System] Evolution Studio initialized. Waiting for User...</div>}
-                            </div>
-                        )}
-
-                        {bottomTab === 'generations' && (
-                            <div className={styles.generationsPanel}>
-                                <GenerationStatsTable
-                                    generations={generationHistory}
-                                    selectedGeneration={viewingSnapshot?.generation}
-                                    onSelectGeneration={(gen) => {
-                                        const idx = generationHistory.findIndex((s) => s.generation === gen);
-                                        if (idx >= 0) {
-                                            setAutoFollow(false);
-                                            setViewingGenIndex(idx);
-                                        }
-                                    }}
-                                />
-
-                                {/* Pagination + Controls */}
-                                <div className={styles.genPaginationBar}>
-                                    <button
-                                        className={styles.genPageBtn}
-                                        disabled={viewingGenIndex <= 0}
-                                        onClick={() => { setAutoFollow(false); setViewingGenIndex(i => Math.max(0, i - 1)); }}
-                                    >←</button>
-                                    <span className={styles.genPageLabel}>
-                                        <span>Generation {viewingSnapshot ? viewingSnapshot.generation : '--'}</span>
-                                        {viewingSnapshot && (
-                                            <span className={`${styles.evalStatus} ${viewingSnapshot.evaluated ? styles.evalStatusDone : styles.evalStatusProgress}`}>
-                                                {viewingSnapshot.evaluated ? 'EVALUATED' : 'EVALUATING...'}
-                                            </span>
-                                        )}
-                                        {viewingSnapshot && <span style={{ opacity: 0.6 }}>{viewingSnapshot.timestamp}</span>}
-                                    </span>
-                                    <button
-                                        className={styles.genPageBtn}
-                                        disabled={viewingGenIndex >= generationHistory.length - 1}
-                                        onClick={() => { setAutoFollow(false); setViewingGenIndex(i => Math.min(generationHistory.length - 1, i + 1)); }}
-                                    >→</button>
-                                    <label className={styles.autoFollowLabel}>
-                                        <input
-                                            type="checkbox"
-                                            checked={autoFollow}
-                                            onChange={e => setAutoFollow(e.target.checked)}
-                                        />
-                                        Auto
-                                    </label>
-                                    <select
-                                        className={styles.sortSelect}
-                                        value={sortKey}
-                                        onChange={e => setSortKey(e.target.value as SortKey)}
-                                    >
-                                        <option value="evalOrder">Eval Order</option>
-                                        <option value="accuracy">Accuracy</option>
-                                        <option value="fitness">Fitness</option>
-                                        <option value="nodes">Nodes</option>
-                                    </select>
-                                    <button
-                                        className={styles.sortDirBtn}
-                                        onClick={() => setSortAsc(v => !v)}
-                                        title={sortAsc ? 'Ascending' : 'Descending'}
-                                    >{sortAsc ? '↑' : '↓'}</button>
+                        <div className={styles.logConsole}>
+                            {logs.map((log, idx) => (
+                                <div key={idx} className={styles.logEntry} style={{
+                                    color: log.type === 'error' ? 'var(--color-danger)' :
+                                        log.type === 'warn' ? 'var(--color-warning)' :
+                                            log.type === 'success' ? 'var(--color-success)' : 'inherit'
+                                }}>
+                                    <span style={{ opacity: 0.5, marginRight: '8px' }}>[{log.time}]</span>
+                                    {log.message}
                                 </div>
-
-                                {/* Genome Table */}
-                                {sortedGenomes.length > 0 ? (
-                                    <div className={styles.genomeTableWrap}>
-                                        <table className={styles.genomeTable}>
-                                            <thead>
-                                                <tr>
-                                                    <th>#</th>
-                                                    <th>Fitness</th>
-                                                    <th>Loss</th>
-                                                    <th>Acc %</th>
-                                                    <th>Nodes</th>
-                                                    <th>Flash</th>
-                                                    <th>RAM</th>
-                                                    <th>MACs</th>
-                                                    <th>Train ms</th>
-                                                    <th>Infer ms</th>
-                                                    <th>Peak MB</th>
-                                                    <th>Samples/s</th>
-                                                    <th>Profiler</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {sortedGenomes.map((g, idx) => {
-                                                    const isEvaluating = isRunning &&
-                                                        viewingGenIndex === generationHistory.length - 1 &&
-                                                        g.id === population[currentEvaluatingIndex]?.id;
-
-                                                    return (
-                                                        <tr
-                                                            key={g.id}
-                                                            className={`${styles.genomeRow} ${isEvaluating ? styles.evaluatingRow : ''}`}
-                                                            onClick={() => setInspectingGenome(g)}
-                                                        >
-                                                            <td>{idx + 1}</td>
-                                                            <td>{g.adjustedFitness?.toFixed(4) || '--'}</td>
-                                                            <td>{g.loss?.toFixed(4) || '--'}</td>
-                                                            <td className={g.accuracy !== undefined ? (g.accuracy > 50 ? styles.accValue : styles.accValueLow) : ''}>
-                                                                {g.accuracy?.toFixed(2) || '--'}
-                                                            </td>
-                                                            <td>{g.nodes.length}</td>
-                                                            <td>{g.resources ? (g.resources.totalFlash / 1024).toFixed(1) + 'K' : '--'}</td>
-                                                            <td>{g.resources ? (g.resources.totalRam / 1024).toFixed(1) + 'K' : '--'}</td>
-                                                            <td>{g.resources ? (g.resources.totalMacs / 1000).toFixed(1) + 'K' : '--'}</td>
-                                                            <td>{g.profiler ? g.profiler.total_train_duration_ms.toFixed(0) : '--'}</td>
-                                                            <td>{g.profiler ? g.profiler.inference_msec_per_sample.toFixed(3) : '--'}</td>
-                                                            <td>{g.profiler ? g.profiler.peak_active_memory_mb.toFixed(1) : '--'}</td>
-                                                            <td>{g.profiler ? g.profiler.samples_per_sec.toFixed(1) : '--'}</td>
-                                                            <td>
-                                                                {g.profiler ? (
-                                                                    <button
-                                                                        className={styles.profilerButton}
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            setProfilerGenome(g);
-                                                                        }}
-                                                                    >
-                                                                        Open
-                                                                    </button>
-                                                                ) : '--'}
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                ) : (
-                                    <div className={styles.chartPlaceholder}>
-                                        No generations evaluated yet.
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                            ))}
+                            {logs.length === 0 && <div className={styles.logEntry}>[System] Evolution Studio initialized. Waiting for User...</div>}
+                        </div>
                     </div>
 
                 </div>
@@ -758,6 +601,18 @@ export const EvolutionStudioPage: React.FC = () => {
                     genomeId={profilerGenome.id}
                     profiler={profilerGenome.profiler}
                     onClose={() => setProfilerGenome(null)}
+                />
+            )}
+
+            {showGenerationsModal && (
+                <GenerationsModal
+                    generations={generationHistory}
+                    selectedGeneration={currentSnapshot?.generation}
+                    onSelectGeneration={(gen) => {
+                        // Just close the modal; the selection doesn't affect current snapshot anymore
+                        setShowGenerationsModal(false);
+                    }}
+                    onClose={() => setShowGenerationsModal(false)}
                 />
             )}
         </div>
