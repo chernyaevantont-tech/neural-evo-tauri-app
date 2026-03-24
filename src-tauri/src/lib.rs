@@ -24,6 +24,7 @@ pub mod entities;
 pub mod zero_cost_proxies;
 pub mod csv_loader;
 pub mod shape_inference;
+pub mod orchestrator;
 
 /// Global session counter. Incremented by `stop_evolution`.
 /// Each `evaluate_population` call captures a snapshot; if the current value

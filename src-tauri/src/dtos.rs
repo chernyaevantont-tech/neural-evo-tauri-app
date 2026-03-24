@@ -500,6 +500,44 @@ pub struct TrainingResult {
 }
 
 // ---------------------------------------------------------------------------
+// Training Job DTOs (for Orchestrator)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct TrainingJob {
+    pub job_id: String,
+    pub run_id: String,
+    pub genome_id: String,
+    pub genome_json: String,
+    pub training_params: serde_json::Value,
+    pub estimated_vram_mb: u64,
+    pub dataset_name: String,
+    pub priority: i32,
+    pub created_at_ms: u64,
+    pub proxy_decision: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Run State DTO (for Orchestrator)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RunState {
+    pub run_id: String,
+    pub status: String,
+    pub created_at_ms: u64,
+    pub started_at_ms: Option<u64>,
+    pub finished_at_ms: Option<u64>,
+    pub queued_jobs: Vec<String>,
+    pub active_jobs: Vec<String>,
+    pub completed_jobs: Vec<String>,
+    pub failed_jobs: Vec<String>,
+    pub max_parallel_jobs: u32,
+}
+
+// ---------------------------------------------------------------------------
 // Genome Library Entry with Extended Metadata
 // ---------------------------------------------------------------------------
 
