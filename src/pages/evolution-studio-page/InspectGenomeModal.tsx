@@ -24,10 +24,11 @@ interface InspectGenomeModalProps {
     subtitle?: string;
     nodes: BaseNode[];
     trainingMetrics?: BatchMetrics[];
+    genomeDetail?: React.ReactNode;
     onClose: () => void;
 }
 
-export const InspectGenomeModal: React.FC<InspectGenomeModalProps> = ({ title, subtitle, nodes, trainingMetrics, onClose }) => {
+export const InspectGenomeModal: React.FC<InspectGenomeModalProps> = ({ title, subtitle, nodes, trainingMetrics, genomeDetail, onClose }) => {
     const hasMetrics = trainingMetrics && trainingMetrics.length > 0;
 
     const chartData: ChartData<'line'> | null = hasMetrics ? {
@@ -108,6 +109,11 @@ export const InspectGenomeModal: React.FC<InspectGenomeModalProps> = ({ title, s
                 </div>
                 <div className={styles.content}>
                     <GenomeSvgPreview nodes={nodes} />
+                    {genomeDetail && (
+                        <div className={styles.detailSection}>
+                            {genomeDetail}
+                        </div>
+                    )}
                     {chartData && (
                         <div style={{ width: '100%', height: '200px', marginTop: '12px' }}>
                             <Line data={chartData} options={chartOptions} />

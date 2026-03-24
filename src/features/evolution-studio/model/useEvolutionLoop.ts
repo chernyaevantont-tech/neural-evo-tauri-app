@@ -2,13 +2,14 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Genome, serializeGenome, deserializeGenome, generateRandomArchitecture, extractShapesFromDatasetProfile } from '../../../entities/canvas-genome';
 import type { BatchMetrics, GenerationSnapshot, PopulatedGenome } from '../../../entities/genome';
-import type { AdaptiveMutationSettings, UseEvolutionLoopParams } from '../../../shared/lib';
+import type { AdaptiveMutationSettings, TrainingProfiler, UseEvolutionLoopParams } from '../../../shared/lib';
 import { computeZeroCostScore, ZeroCostMetrics } from './useZeroCostEvaluation';
 
 export interface EvaluationResult {
     genome_id: string;
     loss: number;
     accuracy: number;
+    profiler?: TrainingProfiler;
 }
 
 export interface LogEntry {
@@ -544,6 +545,7 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                     trainingMetrics: genomeMetrics,
                     resources,
                     zeroCostMetric,
+                    profiler: res.profiler,
                 } as PopulatedGenome;
             });
 
@@ -563,6 +565,18 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
 
             // Update stats history
             const avgNodes = Math.round(evaluatedPop.reduce((acc, p) => acc + p.nodes.length, 0) / evaluatedPop.length);
+            const totalTrainingMs = evaluatedPop.reduce(
+                (acc, p) => acc + (p.profiler?.total_train_duration_ms ?? 0),
+                0,
+            );
+            const totalInferenceMs = evaluatedPop.reduce(
+                (acc, p) => acc + (p.profiler?.inference_msec_per_sample ?? 0),
+                0,
+            );
+            const avgSamplesPerSec = evaluatedPop.length > 0
+                ? evaluatedPop.reduce((acc, p) => acc + (p.profiler?.samples_per_sec ?? 0), 0) / evaluatedPop.length
+                : 0;
+
             setStats(prev => [...prev, {
                 generation,
                 bestFitness: best.adjustedFitness || 0,
@@ -579,7 +593,10 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                     bestFitness: best.adjustedFitness || 0,
                     avgNodes,
                     timestamp: new Date().toLocaleTimeString(),
-                    evaluated: true
+                    evaluated: true,
+                    totalTrainingMs,
+                    totalInferenceMs,
+                    avgSamplesPerSec,
                 };
                 return updated;
             });

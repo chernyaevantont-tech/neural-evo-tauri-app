@@ -77,6 +77,14 @@
     background-color: var(--color-bg-primary);
 }
 
+.detailSection {
+    position: absolute;
+    left: 1rem;
+    right: 1rem;
+    bottom: 0.8rem;
+    z-index: 2;
+}
+
 @keyframes fadeIn {
     from {
         opacity: 0;

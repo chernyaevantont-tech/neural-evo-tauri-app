@@ -10,9 +10,14 @@ import { useCanvasGenomeStore, serializeGenome } from '../../entities/canvas-gen
 import type { GenerationSnapshot, PopulatedGenome } from '../../entities/genome';
 import { GenomeCatalogPicker } from '../../features/genome-library';
 import { useGenomeLibraryStore } from '../../features/genome-library';
+import { GenomeDetailPanel } from '../../features/genome-library/ui/GenomeDetailPanel';
+import { useProfilerStats } from '../../shared/hooks';
 import { EvolutionSettingsPanel } from './EvolutionSettingsPanel';
 import { GenomeSvgPreview } from '../../entities/canvas-genome/ui/GenomeSvgPreview/GenomeSvgPreview';
 import { InspectGenomeModal } from './InspectGenomeModal';
+import { GenomeProfilerModal } from '../../features/evolution-studio/ui/GenomeProfilerModal';
+import { GenerationStatsTable } from '../../features/evolution-studio/ui/GenerationStatsTable';
+import { ComparisonCharts } from '../../widgets/genome-comparison/ComparisonCharts';
 import {
     Chart as ChartJS,
     CategoryScale,
@@ -69,6 +74,7 @@ export const EvolutionStudioPage: React.FC = () => {
     const [showCatalogPicker, setShowCatalogPicker] = useState(false);
     const [selectedSeedIds, setSelectedSeedIds] = useState<string[]>([]);
     const [inspectingGenome, setInspectingGenome] = useState<PopulatedGenome | null>(null);
+    const [profilerGenome, setProfilerGenome] = useState<PopulatedGenome | null>(null);
 
     // Bottom panel state
     const [bottomTab, setBottomTab] = useState<'generations' | 'log'>('generations');
@@ -87,6 +93,7 @@ export const EvolutionStudioPage: React.FC = () => {
 
     // Sorted genomes for the currently viewed generation
     const viewingSnapshot = generationHistory[viewingGenIndex] as GenerationSnapshot | undefined;
+    const profilerStats = useProfilerStats(viewingSnapshot?.genomes ?? []);
     const sortedGenomes = useMemo(() => {
         if (!viewingSnapshot) return [];
         const genomes = [...viewingSnapshot.genomes];
@@ -104,6 +111,32 @@ export const EvolutionStudioPage: React.FC = () => {
     }, [viewingSnapshot, sortKey, sortAsc]);
 
     const activeProfile = profiles.find(p => p.id === datasetProfileId);
+
+    useEffect(() => {
+        if (generationHistory.length === 0) {
+            return;
+        }
+
+        const evaluated = [...generationHistory].reverse().find((s) => s.evaluated);
+        if (!evaluated) {
+            return;
+        }
+
+        const peakConcurrentVramMb = evaluated.genomes.reduce(
+            (max, g) => Math.max(max, g.profiler?.peak_active_memory_mb ?? 0),
+            0,
+        );
+
+        settings.setGenerationProfilingStat(evaluated.generation, {
+            generation: evaluated.generation,
+            totalTrainingMs: evaluated.totalTrainingMs ?? 0,
+            totalInferenceMs: evaluated.totalInferenceMs ?? 0,
+            avgSamplesPerSec: evaluated.avgSamplesPerSec ?? 0,
+            peakConcurrentVramMb,
+            totalJobsCompleted: evaluated.genomes.length,
+            totalJobsFailed: 0,
+        });
+    }, [generationHistory, settings]);
 
     const handleStart = async () => {
         try {
@@ -389,6 +422,18 @@ export const EvolutionStudioPage: React.FC = () => {
                                     <div className={styles.metricLabel}>Nodes</div>
                                     <div className={styles.metricValue}>{avgNodes}</div>
                                 </div>
+                                    <div className={styles.metricCard}>
+                                        <div className={styles.metricLabel}>Train Avg</div>
+                                        <div className={styles.metricValue}>{(profilerStats.avgTrainingTime / 1000).toFixed(2)}s</div>
+                                    </div>
+                                    <div className={styles.metricCard}>
+                                        <div className={styles.metricLabel}>Infer Avg</div>
+                                        <div className={styles.metricValue}>{profilerStats.avgInferenceLatency.toFixed(3)}ms</div>
+                                    </div>
+                                    <div className={styles.metricCard}>
+                                        <div className={styles.metricLabel}>Throughput</div>
+                                        <div className={styles.metricValue}>{profilerStats.avgThroughput.toFixed(1)}/s</div>
+                                    </div>
                             </div>
                         </div>
 
@@ -462,6 +507,14 @@ export const EvolutionStudioPage: React.FC = () => {
                         </div>
                     </div>
 
+                    <div className={styles.chartArea}>
+                        <h3 className={styles.sectionTitle}>Profiler Comparisons</h3>
+                        <div style={{ padding: '0.2rem 0 0.4rem', color: 'var(--color-text-secondary)', fontSize: '0.82rem' }}>
+                            Snapshot summary: Total train {((viewingSnapshot?.totalTrainingMs ?? 0) / 1000).toFixed(2)}s | Avg inference {((viewingSnapshot?.totalInferenceMs ?? 0) / Math.max(1, viewingSnapshot?.genomes.length ?? 1)).toFixed(3)}ms | Avg throughput {(viewingSnapshot?.avgSamplesPerSec ?? 0).toFixed(1)} samples/s
+                        </div>
+                        <ComparisonCharts genomes={sortedGenomes} />
+                    </div>
+
                     {/* Bottom Tabbed Panel: Generations / Event Log */}
                     <div className={styles.logArea}>
                         <div className={styles.tabBar}>
@@ -497,6 +550,18 @@ export const EvolutionStudioPage: React.FC = () => {
 
                         {bottomTab === 'generations' && (
                             <div className={styles.generationsPanel}>
+                                <GenerationStatsTable
+                                    generations={generationHistory}
+                                    selectedGeneration={viewingSnapshot?.generation}
+                                    onSelectGeneration={(gen) => {
+                                        const idx = generationHistory.findIndex((s) => s.generation === gen);
+                                        if (idx >= 0) {
+                                            setAutoFollow(false);
+                                            setViewingGenIndex(idx);
+                                        }
+                                    }}
+                                />
+
                                 {/* Pagination + Controls */}
                                 <div className={styles.genPaginationBar}>
                                     <button
@@ -557,6 +622,11 @@ export const EvolutionStudioPage: React.FC = () => {
                                                     <th>Flash</th>
                                                     <th>RAM</th>
                                                     <th>MACs</th>
+                                                    <th>Train ms</th>
+                                                    <th>Infer ms</th>
+                                                    <th>Peak MB</th>
+                                                    <th>Samples/s</th>
+                                                    <th>Profiler</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -581,6 +651,23 @@ export const EvolutionStudioPage: React.FC = () => {
                                                             <td>{g.resources ? (g.resources.totalFlash / 1024).toFixed(1) + 'K' : '--'}</td>
                                                             <td>{g.resources ? (g.resources.totalRam / 1024).toFixed(1) + 'K' : '--'}</td>
                                                             <td>{g.resources ? (g.resources.totalMacs / 1000).toFixed(1) + 'K' : '--'}</td>
+                                                            <td>{g.profiler ? g.profiler.total_train_duration_ms.toFixed(0) : '--'}</td>
+                                                            <td>{g.profiler ? g.profiler.inference_msec_per_sample.toFixed(3) : '--'}</td>
+                                                            <td>{g.profiler ? g.profiler.peak_active_memory_mb.toFixed(1) : '--'}</td>
+                                                            <td>{g.profiler ? g.profiler.samples_per_sec.toFixed(1) : '--'}</td>
+                                                            <td>
+                                                                {g.profiler ? (
+                                                                    <button
+                                                                        className={styles.profilerButton}
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            setProfilerGenome(g);
+                                                                        }}
+                                                                    >
+                                                                        Open
+                                                                    </button>
+                                                                ) : '--'}
+                                                            </td>
                                                         </tr>
                                                     );
                                                 })}
@@ -656,7 +743,21 @@ export const EvolutionStudioPage: React.FC = () => {
                             ? [...(inspectingGenome.trainingMetrics || []), ...liveMetrics]
                             : inspectingGenome.trainingMetrics
                     }
+                    genomeDetail={
+                        <GenomeDetailPanel
+                            genome={inspectingGenome}
+                            onOpenProfiler={(g) => setProfilerGenome(g)}
+                        />
+                    }
                     onClose={() => setInspectingGenome(null)}
+                />
+            )}
+
+            {profilerGenome?.profiler && (
+                <GenomeProfilerModal
+                    genomeId={profilerGenome.id}
+                    profiler={profilerGenome.profiler}
+                    onClose={() => setProfilerGenome(null)}
                 />
             )}
         </div>

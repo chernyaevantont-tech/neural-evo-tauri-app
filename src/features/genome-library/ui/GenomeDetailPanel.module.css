@@ -1,0 +1,31 @@
+.panel {
+    margin-top: 0.75rem;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--color-border-primary);
+    border-radius: 8px;
+    background: var(--color-bg-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.meta {
+    font-size: 0.82rem;
+    color: var(--color-text-secondary);
+}
+
+.button {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 6px;
+    padding: 0.3rem 0.65rem;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.button:hover {
+    border-color: var(--color-accent-primary);
+    color: var(--color-accent-primary);
+}
