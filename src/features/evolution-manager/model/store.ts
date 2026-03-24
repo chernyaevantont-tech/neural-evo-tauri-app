@@ -1,6 +1,32 @@
 import { create } from 'zustand';
+import type {
+    DeviceProfile,
+    GenerationParetoFront,
+    GenomeGenealogy,
+    GenomeObjectives,
+    StoppingPolicy,
+} from '../../../shared/lib';
 
 export type CrossoverStrategy = 'subgraph-insertion' | 'subgraph-replacement' | 'neat-style' | 'multi-point';
+export type SecondaryObjective = 'latency' | 'model_size' | 'training_time' | 'energy';
+
+export interface GenerationProfilingStats {
+    generation: number;
+    totalTrainingMs: number;
+    totalInferenceMs: number;
+    avgSamplesPerSec: number;
+    peakConcurrentVramMb: number;
+    totalJobsCompleted: number;
+    totalJobsFailed: number;
+}
+
+export interface StoppingProgress {
+    generationsSoFar: number;
+    elapsedSeconds: number;
+    plateauPatience: number;
+    bestAccuracySoFar: number;
+    triggeredCriteria?: string[];
+}
 
 export interface EvolutionSettingsState {
     // Crossover
@@ -76,6 +102,73 @@ export interface EvolutionSettingsState {
     setFastPassThreshold: (val: number) => void;
     partialTrainingEpochs: number;
     setPartialTrainingEpochs: (val: number) => void;
+
+    // Performance & Profiling
+    profilingEnabled: boolean;
+    setProfilingEnabled: (val: boolean) => void;
+    memorySafetyMarginMb: number;
+    setMemorySafetyMarginMb: (val: number) => void;
+    estimatorSafetyFactor: number;
+    setEstimatorSafetyFactor: (val: number) => void;
+
+    // Multi-Objective
+    mobjEnabled: boolean;
+    setMobjEnabled: (val: boolean) => void;
+    primaryObjective: 'accuracy';
+    secondaryObjectives: SecondaryObjective[];
+    setSecondaryObjectives: (val: SecondaryObjective[]) => void;
+
+    // Device Targeting
+    deviceProfileId: string;
+    setDeviceProfileId: (val: string) => void;
+    isCustomDevice: boolean;
+    setIsCustomDevice: (val: boolean) => void;
+    customDeviceParams?: {
+        ram_mb: number;
+        vram_mb?: number;
+        latency_budget_ms: number;
+        max_model_size_mb?: number;
+    };
+    setCustomDeviceParams: (val?: EvolutionSettingsState['customDeviceParams']) => void;
+    selectedDeviceProfile?: DeviceProfile;
+    setSelectedDeviceProfile: (val?: DeviceProfile) => void;
+
+    // Stopping Criteria
+    stoppingPolicy: StoppingPolicy;
+    setStoppingPolicy: (policy: StoppingPolicy) => void;
+
+    // Genealogy
+    genealogyTrackingEnabled: boolean;
+    setGenealogyTrackingEnabled: (val: boolean) => void;
+
+    // Hidden Library
+    autoSaveToHiddenLibrary: boolean;
+    setAutoSaveToHiddenLibrary: (val: boolean) => void;
+
+    // Pareto & Multi-Objective runtime state
+    paretoHistory: Map<number, GenerationParetoFront>;
+    currentParetoFront: GenomeObjectives[];
+    setCurrentParetoFront: (front: GenomeObjectives[]) => void;
+    setParetoForGeneration: (generation: number, front: GenerationParetoFront) => void;
+
+    // Genealogy runtime state
+    genealogyTree?: Map<string, GenomeGenealogy>;
+    setGenealogyTree: (tree?: Map<string, GenomeGenealogy>) => void;
+
+    // Performance tracking runtime state
+    generationProfilingStats: Map<number, GenerationProfilingStats>;
+    setGenerationProfilingStat: (generation: number, stats: GenerationProfilingStats) => void;
+
+    // Stopping criteria progress runtime state
+    currentStoppingProgress: StoppingProgress;
+    setCurrentStoppingProgress: (progress: StoppingProgress) => void;
+
+    // Hidden library auto-save count
+    hiddenLibraryGenomeCount: number;
+    setHiddenLibraryGenomeCount: (count: number) => void;
+    incrementHiddenLibraryGenomeCount: () => void;
+
+    resetAdvancedTracking: () => void;
 }
 
 export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) => ({
@@ -155,6 +248,94 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
     setFastPassThreshold: (val) => set({ fastPassThreshold: Math.max(0, Math.min(1, val)) }),
     partialTrainingEpochs: 20,
     setPartialTrainingEpochs: (val) => set({ partialTrainingEpochs: Math.max(1, Math.min(100, val)) }),
+
+    profilingEnabled: false,
+    setProfilingEnabled: (val) => set({ profilingEnabled: val }),
+    memorySafetyMarginMb: 128,
+    setMemorySafetyMarginMb: (val) => set({ memorySafetyMarginMb: Math.max(0, val) }),
+    estimatorSafetyFactor: 1.1,
+    setEstimatorSafetyFactor: (val) => set({ estimatorSafetyFactor: Math.max(1, val) }),
+
+    mobjEnabled: false,
+    setMobjEnabled: (val) => set({ mobjEnabled: val }),
+    primaryObjective: 'accuracy',
+    secondaryObjectives: ['latency', 'model_size'],
+    setSecondaryObjectives: (val) => set({ secondaryObjectives: val }),
+
+    deviceProfileId: 'default-device',
+    setDeviceProfileId: (val) => set({ deviceProfileId: val }),
+    isCustomDevice: false,
+    setIsCustomDevice: (val) => set({ isCustomDevice: val }),
+    customDeviceParams: undefined,
+    setCustomDeviceParams: (val) => set({ customDeviceParams: val }),
+    selectedDeviceProfile: undefined,
+    setSelectedDeviceProfile: (val) => set({ selectedDeviceProfile: val }),
+
+    stoppingPolicy: {
+        criteria: [{ type: 'ManualStop' }],
+        policy_type: 'any',
+    },
+    setStoppingPolicy: (policy) => set({ stoppingPolicy: policy }),
+
+    genealogyTrackingEnabled: true,
+    setGenealogyTrackingEnabled: (val) => set({ genealogyTrackingEnabled: val }),
+
+    autoSaveToHiddenLibrary: false,
+    setAutoSaveToHiddenLibrary: (val) => set({ autoSaveToHiddenLibrary: val }),
+
+    paretoHistory: new Map(),
+    currentParetoFront: [],
+    setCurrentParetoFront: (front) => set({ currentParetoFront: front }),
+    setParetoForGeneration: (generation, front) =>
+        set((state) => {
+            const next = new Map(state.paretoHistory);
+            next.set(generation, front);
+            return {
+                paretoHistory: next,
+                currentParetoFront: front.pareto_members,
+            };
+        }),
+
+    genealogyTree: undefined,
+    setGenealogyTree: (tree) => set({ genealogyTree: tree }),
+
+    generationProfilingStats: new Map(),
+    setGenerationProfilingStat: (generation, stats) =>
+        set((state) => {
+            const next = new Map(state.generationProfilingStats);
+            next.set(generation, stats);
+            return { generationProfilingStats: next };
+        }),
+
+    currentStoppingProgress: {
+        generationsSoFar: 0,
+        elapsedSeconds: 0,
+        plateauPatience: 0,
+        bestAccuracySoFar: 0,
+        triggeredCriteria: [],
+    },
+    setCurrentStoppingProgress: (progress) => set({ currentStoppingProgress: progress }),
+
+    hiddenLibraryGenomeCount: 0,
+    setHiddenLibraryGenomeCount: (count) => set({ hiddenLibraryGenomeCount: Math.max(0, count) }),
+    incrementHiddenLibraryGenomeCount: () =>
+        set((state) => ({ hiddenLibraryGenomeCount: state.hiddenLibraryGenomeCount + 1 })),
+
+    resetAdvancedTracking: () =>
+        set({
+            paretoHistory: new Map(),
+            currentParetoFront: [],
+            genealogyTree: undefined,
+            generationProfilingStats: new Map(),
+            currentStoppingProgress: {
+                generationsSoFar: 0,
+                elapsedSeconds: 0,
+                plateauPatience: 0,
+                bestAccuracySoFar: 0,
+                triggeredCriteria: [],
+            },
+            hiddenLibraryGenomeCount: 0,
+        }),
 }));
 
 export function getAdaptiveMutationRates(currentNodes: number) {

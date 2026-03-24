@@ -4,6 +4,12 @@ import { useEvolutionSettingsStore, getAdaptiveMutationRates } from '../../evolu
 import { useDatasetManagerStore } from '../../../features/dataset-manager/model/store';
 import { Genome, BaseNode, serializeGenome, deserializeGenome, generateRandomArchitecture, extractShapesFromDatasetProfile } from '../../../entities/canvas-genome';
 import { computeZeroCostScore, ZeroCostMetrics } from './useZeroCostEvaluation';
+import type {
+    GenomeObjectives,
+    GenomeGenealogy,
+    MutationType,
+    TrainingProfiler,
+} from '../../../shared/lib';
 
 export interface EvaluationResult {
     genome_id: string;
@@ -21,6 +27,13 @@ export interface PopulatedGenome {
     trainingMetrics?: BatchMetrics[];
     resources?: { totalFlash: number; totalRam: number; totalMacs: number; totalNodes: number };
     zeroCostMetric?: ZeroCostMetrics;
+    profiler?: TrainingProfiler;
+    objectives?: GenomeObjectives;
+    is_dominated?: boolean;
+    generation?: number;
+    parent_ids?: string[];
+    mutation_type?: MutationType;
+    mutation_params?: Record<string, unknown>;
 }
 
 export interface LogEntry {
@@ -56,6 +69,16 @@ export interface GenerationSnapshot {
     avgNodes: number;
     timestamp: string;
     evaluated: boolean;  // false = pre-eval, true = post-eval with fitness
+    genealogy?: Map<string, GenomeGenealogy>;
+    paretoFront?: GenomeObjectives[];
+    objectiveSpace?: {
+        accuracy: { min: number; max: number };
+        latency: { min: number; max: number };
+        modelSize: { min: number; max: number };
+    };
+    totalTrainingMs?: number;
+    totalInferenceMs?: number;
+    avgSamplesPerSec?: number;
 }
 
 export const useEvolutionLoop = (datasetProfileId: string | null) => {
