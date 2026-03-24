@@ -361,6 +361,7 @@ mod tests {
             role: "Target".to_string(),
             data_type: DataType::Categorical,
             tensor_shape: vec![],
+            num_classes: None,
             locator: DataLocatorDef::CsvDataset(CsvDatasetDef {
                 csv_path: "test.csv".to_string(),
                 has_headers: true,
@@ -390,6 +391,7 @@ mod tests {
             role: "Target".to_string(),
             data_type: DataType::Categorical,
             tensor_shape: vec![],
+            num_classes: None,
             locator: DataLocatorDef::CsvDataset(CsvDatasetDef {
                 csv_path: "test.csv".to_string(),
                 has_headers: true,
