@@ -29,6 +29,7 @@ use burn::{
 };
 
 use crate::dtos::NodeDtoJSON;
+use crate::profiler::ProfilerCollector;
 
 // ---------------------------------------------------------------------------
 // Тензорные типы
@@ -1556,7 +1557,13 @@ pub fn run_eval_pass<B: AutodiffBackend>(
     is_classification: bool,
     session_counter: &std::sync::atomic::AtomicU64,
     session_snapshot: u64,
+    profiler: Option<&mut ProfilerCollector>,
 ) -> (f32, f32) {
+    let mut profiler = profiler;
+    if let Some(p) = profiler.as_mut() {
+        p.mark_train_start();
+    }
+
     let mut optim = burn::optim::AdamConfig::new().init::<B, GraphModel<B>>();
 
     let mut final_loss = 999.0;
@@ -1595,6 +1602,21 @@ pub fn run_eval_pass<B: AutodiffBackend>(
                 batch.inputs.iter().map(|t| t.clone()).collect();
             let cloned_targets: Vec<DynamicTensor<B>> =
                 batch.targets.iter().map(|t| t.clone()).collect();
+
+            if epoch == 0 && batch_idx == 0 {
+                if let Some(p) = profiler.as_mut() {
+                    p.mark_first_batch();
+                }
+            }
+
+            let batch_size = match &batch.inputs[0] {
+                DynamicTensor::Dim2(t) => t.dims()[0],
+                DynamicTensor::Dim3(t) => t.dims()[0],
+                DynamicTensor::Dim4(t) => t.dims()[0],
+            };
+            if let Some(p) = profiler.as_mut() {
+                p.record_batch(batch_size);
+            }
 
             let predictions = model.forward_internal(&cloned_inputs, true, false);
             let loss = model.compute_loss(&predictions, &cloned_targets);
@@ -1663,11 +1685,18 @@ pub fn run_eval_pass<B: AutodiffBackend>(
                         "  >>> Early stopping triggered: Accuracy stalled at {:.2}% (improvement: {:.2}%).",
                         final_acc, improvement
                     );
+                    if let Some(p) = profiler.as_mut() {
+                        p.mark_early_stop_epoch(epoch + 1);
+                    }
                     break;
                 }
             }
             prev_acc = final_acc;
         }
+    }
+
+    if let Some(p) = profiler.as_mut() {
+        p.mark_train_end();
     }
 
     (final_loss, final_acc)
@@ -1680,7 +1709,19 @@ pub fn run_validation_pass<B: AutodiffBackend>(
     batches: &[DynamicBatch<B>],
     split_name: &str,
     is_classification: bool,
+    profiler: Option<&mut ProfilerCollector>,
 ) -> (f32, f32) {
+    let mut profiler = profiler;
+    if split_name.eq_ignore_ascii_case("validation") {
+        if let Some(p) = profiler.as_mut() {
+            p.mark_val_start();
+        }
+    } else if split_name.eq_ignore_ascii_case("test") {
+        if let Some(p) = profiler.as_mut() {
+            p.mark_test_start();
+        }
+    }
+
     println!(">>> [{}] starting with {} batches...", split_name, batches.len());
     let mut val_loss_sum = 0.0f32;
     let mut val_correct = 0usize;
@@ -1706,6 +1747,10 @@ pub fn run_validation_pass<B: AutodiffBackend>(
         val_correct += correct;
         val_total += count;
 
+        if let Some(p) = profiler.as_mut() {
+            p.record_inference_samples(count);
+        }
+
         // Yield during validation too, especially for large test sets
         std::thread::yield_now();
         // Tiny sleep to prevent "GPU command queue saturation" consistent with the training loop
@@ -1724,6 +1769,16 @@ pub fn run_validation_pass<B: AutodiffBackend>(
         split_name, avg_loss, acc
     );
     println!(">>> [{}] finished with loss={:.4}, acc={:.2}%", split_name, avg_loss, acc);
+
+    if split_name.eq_ignore_ascii_case("validation") {
+        if let Some(p) = profiler.as_mut() {
+            p.mark_val_end();
+        }
+    } else if split_name.eq_ignore_ascii_case("test") {
+        if let Some(p) = profiler.as_mut() {
+            p.mark_test_end();
+        }
+    }
 
     (avg_loss, acc)
 }

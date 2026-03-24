@@ -17,6 +17,7 @@ use burn::tensor::Tensor;
 use entities::{DynamicBatch, DynamicTensor, GraphModel, train_simple};
 use serde::{Deserialize, Serialize};
 use zero_cost_proxies::{ZeroCostConfig, ZeroCostMetrics};
+use crate::dtos::TrainingProfiler;
 
 pub mod data_loader;
 pub mod dtos;
@@ -25,6 +26,7 @@ pub mod zero_cost_proxies;
 pub mod csv_loader;
 pub mod shape_inference;
 pub mod orchestrator;
+pub mod profiler;
 
 /// Global session counter. Incremented by `stop_evolution`.
 /// Each `evaluate_population` call captures a snapshot; if the current value
@@ -331,6 +333,7 @@ pub struct EvaluationResult {
     pub genome_id: String,
     pub loss: f32,
     pub accuracy: f32,
+    pub profiler: Option<TrainingProfiler>,
 }
 
 #[tauri::command]
@@ -704,6 +707,7 @@ async fn evaluate_population(
                 genome_id: format!("genome_{}", i),
                 loss: cached_loss,
                 accuracy: cached_acc,
+                profiler: None,
             });
 
             // Emit start + result events so the frontend updates progressively
@@ -742,6 +746,7 @@ async fn evaluate_population(
 
                 let mut best_loss = 999.0_f32;
                 let mut best_acc = 0.0_f32;
+                let mut best_profiler: Option<TrainingProfiler> = None;
 
                 for attempt in 0..MAX_RETRIES {
                     // Check cancellation
@@ -750,7 +755,7 @@ async fn evaluate_population(
                     }
 
                     // Rebuild model each attempt (fresh random weights)
-                    let mut model = crate::entities::GraphModel::<Backend>::build(
+                    let model = crate::entities::GraphModel::<Backend>::build(
                         genome_str,
                         &device,
                         Some(&input_overrides),
@@ -774,13 +779,16 @@ async fn evaluate_population(
                     // Get individual epochs for this genome
                     let epochs = *per_genome_epochs.get(i).unwrap_or(&0) as usize;
 
-                    if epochs > 0 {
-                        // Train on training set
-                        let app_handle_clone = app_handle.clone();
-                        let train_batches_local = train_batches.clone();
+                    let app_handle_clone = app_handle.clone();
+                    let train_batches_local = train_batches.clone();
+                    let val_batches_local = val_batches.clone();
+                    let test_batches_local = test_batches.clone();
+
+                    let (final_loss, final_acc, profiler_result) = tokio::task::spawn_blocking(move || {
                         let mut model_local = model;
-                        
-                        model = tokio::task::spawn_blocking(move || {
+                        let mut profiler = crate::profiler::ProfilerCollector::new();
+
+                        if epochs > 0 {
                             crate::entities::run_eval_pass(
                                 &app_handle_clone,
                                 &mut model_local,
@@ -790,12 +798,48 @@ async fn evaluate_population(
                                 is_classification,
                                 &EVOLUTION_SESSION,
                                 session_snapshot,
+                                Some(&mut profiler),
                             );
-                            model_local
-                        }).await.map_err(|e| format!("Training task failed: {}", e))?;
-                    } else {
-                        println!(">>> Genome {}: Skipping training (0 epochs requested)", i);
-                    }
+                        } else {
+                            println!(">>> Genome {}: Skipping training (0 epochs requested)", i);
+                        }
+
+                        let (val_loss, val_acc) = if !val_batches_local.is_empty() {
+                            crate::entities::run_validation_pass(
+                                &model_local,
+                                &val_batches_local,
+                                "Validation",
+                                is_classification,
+                                Some(&mut profiler),
+                            )
+                        } else {
+                            (0.0, 0.0)
+                        };
+
+                        let (loss, acc) = if !test_batches_local.is_empty() {
+                            crate::entities::run_validation_pass(
+                                &model_local,
+                                &test_batches_local,
+                                "Test",
+                                is_classification,
+                                Some(&mut profiler),
+                            )
+                        } else if !val_batches_local.is_empty() {
+                            (val_loss, val_acc)
+                        } else {
+                            crate::entities::run_validation_pass(
+                                &model_local,
+                                &train_batches_local,
+                                "Train",
+                                is_classification,
+                                None,
+                            )
+                        };
+
+                        (loss, acc, profiler.finalize())
+                    })
+                    .await
+                    .map_err(|e| format!("Training task failed: {}", e))?;
 
                     // Check cancellation after training
                     if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
@@ -806,61 +850,12 @@ async fn evaluate_population(
                         break;
                     }
 
-                    let val_batches_local = val_batches.clone();
-                    let test_batches_local = test_batches.clone();
-                    let train_batches_local = train_batches.clone();
-                    
-                    let (val_loss, val_acc) = if !val_batches_local.is_empty() {
-                         let val_batches_for_closure = val_batches_local.clone();
-                         tokio::task::spawn_blocking({
-                            let model_clone = model.clone();
-                            let is_class = is_classification;
-                            move || {
-                                crate::entities::run_validation_pass(
-                                    &model_clone,
-                                    &val_batches_for_closure,
-                                    "Validation",
-                                    is_class,
-                                )
-                            }
-                         }).await.map_err(|e| format!("Validation task failed: {}", e))?
-                    } else { (0.0, 0.0) };
-
-                    // Evaluate fitness on test set (or val if no test batches, or train)
-                    let (final_loss, final_acc) = if !test_batches_local.is_empty() {
-                        tokio::task::spawn_blocking({
-                            let model_clone = model.clone();
-                            let is_class = is_classification;
-                            move || {
-                                crate::entities::run_validation_pass(
-                                    &model_clone,
-                                    &test_batches_local,
-                                    "Test",
-                                    is_class,
-                                )
-                            }
-                        }).await.map_err(|e| format!("Test task failed: {}", e))?
-                    } else if !val_batches_local.is_empty() {
-                        (val_loss, val_acc)
-                    } else {
-                        tokio::task::spawn_blocking({
-                            let model_clone = model.clone();
-                            let is_class = is_classification;
-                            move || {
-                                crate::entities::run_validation_pass(
-                                    &model_clone,
-                                    &train_batches_local,
-                                    "Train",
-                                    is_class,
-                                )
-                            }
-                        }).await.map_err(|e| format!("Fallback task failed: {}", e))?
-                    };
-
                     // Keep the best attempt
-                    if final_acc > best_acc {
+                    let attempt_is_better = attempt == 0 || final_acc > best_acc;
+                    if attempt_is_better {
                         best_loss = final_loss;
                         best_acc = final_acc;
+                        best_profiler = Some(profiler_result);
                     }
 
                     // If accuracy is above random chance, accept and stop retrying
@@ -888,6 +883,7 @@ async fn evaluate_population(
                     genome_id: format!("genome_{}", i),
                     loss: best_loss,
                     accuracy: best_acc,
+                    profiler: best_profiler,
                 });
 
                 // Notify frontend of this genome's result for progressive UI
@@ -930,6 +926,7 @@ async fn evaluate_population(
                     genome_id: format!("genome_{}", i),
                     loss: 999.0,
                     accuracy: 0.0,
+                    profiler: None,
                 });
 
                 // Notify frontend of this genome's failure result

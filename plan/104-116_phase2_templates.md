@@ -180,7 +180,52 @@ UI для stopping criteria configuration и monitoring:
 
 ---
 
-## Задача 114-116: Reserved для дополнительных features
+## Задача 114: Profiler Memory Breakdown (Backend)
+
+**Сложность**: Medium | **Время**: 6ч | **Зависимости**: Task 101, Task 002
+
+### Описание
+Довести backend-профайлер до полноценного memory breakdown без заглушек:
+- Убрать `0.0` placeholders для `peak_model_params_mb`, `peak_gradient_mb`, `peak_optim_state_mb`, `peak_activation_mb`
+- Добавить deterministic estimator по tensor shapes + dtype (fallback)
+- По возможности подключить runtime peak-источник из backend allocator/device telemetry
+- Согласовать сбор метрик в training/validation/test проходах
+
+### Пошаговое выполнение
+1. Расширить `src-tauri/src/profiler.rs` методами для записи memory breakdown категорий
+2. Добавить helper модуль (или секцию) для оценки памяти:
+	 - `estimate_model_params_mb(model)`
+	 - `estimate_gradients_mb(model)`
+	 - `estimate_optimizer_state_mb(optimizer, model)`
+	 - `estimate_activations_mb(batch_shapes, node_shapes)`
+3. Интегрировать estimation points в `run_eval_pass` и `run_validation_pass`
+4. Если runtime telemetry доступна, обновлять `peak_active_memory_mb` и category peaks на каждом batch
+5. Добавить feature flag/strategy:
+	 - `profiling.memory_mode = "estimate" | "runtime" | "hybrid"`
+6. Обновить сериализацию и payload проверками (должны приходить non-zero значения на нетривиальных моделях)
+
+### Тесты
+- Unit tests в `profiler.rs`:
+	- проверка формул memory estimates
+	- проверка monotonic peak updates
+	- проверка fallback поведения при недоступном runtime telemetry
+- Integration smoke test:
+	- маленькая модель (Dense-only)
+	- убедиться, что все `peak_*_mb` > 0 (кроме edge-case tiny tensor)
+
+### Критерии готовности
+- ✅ `TrainingProfiler` заполняет все `peak_*_mb` категории без постоянных заглушек
+- ✅ Значения категорий детерминированны в режиме `estimate`
+- ✅ В режиме `hybrid` runtime peak корректно перекрывает estimation при наличии telemetry
+- ✅ Тесты проходят (`cargo test --lib profiler` + integration smoke)
+
+### Вывод
+- Изменения: `src-tauri/src/profiler.rs`, `src-tauri/src/entities.rs`, опционально `src-tauri/src/orchestrator/memory_estimator.rs`
+- Результат: корректные memory breakdown метрики для UI задач T102/T118/T119 и тестов T120/T122
+
+---
+
+## Задача 115-116: Reserved для дополнительных features
 
 Если потребуются дополнительные backend функции или UI, они займут эти слоты.
 
