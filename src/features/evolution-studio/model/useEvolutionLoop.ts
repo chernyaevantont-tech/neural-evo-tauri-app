@@ -1,39 +1,14 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useEvolutionSettingsStore, getAdaptiveMutationRates } from '../../evolution-manager/model/store';
-import { useDatasetManagerStore } from '../../../features/dataset-manager/model/store';
-import { Genome, BaseNode, serializeGenome, deserializeGenome, generateRandomArchitecture, extractShapesFromDatasetProfile } from '../../../entities/canvas-genome';
+import { Genome, serializeGenome, deserializeGenome, generateRandomArchitecture, extractShapesFromDatasetProfile } from '../../../entities/canvas-genome';
+import type { BatchMetrics, GenerationSnapshot, PopulatedGenome } from '../../../entities/genome';
+import type { AdaptiveMutationSettings, UseEvolutionLoopParams } from '../../../shared/lib';
 import { computeZeroCostScore, ZeroCostMetrics } from './useZeroCostEvaluation';
-import type {
-    GenomeObjectives,
-    GenomeGenealogy,
-    MutationType,
-    TrainingProfiler,
-} from '../../../shared/lib';
 
 export interface EvaluationResult {
     genome_id: string;
     loss: number;
     accuracy: number;
-}
-
-export interface PopulatedGenome {
-    id: string;
-    genome: Genome;
-    nodes: BaseNode[];
-    loss?: number;
-    accuracy?: number;
-    adjustedFitness?: number;
-    trainingMetrics?: BatchMetrics[];
-    resources?: { totalFlash: number; totalRam: number; totalMacs: number; totalNodes: number };
-    zeroCostMetric?: ZeroCostMetrics;
-    profiler?: TrainingProfiler;
-    objectives?: GenomeObjectives;
-    is_dominated?: boolean;
-    generation?: number;
-    parent_ids?: string[];
-    mutation_type?: MutationType;
-    mutation_params?: Record<string, unknown>;
 }
 
 export interface LogEntry {
@@ -48,41 +23,40 @@ export interface GenerationStat {
     avgNodes: number;
 }
 
-export interface BatchMetrics {
-    epoch: number;
-    batch: number;
-    total_batches: number;
-    loss: number;
-    accuracy: number;
-}
-
 export interface GenomeResultEvent {
     index: number;
     loss: number;
     accuracy: number;
 }
 
-export interface GenerationSnapshot {
-    generation: number;
-    genomes: PopulatedGenome[];
-    bestFitness: number;
-    avgNodes: number;
-    timestamp: string;
-    evaluated: boolean;  // false = pre-eval, true = post-eval with fitness
-    genealogy?: Map<string, GenomeGenealogy>;
-    paretoFront?: GenomeObjectives[];
-    objectiveSpace?: {
-        accuracy: { min: number; max: number };
-        latency: { min: number; max: number };
-        modelSize: { min: number; max: number };
+function getAdaptiveMutationRates(settings: AdaptiveMutationSettings, currentNodes: number) {
+    if (!settings.useAdaptiveMutation) {
+        return {
+            addNode: settings.mutationRates.addNode,
+            removeNode: settings.mutationRates.removeNode,
+            removeSubgraph: settings.mutationRates.removeSubgraph,
+        };
+    }
+
+    const target = settings.adaptiveTargetNodes;
+    if (currentNodes <= target) {
+        const ratio = currentNodes / Math.max(1, target);
+        return {
+            addNode: Math.max(0.1, 0.4 - 0.2 * ratio),
+            removeNode: Math.max(0.01, 0.05 * ratio),
+            removeSubgraph: Math.max(0.01, 0.02 * ratio),
+        };
+    }
+
+    const ratio = Math.min(2.0, currentNodes / target);
+    return {
+        addNode: Math.max(0.01, 0.2 - 0.1 * ratio),
+        removeNode: Math.min(0.8, 0.1 + 0.3 * (ratio - 1)),
+        removeSubgraph: Math.min(0.5, 0.05 + 0.2 * (ratio - 1)),
     };
-    totalTrainingMs?: number;
-    totalInferenceMs?: number;
-    avgSamplesPerSec?: number;
 }
 
-export const useEvolutionLoop = (datasetProfileId: string | null) => {
-    const settings = useEvolutionSettingsStore();
+export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }: UseEvolutionLoopParams) => {
 
     const [isRunning, setIsRunning] = useState(false);
     const [generation, setGeneration] = useState(0);
@@ -212,8 +186,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             let dataTypeHint: 'Image' | 'TemporalSequence' | 'Vector' | undefined = undefined;
 
             if (numRandom > 0) {
-                const profiles = useDatasetManagerStore.getState().profiles;
-                const profile = profiles.find(p => p.id === datasetProfileId);
+                const profile = datasetProfiles.find(p => p.id === datasetProfileId);
 
                 if (profile && profile.streams && profile.streams.length > 0) {
                     const shapes = extractShapesFromDatasetProfile(profile.streams);
@@ -342,7 +315,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                     const extraRounds = Math.floor(Math.random() * 3);
                     for (let r = 0; r < extraRounds; r++) {
                         const dynamicRates = settings.useAdaptiveMutation
-                            ? getAdaptiveMutationRates(clone.getAllNodes().length)
+                            ? getAdaptiveMutationRates(settings, clone.getAllNodes().length)
                             : {
                                 addNode: settings.mutationRates.addNode,
                                 removeNode: settings.mutationRates.removeNode,
@@ -506,8 +479,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             }
 
             // Look up dataset split percentages from the dataset manager
-            const profiles = useDatasetManagerStore.getState().profiles;
-            const currentProfile = profiles.find(p => p.id === datasetProfileId);
+            const currentProfile = datasetProfiles.find(p => p.id === datasetProfileId);
             const trainSplit = currentProfile?.split?.train ?? 80;
             const valSplit = currentProfile?.split?.val ?? 10;
             const testSplit = currentProfile?.split?.test ?? 10;
@@ -691,7 +663,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
 
                     // Mutation
                     const dynamicRates = settings.useAdaptiveMutation
-                        ? getAdaptiveMutationRates(childGenome.getAllNodes().length)
+                        ? getAdaptiveMutationRates(settings, childGenome.getAllNodes().length)
                         : {
                             addNode: settings.mutationRates.addNode,
                             removeNode: settings.mutationRates.removeNode,
@@ -792,8 +764,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             }
 
             // === PHASE 3: Validate dataset profile before evolution ===
-            const profiles = useDatasetManagerStore.getState().profiles;
-            const profile = profiles.find(p => p.id === datasetProfileId);
+            const profile = datasetProfiles.find(p => p.id === datasetProfileId);
             
             if (profile) {
                 // Check if dataset has been scanned and validated

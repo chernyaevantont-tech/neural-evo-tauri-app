@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { BaseNode } from '../../../../entities/canvas-genome/model/nodes/base_node';
+import { BaseNode } from '../../model/nodes/base_node';
 import { getNodeColor, getNodeLabel, theme } from '../../../../shared/lib';
 import styles from './GenomeSvgPreview.module.css';
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import styles from './EvolutionSettingsPanel.module.css';
-import { useEvolutionSettingsStore, CrossoverStrategy } from '../../features/evolution-manager/model/store';
+import { useEvolutionSettingsStore, type CrossoverStrategy } from '../../features/evolution-manager';
 
 interface EvolutionSettingsPanelProps {
     disabled?: boolean;

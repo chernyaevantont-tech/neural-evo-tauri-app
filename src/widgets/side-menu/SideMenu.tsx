@@ -5,9 +5,9 @@ import { PiGraph } from "react-icons/pi";
 import { HiOutlineMenu } from "react-icons/hi";
 import { RxCross1 } from "react-icons/rx";
 import { AddNodeToolbar } from "../../features/add-node";
-import { LoadGenomeButton } from "../../features/genome-save-load/ui/LoadGenomeButton";
+import { LoadGenomeButton } from "../../features/genome-save-load";
 import { EvolutionManager } from "../../features/evolution-manager";
-import { LoadFromLibraryButton } from "../../features/genome-library/ui/LibraryButtons";
+import { LoadFromLibraryButton } from "../../features/genome-library";
 
 export type MenuType = "Layers" | "Genomes";
 

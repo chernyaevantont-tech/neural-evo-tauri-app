@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import styles from './DatasetManagerPage.module.css';
-import { CsvPreprocessingConfig } from '../../features/dataset-manager/model/store';
+import type { CsvPreprocessingConfig } from '../../features/dataset-manager';
 import { BsEye, BsCheckCircle, BsExclamationTriangle } from 'react-icons/bs';
 
 interface CsvDatasetLocator {

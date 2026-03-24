@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import styles from './DatasetManagerPage.module.css';
-import { DataStream, DatasetProfile, useDatasetManagerStore, VisionSettings, TabularSettings, defaultVisionSettings, defaultTabularSettings, CsvPreprocessingConfig } from '../../features/dataset-manager/model/store';
+import { useDatasetManagerStore, defaultTabularSettings, defaultVisionSettings, type CsvPreprocessingConfig, type DataStream, type DatasetProfile, type TabularSettings, type VisionSettings } from '../../features/dataset-manager';
 import { BsPlusLg, BsTrash, BsBoxArrowInRight, BsBullseye, BsGearFill, BsEye } from 'react-icons/bs';
 import { CsvPreviewModal } from './CsvPreviewModal';
 import { CsvDatasetConfigPanel } from './CsvDatasetConfigPanel';

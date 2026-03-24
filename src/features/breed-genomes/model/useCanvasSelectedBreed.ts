@@ -1,8 +1,8 @@
 import { useCanvasGenomeStore } from "../../../entities/canvas-genome";
 import { useCanvasStateStore } from "../../../entities/canvas-state"
-import { useEvolutionSettingsStore } from "../../evolution-manager";
+import type { EvolutionSettingsState } from "../../evolution-manager";
 
-export const useCanvasSelectedBreed = () => {
+export const useCanvasSelectedBreed = (settings: Pick<EvolutionSettingsState, 'useMaxNodesLimit' | 'maxNodesLimit' | 'selectedCrossovers'>) => {
     const breedingStartGenomeId = useCanvasStateStore(state => state.breedingStartGenomeId);
     const setBreedingStartGenomeId = useCanvasStateStore(state => state.setBreedingStartGenomeId)
     const addGenome = useCanvasGenomeStore(state => state.addGenome);
@@ -11,8 +11,6 @@ export const useCanvasSelectedBreed = () => {
     const canvasHeight = useCanvasStateStore(state => state.canvasHeight);
     const translate = useCanvasStateStore(state => state.translate);
     const scale = useCanvasStateStore(state => state.scale);
-
-    const settings = useEvolutionSettingsStore();
 
     return (genomeId: string | null) => {
         if (genomeId && breedingStartGenomeId && genomeId != breedingStartGenomeId) {

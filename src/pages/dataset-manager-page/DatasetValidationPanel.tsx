@@ -1,6 +1,6 @@
 import React from 'react';
 import styles from './DatasetManagerPage.module.css';
-import { DatasetValidationReport } from '../../features/dataset-manager/model/store';
+import type { DatasetValidationReport } from '../../features/dataset-manager';
 import { BsCheckCircle, BsExclamationTriangle, BsExclamationCircle } from 'react-icons/bs';
 
 interface Props {

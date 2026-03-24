@@ -4,7 +4,7 @@ import styles from './SidePanel.module.css';
 import { MenuType } from '../side-menu/SideMenu';
 import { GenomeCard } from '../../entities/canvas-genome/ui/GenomeCard/GenomeCard';
 import { useCanvasStateStore } from '../../entities/canvas-state';
-import { SaveGenomeButton } from '../../features/genome-save-load/ui/SaveGenomeButton';
+import { SaveGenomeButton } from '../../features/genome-save-load';
 
 interface SidePanelProps {
   menuType: MenuType;

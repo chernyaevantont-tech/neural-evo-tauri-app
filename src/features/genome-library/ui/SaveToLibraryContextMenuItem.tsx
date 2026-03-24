@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { BsBoxArrowInDown } from 'react-icons/bs';
 import { useCanvasStateStore } from '../../../entities/canvas-state';
-import { useCanvasGenomeStore } from '../../../entities/canvas-genome/model/store';
-import { serializeGenome } from '../../../entities/canvas-genome/lib/serializeGenome';
+import { serializeGenome, useCanvasGenomeStore } from '../../../entities/canvas-genome';
 import { ContextMenu } from '../../../shared/ui/ContextMenu/ContextMenu';
 import { useGenomeLibraryStore } from '../model/store';
 

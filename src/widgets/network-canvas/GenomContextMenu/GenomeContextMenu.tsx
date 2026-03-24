@@ -1,8 +1,7 @@
 import { useCanvasStateStore } from "../../../entities/canvas-state";
 import { DeleteGenomeContextMenuItem } from "../../../features/delete-genome";
-import { TestTrainGenomeContextMenuItem } from "../../../features/train-genome/ui/TestTrainGenomeContextMenuItem";
-import { TestTrainOnImageFolderContextMenuItem } from "../../../features/train-genome/ui/TestTrainOnImageFolderContextMenuItem";
-import { SaveToLibraryContextMenuItem } from "../../../features/genome-library/ui/SaveToLibraryContextMenuItem";
+import { TestTrainGenomeContextMenuItem, TestTrainOnImageFolderContextMenuItem } from "../../../features/train-genome";
+import { SaveToLibraryContextMenuItem } from "../../../features/genome-library";
 import { ContextMenu } from "../../../shared/ui/ContextMenu/ContextMenu"
 
 export const GenomeContextMenu: React.FC = () => {

@@ -1,8 +1,8 @@
 import React from 'react';
 import styles from './InspectGenomeModal.module.css';
 import { BaseNode, GenomeSvgPreview } from '../../entities/canvas-genome';
+import type { BatchMetrics } from '../../entities/genome';
 import { BsX } from 'react-icons/bs';
-import { BatchMetrics } from '../../features/evolution-studio/model/useEvolutionLoop';
 import {
     Chart as ChartJS,
     CategoryScale,

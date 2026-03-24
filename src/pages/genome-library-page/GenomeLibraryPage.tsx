@@ -3,14 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import styles from './GenomeLibraryPage.module.css';
 import { TitleBar } from '../../widgets/title-bar/TitleBar';
 import { BsCollection, BsBoxArrowUpRight, BsTrash, BsSearch, BsFileEarmarkPlus } from 'react-icons/bs';
-import { useGenomeLibraryStore, GenomeLibraryEntry, CompatibilityStatus } from '../../features/genome-library';
-import { checkCompatibility } from '../../features/genome-library/lib/compatibility';
-import { GenomePreviewCanvas } from '../../features/genome-library/ui/GenomePreviewCanvas';
-import { useDatasetManagerStore } from '../../features/dataset-manager/model/store';
-import { loadGenomeApi } from '../../features/genome-save-load/api/loadGenome';
-import { useCanvasGenomeStore } from '../../entities/canvas-genome/model/store';
-import { useCanvasStateStore } from '../../entities/canvas-state/model/store';
-import { deserializeGenome } from '../../entities/canvas-genome/lib/deserializeGenome';
+import { checkCompatibility, GenomePreviewCanvas, useGenomeLibraryStore, type CompatibilityStatus, type GenomeLibraryEntry } from '../../features/genome-library';
+import { useDatasetManagerStore } from '../../features/dataset-manager';
+import { loadGenomeApi } from '../../features/genome-save-load';
+import { deserializeGenome, useCanvasGenomeStore } from '../../entities/canvas-genome';
+import { useCanvasStateStore } from '../../entities/canvas-state';
 
 type SortKey = 'date' | 'name' | 'nodes';
 

@@ -2,7 +2,7 @@ import React from 'react';
 import styles from './DatasetManagerPage.module.css';
 import { TitleBar } from '../../widgets/title-bar/TitleBar';
 import { BsDatabaseAdd, BsFolder2Open, BsFiletypeCsv, BsSearch, BsCheckCircle, BsExclamationTriangle, BsLightningCharge } from 'react-icons/bs';
-import { useDatasetManagerStore, DatasetSourceType, ScanResult } from '../../features/dataset-manager/model/store';
+import { useDatasetManagerStore, type DatasetSourceType, type ScanResult } from '../../features/dataset-manager';
 import { CreateDatasetModal } from './CreateDatasetModal';
 import { DataStreamsPanel } from './DataStreamsPanel';
 import { DatasetValidationPanel } from './DatasetValidationPanel';

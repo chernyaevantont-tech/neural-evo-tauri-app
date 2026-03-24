@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { CopyNodeContextMenuItem } from "../../../features/copy-node";
 import { DeleteNodeContextMenuItem } from "../../../features/delete-node";
-import { EditNodeContextMenuItem, useEditNode } from "../../../features/edit-node";
+import { EditNodeContextMenuItem, EditNodeModal, useEditNode } from "../../../features/edit-node";
 import { ContextMenu } from "../../../shared/ui/ContextMenu/ContextMenu"
-import { EditNodeModal } from "../../../features/edit-node/ui/EditNodeModal/EditNodeModal";
 import { useCanvasStateStore } from "../../../entities/canvas-state";
 import { BaseNode, useCanvasGenomeStore } from "../../../entities/canvas-genome";
 

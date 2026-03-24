@@ -3,14 +3,14 @@ import { TitleBar } from '../../widgets/title-bar/TitleBar';
 import styles from './EvolutionStudioPage.module.css';
 import { useNavigate } from 'react-router-dom';
 import { BsArrowLeft, BsPlay, BsStop, BsPlus, BsX } from 'react-icons/bs';
-import { useEvolutionLoop } from '../../features/evolution-studio/model/useEvolutionLoop';
-import { useEvolutionSettingsStore } from '../../features/evolution-manager/model/store';
-import { useDatasetManagerStore } from '../../features/dataset-manager/model/store';
+import { useEvolutionLoop } from '../../features/evolution-studio';
+import { useEvolutionSettingsStore } from '../../features/evolution-manager';
+import { useDatasetManagerStore } from '../../features/dataset-manager';
 import { useCanvasGenomeStore, serializeGenome } from '../../entities/canvas-genome';
+import type { GenerationSnapshot, PopulatedGenome } from '../../entities/genome';
 import { GenomeCatalogPicker } from '../../features/genome-library';
-import { useGenomeLibraryStore } from '../../features/genome-library/model/store';
+import { useGenomeLibraryStore } from '../../features/genome-library';
 import { EvolutionSettingsPanel } from './EvolutionSettingsPanel';
-import { PopulatedGenome, GenerationSnapshot } from '../../features/evolution-studio/model/useEvolutionLoop';
 import { GenomeSvgPreview } from '../../entities/canvas-genome/ui/GenomeSvgPreview/GenomeSvgPreview';
 import { InspectGenomeModal } from './InspectGenomeModal';
 import {
@@ -42,6 +42,8 @@ ChartJS.register(
 export const EvolutionStudioPage: React.FC = () => {
     const navigate = useNavigate();
     const datasetProfileId = useDatasetManagerStore(state => state.selectedProfileId);
+    const profiles = useDatasetManagerStore(state => state.profiles);
+    const settings = useEvolutionSettingsStore();
     const {
         isRunning,
         startEvolution,
@@ -55,12 +57,14 @@ export const EvolutionStudioPage: React.FC = () => {
         currentEvaluatingIndex,
         liveMetrics,
         generationHistory
-    } = useEvolutionLoop(datasetProfileId);
+    } = useEvolutionLoop({
+        datasetProfileId,
+        settings,
+        datasetProfiles: profiles,
+    });
 
     const genomes = useCanvasGenomeStore(state => state.genomes);
     const { entries, loadGenomeContent } = useGenomeLibraryStore();
-    const profiles = useDatasetManagerStore(state => state.profiles);
-    const settings = useEvolutionSettingsStore();
 
     const [showCatalogPicker, setShowCatalogPicker] = useState(false);
     const [selectedSeedIds, setSelectedSeedIds] = useState<string[]>([]);

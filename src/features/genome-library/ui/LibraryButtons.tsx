@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { BsCollection } from 'react-icons/bs';
 import { Button } from '../../../shared';
-import { useCanvasGenomeStore } from '../../../entities/canvas-genome/model/store';
-import { useCanvasStateStore } from '../../../entities/canvas-state/model/store';
-import { deserializeGenome } from '../../../entities/canvas-genome/lib/deserializeGenome';
+import { deserializeGenome, useCanvasGenomeStore } from '../../../entities/canvas-genome';
+import { useCanvasStateStore } from '../../../entities/canvas-state';
 import { useGenomeLibraryStore, GenomeLibraryEntry } from '../model/store';
 import { GenomeCatalogPicker } from './GenomeCatalogPicker';
 

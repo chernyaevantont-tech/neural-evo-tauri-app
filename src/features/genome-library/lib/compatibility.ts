@@ -1,5 +1,16 @@
 import { GenomeLibraryEntry, CompatibilityStatus } from '../model/store';
-import { DataStream, DataType } from '../../dataset-manager/model/store';
+
+type DataType =
+    | 'Image'
+    | 'Vector'
+    | 'Categorical'
+    | 'Text'
+    | 'TemporalSequence';
+
+type DataStream = {
+    role: 'Input' | 'Target' | 'Ignore';
+    dataType: DataType;
+};
 
 /**
  * Get the tensor dimensionality for a given DataType.

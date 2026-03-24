@@ -15,6 +15,7 @@ import { useContinueCanvasPanning, useEndCanvasPanning, useStartCanvasPanning } 
 import { useResizeCanvas } from '../../features/resize-canvas';
 import { useConnectNodes } from '../../features/connect-nodes';
 import { useCanvasSelectedBreed } from '../../features/breed-genomes';
+import { useEvolutionSettingsStore } from '../../features/evolution-manager';
 import { ConnectionContextMenu } from './ConnectionContextMenu/ConnectionContextMenu';
 import { NodeContextMenu } from './NodeContextMenu/NodeContextMenu';
 import { GenomeContextMenu } from './GenomContextMenu/GenomeContextMenu';
@@ -57,7 +58,8 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
   const resizeCanvas = useResizeCanvas();
 
   const connectNodes = useConnectNodes();
-  const breedGenomes = useCanvasSelectedBreed();
+  const settings = useEvolutionSettingsStore();
+  const breedGenomes = useCanvasSelectedBreed(settings);
 
   useEffect(() => {
     if (!svgRef || !svgRef.current) return;

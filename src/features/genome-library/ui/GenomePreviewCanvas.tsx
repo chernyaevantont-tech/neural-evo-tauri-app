@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useGenomeLibraryStore } from '../model/store';
-import { deserializeGenome } from '../../../entities/canvas-genome/lib/deserializeGenome';
-import { BaseNode, GenomeSvgPreview } from '../../../entities/canvas-genome';
+import { BaseNode, deserializeGenome, GenomeSvgPreview } from '../../../entities/canvas-genome';
 
 interface GenomePreviewCanvasProps {
     genomeId: string;

@@ -1,5 +1,6 @@
 export { EvolutionManager } from './ui/EvolutionManager';
 export { useEvolutionSettingsStore } from './model/store';
+export { getAdaptiveMutationRates } from './model/store';
 export type {
 	CrossoverStrategy,
 	EvolutionSettingsState,
