@@ -28,6 +28,7 @@ pub mod shape_inference;
 pub mod orchestrator;
 pub mod profiler;
 pub mod pareto;
+pub mod device_profiles;
 
 /// Global session counter. Incremented by `stop_evolution`.
 /// Each `evaluate_population` call captures a snapshot; if the current value
@@ -1881,8 +1882,59 @@ async fn compute_zero_cost_score(
 async fn compute_pareto_front(
     generation: u32,
     genomes: Vec<dtos::GenomeObjectives>,
+    constraints: Option<device_profiles::DeviceResourceConstraints>,
+    alpha: Option<f32>,
 ) -> Result<dtos::GenerationParetoFront, String> {
-    Ok(pareto::compute_generation_pareto_front(generation, &genomes))
+    let adjusted = if let Some(c) = constraints.as_ref() {
+        let penalty_alpha = alpha.unwrap_or(1.0);
+        genomes
+            .iter()
+            .cloned()
+            .map(|mut g| {
+                let (adjusted_accuracy, _) = device_profiles::score_fitness_with_device_constraints(
+                    g.accuracy,
+                    &g,
+                    c,
+                    penalty_alpha,
+                );
+                g.accuracy = adjusted_accuracy;
+                g
+            })
+            .collect::<Vec<_>>()
+    } else {
+        genomes
+    };
+
+    Ok(pareto::compute_generation_pareto_front(generation, &adjusted))
+}
+
+#[tauri::command]
+async fn get_device_profiles() -> Result<Vec<device_profiles::DeviceProfileDto>, String> {
+    Ok(device_profiles::built_in_profiles())
+}
+
+#[tauri::command]
+async fn validate_genome_for_device(
+    genome_objectives: dtos::GenomeObjectives,
+    constraints: device_profiles::DeviceResourceConstraints,
+) -> Result<device_profiles::DeviceValidationResult, String> {
+    Ok(device_profiles::validate_genome_for_device(
+        &genome_objectives,
+        &constraints,
+    ))
+}
+
+#[tauri::command]
+async fn apply_device_penalty(
+    base_fitness: f32,
+    violation_score: f32,
+    alpha: f32,
+) -> Result<f32, String> {
+    Ok(device_profiles::apply_device_penalty(
+        base_fitness,
+        violation_score,
+        alpha,
+    ))
 }
 
 
@@ -1910,6 +1962,9 @@ pub fn run() {
             preview_csv,
             compute_zero_cost_score,
             compute_pareto_front,
+            get_device_profiles,
+            validate_genome_for_device,
+            apply_device_penalty,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
