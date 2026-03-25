@@ -572,6 +572,8 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                 trainSplit,
                 valSplit,
                 testSplit,
+                genomeIds: population.map((p) => p.id),
+                sourceGeneration: generation,
             });
 
             // 3. Map Results & Apply Fitness (Parsimony + Resource-Aware + Zero-Cost)

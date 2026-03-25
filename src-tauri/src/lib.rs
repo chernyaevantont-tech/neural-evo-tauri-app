@@ -428,6 +428,8 @@ async fn evaluate_population(
     train_split: usize,
     val_split: usize,
     test_split: usize,
+    genome_ids: Option<Vec<String>>,
+    source_generation: Option<u32>,
 ) -> Result<Vec<EvaluationResult>, String> {
     eprintln!(
         ">>> Entered evaluate_population. Preparing to process dataset profile '{}'...",
@@ -741,10 +743,57 @@ async fn evaluate_population(
         test_batches.len()
     );
 
+    let autosave_hidden_archive = |genome_id: &str,
+                                   genome_str: &str,
+                                   loss: f32,
+                                   accuracy: f32,
+                                   profiler: Option<TrainingProfiler>| {
+        let mut generation = source_generation.unwrap_or(0);
+        let mut parent_genomes = Vec::new();
+
+        if let Ok(store) = GENEALOGY_STORE.lock() {
+            if let Some(record) = store.graph().nodes.get(genome_id) {
+                generation = record.generation;
+                parent_genomes = record.parent_ids.clone();
+            }
+        }
+
+        let fitness_metrics = GenomeFitnessMetrics {
+            loss,
+            accuracy,
+            adjusted_fitness: None,
+            inference_latency_ms: profiler.as_ref().map(|p| p.inference_msec_per_sample),
+            model_size_mb: None,
+            training_time_ms: profiler.as_ref().map(|p| p.total_train_duration_ms),
+        };
+
+        let autosave_tags = vec!["hidden".to_string(), "autosave".to_string()];
+        let autosave_name = format!("Hidden {}", genome_id);
+
+        if let Err(e) = save_hidden_genome(
+            genome_str,
+            autosave_name,
+            autosave_tags,
+            generation,
+            parent_genomes,
+            fitness_metrics,
+            profiler,
+        ) {
+            eprintln!(
+                "[hidden_library] autosave failed for genome '{}': {}",
+                genome_id, e
+            );
+        }
+    };
+
     // 5. Evaluation Loop over each Genome
 
     for (i, genome_str) in genomes.iter().enumerate() {
-        let genome_id = format!("genome_{}", i);
+        let genome_id = genome_ids
+            .as_ref()
+            .and_then(|ids| ids.get(i))
+            .cloned()
+            .unwrap_or_else(|| format!("genome_{}", i));
 
         // Check cancellation between genomes
         if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
@@ -809,6 +858,8 @@ async fn evaluate_population(
                     accuracy: cached_acc,
                 },
             );
+
+            autosave_hidden_archive(&genome_id, genome_str, cached_loss, cached_acc, None);
             continue;
         }
 
@@ -966,7 +1017,7 @@ async fn evaluate_population(
                     genome_id: genome_id.clone(),
                     loss: best_loss,
                     accuracy: best_acc,
-                    profiler: best_profiler,
+                    profiler: best_profiler.clone(),
                 });
 
                 // Notify frontend of this genome's result for progressive UI
@@ -983,6 +1034,14 @@ async fn evaluate_population(
                         loss: best_loss,
                         accuracy: best_acc,
                     },
+                );
+
+                autosave_hidden_archive(
+                    &genome_id,
+                    genome_str,
+                    best_loss,
+                    best_acc,
+                    best_profiler,
                 );
 
                 // Only cache results above random chance threshold
@@ -1635,6 +1694,10 @@ async fn validate_dataset_profile(profile_json: String) -> Result<dtos::DatasetV
 // --- Genome Library ---
 
 fn get_genomes_dir() -> PathBuf {
+    if let Ok(custom_dir) = std::env::var("NEURAL_EVO_GENOMES_DIR") {
+        return PathBuf::from(custom_dir);
+    }
+
     let exe_dir = std::env::current_exe()
         .unwrap()
         .parent()
@@ -1645,6 +1708,20 @@ fn get_genomes_dir() -> PathBuf {
 
 fn get_meta_path() -> PathBuf {
     get_genomes_dir().join("meta.json")
+}
+
+fn current_unix_ms() -> u64 {
+    chrono::Utc::now().timestamp_millis().max(0) as u64
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+pub struct GenomeFitnessMetrics {
+    pub loss: f32,
+    pub accuracy: f32,
+    pub adjusted_fitness: Option<f32>,
+    pub inference_latency_ms: Option<f32>,
+    pub model_size_mb: Option<f32>,
+    pub training_time_ms: Option<u64>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -1659,6 +1736,35 @@ pub struct GenomeLibraryEntry {
     pub layer_types: Vec<String>,
     pub best_loss: Option<f32>,
     pub best_accuracy: Option<f32>,
+    #[serde(default)]
+    pub is_hidden: bool,
+    #[serde(default)]
+    pub source_generation: u32,
+    #[serde(default)]
+    pub parent_genomes: Vec<String>,
+    #[serde(default)]
+    pub fitness_metrics: Option<GenomeFitnessMetrics>,
+    #[serde(default)]
+    pub profiler_data: Option<TrainingProfiler>,
+    #[serde(default)]
+    pub created_at_unix_ms: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HiddenLibraryQuery {
+    pub generation_min: Option<u32>,
+    pub generation_max: Option<u32>,
+    pub accuracy_min: Option<f32>,
+    pub accuracy_max: Option<f32>,
+    pub latency_min_ms: Option<f32>,
+    pub latency_max_ms: Option<f32>,
+    pub model_size_min_mb: Option<f32>,
+    pub model_size_max_mb: Option<f32>,
+    pub parent_genome_id: Option<String>,
+    pub created_after_unix_ms: Option<u64>,
+    pub created_before_unix_ms: Option<u64>,
+    pub limit: Option<usize>,
 }
 
 fn read_meta() -> Vec<GenomeLibraryEntry> {
@@ -1716,9 +1822,154 @@ fn extract_genome_metadata(genome_str: &str) -> (Vec<usize>, Vec<usize>, usize, 
     (input_dims, output_dims, total_nodes, layer_types)
 }
 
+fn save_library_entry(genome_str: &str, mut entry: GenomeLibraryEntry) -> Result<GenomeLibraryEntry, String> {
+    let dir = get_genomes_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let file_path = dir.join(format!("{}.evog", entry.id));
+    fs::write(&file_path, genome_str).map_err(|e| e.to_string())?;
+
+    let mut meta = read_meta();
+    meta.retain(|e| e.id != entry.id);
+    if entry.created_at_unix_ms == 0 {
+        entry.created_at_unix_ms = current_unix_ms();
+    }
+    meta.push(entry.clone());
+    write_meta(&meta)?;
+
+    Ok(entry)
+}
+
+fn save_hidden_genome(
+    genome_str: &str,
+    name: String,
+    tags: Vec<String>,
+    source_generation: u32,
+    parent_genomes: Vec<String>,
+    fitness_metrics: GenomeFitnessMetrics,
+    profiler_data: Option<TrainingProfiler>,
+) -> Result<GenomeLibraryEntry, String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let (input_dims, output_dims, total_nodes, layer_types) = extract_genome_metadata(genome_str);
+    let now = chrono::Utc::now();
+
+    let entry = GenomeLibraryEntry {
+        id,
+        name,
+        tags,
+        created_at: now.to_rfc3339(),
+        input_dims,
+        output_dims,
+        total_nodes,
+        layer_types,
+        best_loss: Some(fitness_metrics.loss),
+        best_accuracy: Some(fitness_metrics.accuracy),
+        is_hidden: true,
+        source_generation,
+        parent_genomes,
+        fitness_metrics: Some(fitness_metrics),
+        profiler_data,
+        created_at_unix_ms: now.timestamp_millis().max(0) as u64,
+    };
+
+    save_library_entry(genome_str, entry)
+}
+
+fn matches_hidden_query(entry: &GenomeLibraryEntry, query: &HiddenLibraryQuery) -> bool {
+    if !entry.is_hidden {
+        return false;
+    }
+
+    if let Some(min_gen) = query.generation_min {
+        if entry.source_generation < min_gen {
+            return false;
+        }
+    }
+    if let Some(max_gen) = query.generation_max {
+        if entry.source_generation > max_gen {
+            return false;
+        }
+    }
+
+    let metrics = entry.fitness_metrics.as_ref();
+    if let Some(min_acc) = query.accuracy_min {
+        let acc = metrics.map(|m| m.accuracy).unwrap_or(0.0);
+        if acc < min_acc {
+            return false;
+        }
+    }
+    if let Some(max_acc) = query.accuracy_max {
+        let acc = metrics.map(|m| m.accuracy).unwrap_or(0.0);
+        if acc > max_acc {
+            return false;
+        }
+    }
+    if let Some(min_latency) = query.latency_min_ms {
+        let latency = metrics.and_then(|m| m.inference_latency_ms).unwrap_or(f32::MAX);
+        if latency < min_latency {
+            return false;
+        }
+    }
+    if let Some(max_latency) = query.latency_max_ms {
+        let latency = metrics.and_then(|m| m.inference_latency_ms).unwrap_or(f32::MAX);
+        if latency > max_latency {
+            return false;
+        }
+    }
+    if let Some(min_size) = query.model_size_min_mb {
+        let size = metrics.and_then(|m| m.model_size_mb).unwrap_or(f32::MAX);
+        if size < min_size {
+            return false;
+        }
+    }
+    if let Some(max_size) = query.model_size_max_mb {
+        let size = metrics.and_then(|m| m.model_size_mb).unwrap_or(f32::MAX);
+        if size > max_size {
+            return false;
+        }
+    }
+
+    if let Some(parent) = query.parent_genome_id.as_ref() {
+        if !entry.parent_genomes.iter().any(|p| p == parent) {
+            return false;
+        }
+    }
+
+    if let Some(after) = query.created_after_unix_ms {
+        if entry.created_at_unix_ms < after {
+            return false;
+        }
+    }
+    if let Some(before) = query.created_before_unix_ms {
+        if entry.created_at_unix_ms > before {
+            return false;
+        }
+    }
+
+    true
+}
+
 #[tauri::command]
 async fn list_library_genomes() -> Result<Vec<GenomeLibraryEntry>, String> {
-    Ok(read_meta())
+    let mut entries: Vec<GenomeLibraryEntry> = read_meta().into_iter().filter(|e| !e.is_hidden).collect();
+    entries.sort_by_key(|e| e.created_at_unix_ms);
+    Ok(entries)
+}
+
+#[tauri::command]
+async fn list_hidden_library(query: Option<HiddenLibraryQuery>) -> Result<Vec<GenomeLibraryEntry>, String> {
+    let q = query.unwrap_or_default();
+    let mut entries: Vec<GenomeLibraryEntry> = read_meta()
+        .into_iter()
+        .filter(|e| matches_hidden_query(e, &q))
+        .collect();
+
+    entries.sort_by(|a, b| b.created_at_unix_ms.cmp(&a.created_at_unix_ms));
+    if let Some(limit) = q.limit {
+        entries.truncate(limit);
+    }
+
+    Ok(entries)
 }
 
 #[tauri::command]
@@ -1728,35 +1979,69 @@ async fn save_to_library(
     tags: Vec<String>,
 ) -> Result<GenomeLibraryEntry, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let dir = get_genomes_dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-    // Save .evog file
-    let file_path = dir.join(format!("{}.evog", id));
-    fs::write(&file_path, &genome_str).map_err(|e| e.to_string())?;
-
-    // Extract metadata from genome
     let (input_dims, output_dims, total_nodes, layer_types) = extract_genome_metadata(&genome_str);
+    let now = chrono::Utc::now();
 
     let entry = GenomeLibraryEntry {
-        id: id.clone(),
+        id,
         name,
         tags,
-        created_at: chrono::Utc::now().to_rfc3339(),
+        created_at: now.to_rfc3339(),
         input_dims,
         output_dims,
         total_nodes,
         layer_types,
         best_loss: None,
         best_accuracy: None,
+        is_hidden: false,
+        source_generation: 0,
+        parent_genomes: vec![],
+        fitness_metrics: None,
+        profiler_data: None,
+        created_at_unix_ms: now.timestamp_millis().max(0) as u64,
     };
 
-    // Update meta.json
-    let mut meta = read_meta();
-    meta.push(entry.clone());
-    write_meta(&meta)?;
+    save_library_entry(&genome_str, entry)
+}
 
-    Ok(entry)
+#[tauri::command]
+async fn unhide_genome(genome_id: String) -> Result<(), String> {
+    let mut meta = read_meta();
+    let mut found = false;
+
+    for entry in &mut meta {
+        if entry.id == genome_id {
+            entry.is_hidden = false;
+            found = true;
+            break;
+        }
+    }
+
+    if !found {
+        return Err(format!("Hidden genome '{}' not found", genome_id));
+    }
+
+    write_meta(&meta)
+}
+
+#[tauri::command]
+async fn delete_hidden_genome(genome_id: String) -> Result<(), String> {
+    let dir = get_genomes_dir();
+    let file_path = dir.join(format!("{}.evog", genome_id));
+    if file_path.exists() {
+        fs::remove_file(&file_path).map_err(|e| e.to_string())?;
+    }
+
+    let mut meta = read_meta();
+    let old_len = meta.len();
+    meta.retain(|e| e.id != genome_id || !e.is_hidden);
+
+    if old_len == meta.len() {
+        return Err(format!("Hidden genome '{}' not found", genome_id));
+    }
+
+    write_meta(&meta)
 }
 
 #[tauri::command]
@@ -2019,6 +2304,208 @@ async fn apply_device_penalty(
 }
 
 
+#[cfg(test)]
+mod hidden_library_tests {
+    use super::*;
+    use std::sync::{LazyLock, Mutex};
+
+    static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn test_genome() -> String {
+        [
+            r#"{"node":"Input","params":{"output_shape":[28,28,1]}}"#,
+            r#"{"node":"Dense","params":{"units":10,"activation":"softmax","use_bias":true}}"#,
+            r#"{"node":"Output","params":{"input_shape":[10]}}"#,
+            "CONNECTIONS",
+            "0 1",
+            "1 2",
+        ]
+        .join("\n")
+    }
+
+    fn with_test_storage() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("hidden-library-test-{}", uuid::Uuid::new_v4()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp dir");
+        unsafe {
+            std::env::set_var("NEURAL_EVO_GENOMES_DIR", dir.to_string_lossy().to_string());
+        }
+        dir
+    }
+
+    #[test]
+    fn hidden_entry_serializes_and_deserializes() {
+        let _guard = TEST_LOCK.lock().expect("test lock");
+        let temp_dir = with_test_storage();
+
+        let profiler = TrainingProfiler {
+            train_start_ms: 1,
+            first_batch_ms: 2,
+            train_end_ms: 3,
+            total_train_duration_ms: 4,
+            val_start_ms: 5,
+            val_end_ms: 6,
+            val_duration_ms: 7,
+            test_start_ms: 8,
+            test_end_ms: 9,
+            test_duration_ms: 10,
+            peak_active_memory_mb: 11.0,
+            peak_model_params_mb: 12.0,
+            peak_gradient_mb: 13.0,
+            peak_optim_state_mb: 14.0,
+            peak_activation_mb: 15.0,
+            samples_per_sec: 16.0,
+            inference_msec_per_sample: 17.0,
+            batch_count: 18,
+            early_stop_epoch: Some(2),
+        };
+
+        let saved = save_hidden_genome(
+            &test_genome(),
+            "entry".to_string(),
+            vec!["hidden".to_string()],
+            3,
+            vec!["parent-a".to_string()],
+            GenomeFitnessMetrics {
+                loss: 0.2,
+                accuracy: 92.0,
+                adjusted_fitness: Some(90.0),
+                inference_latency_ms: Some(1.7),
+                model_size_mb: Some(2.5),
+                training_time_ms: Some(333),
+            },
+            Some(profiler),
+        )
+        .expect("save hidden genome");
+
+        let json = serde_json::to_string(&saved).expect("serialize");
+        let parsed: GenomeLibraryEntry = serde_json::from_str(&json).expect("deserialize");
+
+        assert!(parsed.is_hidden);
+        assert_eq!(parsed.source_generation, 3);
+        assert_eq!(parsed.parent_genomes, vec!["parent-a".to_string()]);
+        assert!(parsed.profiler_data.is_some());
+        assert!(parsed.fitness_metrics.is_some());
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn save_list_unhide_delete_hidden_flow() {
+        let _guard = TEST_LOCK.lock().expect("test lock");
+        let temp_dir = with_test_storage();
+
+        let saved = save_hidden_genome(
+            &test_genome(),
+            "entry".to_string(),
+            vec!["hidden".to_string()],
+            2,
+            vec!["p1".to_string()],
+            GenomeFitnessMetrics {
+                loss: 0.3,
+                accuracy: 88.0,
+                adjusted_fitness: None,
+                inference_latency_ms: Some(2.0),
+                model_size_mb: Some(3.0),
+                training_time_ms: Some(250),
+            },
+            None,
+        )
+        .expect("save hidden genome");
+
+        let listed = futures::executor::block_on(list_hidden_library(None)).expect("list hidden");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, saved.id);
+
+        futures::executor::block_on(unhide_genome(saved.id.clone())).expect("unhide");
+
+        let listed_after_unhide = futures::executor::block_on(list_hidden_library(None)).expect("list hidden after unhide");
+        assert_eq!(listed_after_unhide.len(), 0);
+
+        let visible = futures::executor::block_on(list_library_genomes()).expect("visible list");
+        assert_eq!(visible.len(), 1);
+
+        // Re-hide for hidden delete path
+        let mut meta = read_meta();
+        for entry in &mut meta {
+            if entry.id == saved.id {
+                entry.is_hidden = true;
+            }
+        }
+        write_meta(&meta).expect("write meta");
+
+        futures::executor::block_on(delete_hidden_genome(saved.id.clone())).expect("delete hidden");
+
+        let final_hidden = futures::executor::block_on(list_hidden_library(None)).expect("final list hidden");
+        assert_eq!(final_hidden.len(), 0);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn hidden_filters_return_expected_subset() {
+        let _guard = TEST_LOCK.lock().expect("test lock");
+        let temp_dir = with_test_storage();
+
+        let _a = save_hidden_genome(
+            &test_genome(),
+            "g1".to_string(),
+            vec!["hidden".to_string()],
+            1,
+            vec!["root".to_string()],
+            GenomeFitnessMetrics {
+                loss: 0.4,
+                accuracy: 70.0,
+                adjusted_fitness: None,
+                inference_latency_ms: Some(6.0),
+                model_size_mb: Some(8.0),
+                training_time_ms: Some(100),
+            },
+            None,
+        )
+        .expect("save g1");
+
+        let _b = save_hidden_genome(
+            &test_genome(),
+            "g2".to_string(),
+            vec!["hidden".to_string()],
+            5,
+            vec!["p2".to_string()],
+            GenomeFitnessMetrics {
+                loss: 0.1,
+                accuracy: 95.0,
+                adjusted_fitness: None,
+                inference_latency_ms: Some(1.0),
+                model_size_mb: Some(2.0),
+                training_time_ms: Some(100),
+            },
+            None,
+        )
+        .expect("save g2");
+
+        let query = HiddenLibraryQuery {
+            generation_min: Some(3),
+            generation_max: None,
+            accuracy_min: Some(90.0),
+            accuracy_max: None,
+            latency_min_ms: None,
+            latency_max_ms: Some(2.0),
+            model_size_min_mb: None,
+            model_size_max_mb: Some(3.0),
+            parent_genome_id: Some("p2".to_string()),
+            created_after_unix_ms: None,
+            created_before_unix_ms: None,
+            limit: Some(10),
+        };
+
+        let filtered = futures::executor::block_on(list_hidden_library(Some(query))).expect("filtered list");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "g2");
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2035,7 +2522,10 @@ pub fn run() {
             cache_dataset,
             validate_dataset_profile,
             list_library_genomes,
+            list_hidden_library,
             save_to_library,
+            unhide_genome,
+            delete_hidden_genome,
             delete_from_library,
             load_library_genome,
             save_dataset_profiles,
