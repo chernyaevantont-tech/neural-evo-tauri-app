@@ -7,6 +7,8 @@ import { useEvolutionLoop } from '../../features/evolution-studio';
 import {
     evaluateGenomeFeasibility,
     useEvolutionSettingsStore,
+    StoppingCriteriaLiveMonitor,
+    StoppingCriteriaSummary,
     type DeviceConstraintParams,
 } from '../../features/evolution-manager';
 import { useDatasetManagerStore } from '../../features/dataset-manager';
@@ -125,6 +127,9 @@ export const EvolutionStudioPage: React.FC = () => {
     const [showGenerationsModal, setShowGenerationsModal] = useState(false);
     const [analysisTab, setAnalysisTab] = useState<'pareto' | 'genealogy'>('pareto');
     const [exportGenomeId, setExportGenomeId] = useState<string | null>(null);
+    const [stoppingTriggeredIndex, setStoppingTriggeredIndex] = useState<number | null>(null);
+    const [evolutionCompleted, setEvolutionCompleted] = useState(false);
+    const [elapsedRuntimeSeconds, setElapsedRuntimeSeconds] = useState(0);
 
     // Auto-follow latest generation
     useEffect(() => {
@@ -157,6 +162,28 @@ export const EvolutionStudioPage: React.FC = () => {
         }
     }, [generationHistory, settings]);
 
+    // Track evolution completion
+    useEffect(() => {
+        if (!isRunning && generationHistory.length > 0) {
+            setEvolutionCompleted(true);
+        }
+    }, [isRunning, generationHistory.length]);
+
+    useEffect(() => {
+        if (!isRunning) {
+            return;
+        }
+
+        const startMs = Date.now();
+        setElapsedRuntimeSeconds(0);
+
+        const intervalId = setInterval(() => {
+            setElapsedRuntimeSeconds(Math.floor((Date.now() - startMs) / 1000));
+        }, 1000);
+
+        return () => clearInterval(intervalId);
+    }, [isRunning]);
+
     // Current snapshot (latest generation)
     const currentSnapshot = generationHistory.length > 0 
         ? generationHistory[generationHistory.length - 1] 
@@ -166,6 +193,50 @@ export const EvolutionStudioPage: React.FC = () => {
         if (!currentSnapshot) return [];
         return [...currentSnapshot.genomes];
     }, [currentSnapshot]);
+    const bestAccuracyNormalized = useMemo(() => {
+        const best = population.reduce((max, genome) => Math.max(max, genome.accuracy ?? 0), 0);
+        return best > 1 ? best / 100 : best;
+    }, [population]);
+
+    useEffect(() => {
+        if (isRunning || !evolutionCompleted) {
+            return;
+        }
+
+        const criteria = settings.stoppingPolicy.criteria;
+        const triggeredFromBackend = settings.currentStoppingProgress.triggeredCriteria ?? [];
+
+        if (triggeredFromBackend.length > 0) {
+            const byTypeIndex = criteria.findIndex((criterion) =>
+                triggeredFromBackend.some((triggered) => triggered.includes(criterion.type)),
+            );
+            setStoppingTriggeredIndex(byTypeIndex >= 0 ? byTypeIndex : null);
+            return;
+        }
+
+        const heuristicIndex = criteria.findIndex((criterion) => {
+            if (criterion.type === 'GenerationLimit') {
+                return generation >= criterion.max_generations;
+            }
+            if (criterion.type === 'TimeLimit') {
+                return elapsedRuntimeSeconds >= criterion.max_seconds;
+            }
+            if (criterion.type === 'TargetAccuracy') {
+                return bestAccuracyNormalized >= criterion.threshold;
+            }
+            return false;
+        });
+
+        setStoppingTriggeredIndex(heuristicIndex >= 0 ? heuristicIndex : null);
+    }, [
+        isRunning,
+        evolutionCompleted,
+        settings.stoppingPolicy.criteria,
+        settings.currentStoppingProgress.triggeredCriteria,
+        generation,
+        elapsedRuntimeSeconds,
+        bestAccuracyNormalized,
+    ]);
 
     const activeProfile = profiles.find(p => p.id === datasetProfileId);
     const activeDeviceConstraints = useMemo<DeviceConstraintParams | undefined>(() => {
@@ -314,6 +385,10 @@ export const EvolutionStudioPage: React.FC = () => {
 
     const handleStart = async () => {
         try {
+            // Reset stopping criteria tracking
+            setStoppingTriggeredIndex(null);
+            setEvolutionCompleted(false);
+
             // First, ensure a dataset profile is selected
             if (!datasetProfileId) {
                 alert("Please select a Dataset Profile first!");
@@ -613,6 +688,29 @@ export const EvolutionStudioPage: React.FC = () => {
                                         <div className={styles.metricValue}>{profilerStats.avgThroughput.toFixed(1)}/s</div>
                                     </div>
                             </div>
+
+                            {isRunning && (
+                                <div className={styles.setupCard}>
+                                    <StoppingCriteriaLiveMonitor
+                                        isRunning={isRunning}
+                                        generation={generation}
+                                        elapsedSeconds={elapsedRuntimeSeconds}
+                                        bestAccuracy={bestAccuracyNormalized}
+                                    />
+                                </div>
+                            )}
+
+                            {!isRunning && evolutionCompleted && generationHistory.length > 0 && (
+                                <div className={styles.setupCard}>
+                                    <StoppingCriteriaSummary
+                                        triggeredCriterionIndex={stoppingTriggeredIndex}
+                                        criteria={settings.stoppingPolicy.criteria}
+                                        finalGeneration={generation}
+                                        elapsedSeconds={elapsedRuntimeSeconds}
+                                        finalAccuracy={bestAccuracyNormalized}
+                                    />
+                                </div>
+                            )}
                         </div>
 
                         {/* Right Column: Visualizations (Topology & Live Chart) */}

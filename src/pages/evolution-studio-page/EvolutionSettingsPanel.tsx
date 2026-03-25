@@ -2,6 +2,7 @@ import React from 'react';
 import styles from './EvolutionSettingsPanel.module.css';
 import {
     DeviceProfileSelector,
+    StoppingCriteriaPanel,
     useEvolutionSettingsStore,
     type CrossoverStrategy,
 } from '../../features/evolution-manager';
@@ -342,6 +343,11 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
                         />
                     </div>
                 )}
+            </div>
+
+            {/* Stopping Criteria */}
+            <div className={styles.section}>
+                <StoppingCriteriaPanel disabled={disabled} />
             </div>
 
             {/* Zero-Cost Proxy Evaluation */}

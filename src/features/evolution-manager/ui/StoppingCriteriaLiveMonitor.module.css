@@ -1,0 +1,113 @@
+.monitor {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.8rem;
+    background-color: var(--color-bg-tertiary, #2a2d2e);
+    border: 1px solid var(--color-border-primary, #444);
+    border-radius: 8px;
+    width: 100%;
+}
+
+.monitorTitle {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-text-secondary, #888);
+}
+
+.criteriaList {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.criterionRow {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.5rem;
+    background-color: var(--color-bg-secondary, #1a1d1e);
+    border: 1px solid var(--color-border-secondary, #333);
+    border-radius: 6px;
+}
+
+.criterionLabel {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-accent-primary, #646cff);
+}
+
+.progressContainer {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.progressBar {
+    flex: 1;
+    height: 6px;
+    background-color: var(--color-bg-secondary, #1a1d1e);
+    border: 1px solid var(--color-border-secondary, #333);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progressFill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--color-accent-primary, #646cff), var(--color-accent-secondary, #7fb3ff));
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 6px rgba(100, 108, 255, 0.5);
+}
+
+.progressFill.complete {
+    background: linear-gradient(90deg, var(--color-success, #51cf66), var(--color-success-light, #8ce99a));
+    box-shadow: 0 0 6px rgba(81, 207, 102, 0.5);
+}
+
+.progressText {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary, #888);
+    white-space: nowrap;
+    min-width: 70px;
+    text-align: right;
+}
+
+.plateauInfo {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+}
+
+.plateauText {
+    color: var(--color-text-secondary, #888);
+}
+
+.manualStopNote {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary, #888);
+    padding: 0.3rem 0.4rem;
+    background-color: var(--color-bg-secondary, #1a1d1e);
+    border-radius: 3px;
+    border-left: 2px solid var(--color-accent-primary, #646cff);
+    padding-left: 0.6rem;
+}
+
+.policyInfo {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary, #888);
+    padding: 0.5rem;
+    background-color: var(--color-bg-secondary, #1a1d1e);
+    border-left: 2px solid var(--color-accent-primary, #646cff);
+    border-radius: 3px;
+    padding-left: 0.7rem;
+}
+
+.policyInfo strong {
+    color: var(--color-accent-primary, #646cff);
+    font-weight: 600;
+}
