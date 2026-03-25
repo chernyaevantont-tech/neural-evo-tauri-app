@@ -2105,39 +2105,6 @@ fn find_library_entry_for_genome(genome_id: &str) -> Option<GenomeLibraryEntry> 
         .max_by_key(|e| e.created_at_unix_ms)
 }
 
-fn parse_hidden_source_genome_id(name: &str) -> Option<String> {
-    name
-        .strip_prefix("Hidden ")
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(ToString::to_string)
-}
-
-fn resolve_cached_weight_owner(genome_id: &str, cache_dir: &Path) -> Result<Option<String>, String> {
-    if weight_io::load_weights(genome_id, cache_dir)?.is_some() {
-        return Ok(Some(genome_id.to_string()));
-    }
-
-    let entry = match find_library_entry_for_genome(genome_id) {
-        Some(entry) => entry,
-        None => return Ok(None),
-    };
-
-    if !entry.is_hidden {
-        return Ok(None);
-    }
-
-    let Some(source_id) = parse_hidden_source_genome_id(&entry.name) else {
-        return Ok(None);
-    };
-
-    if weight_io::load_weights(&source_id, cache_dir)?.is_some() {
-        return Ok(Some(source_id));
-    }
-
-    Ok(None)
-}
-
 #[derive(serde::Serialize)]
 struct WeightExportResponse {
     weights_path: String,
@@ -2148,7 +2115,7 @@ struct WeightExportResponse {
 #[tauri::command]
 async fn has_cached_weights(genome_id: String) -> Result<bool, String> {
     let cache_dir = get_weight_cache_dir();
-    Ok(resolve_cached_weight_owner(&genome_id, &cache_dir)?.is_some())
+    Ok(weight_io::load_weights(&genome_id, &cache_dir)?.is_some())
 }
 
 #[tauri::command]
@@ -2165,20 +2132,17 @@ async fn export_genome_with_weights(
     let cache_dir = get_weight_cache_dir();
     fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
 
-    let cached_weight_owner = resolve_cached_weight_owner(&genome_id, &cache_dir)?;
+    let cache_hit = weight_io::load_weights(&genome_id, &cache_dir)?;
+    let used_cached_weights = cache_hit.is_some();
 
-    let cache_owner_id = if let Some(owner) = cached_weight_owner {
-        owner
+    let cache_weights_path = if let Some(path) = cache_hit {
+        path
     } else {
         return Err(format!(
             "No cached trained weights found for genome '{}'. Run evaluation first to create a checkpoint.",
             genome_id
         ));
     };
-
-    let cache_weights_path = weight_io::load_weights(&cache_owner_id, &cache_dir)?
-        .ok_or_else(|| format!("Cached weight file for genome '{}' disappeared before export", cache_owner_id))?;
-    let used_cached_weights = true;
 
     let export_weights_path = output_dir.join(format!("{}.mpk", genome_id));
     fs::copy(&cache_weights_path, &export_weights_path).map_err(|e| e.to_string())?;
@@ -2713,93 +2677,6 @@ mod weight_export_command_tests {
         let metadata_value: serde_json::Value =
             serde_json::from_str(&metadata_json).expect("parse metadata json");
         assert_eq!(metadata_value["genome_id"], "genome-export-1");
-
-        let _ = fs::remove_dir_all(temp_storage);
-    }
-
-    #[test]
-    fn hidden_archive_export_reuses_source_cache_and_saved_metadata() {
-        let _guard = TEST_LOCK.lock().expect("test lock");
-        let temp_storage = with_test_storage();
-        let output_dir = temp_storage.join("exports-hidden");
-
-        let runtime_genome_id = "runtime-g-42";
-        let genome = [
-            r#"{"node":"Input","params":{"output_shape":[4]}}"#,
-            r#"{"node":"Dense","params":{"units":3,"activation":"relu","use_bias":true}}"#,
-            r#"{"node":"Output","params":{"input_shape":[3]}}"#,
-            "CONNECTIONS",
-            "0 1",
-            "1 2",
-        ]
-        .join("\n");
-
-        let hidden_entry = save_hidden_genome(
-            &genome,
-            format!("Hidden {}", runtime_genome_id),
-            vec!["hidden".to_string(), "autosave".to_string()],
-            7,
-            vec!["p-1".to_string(), "p-2".to_string()],
-            GenomeFitnessMetrics {
-                loss: 0.11,
-                accuracy: 93.5,
-                adjusted_fitness: Some(92.8),
-                inference_latency_ms: Some(1.9),
-                model_size_mb: Some(3.4),
-                training_time_ms: Some(12_345),
-            },
-            Some(TrainingProfiler {
-                train_start_ms: 0,
-                first_batch_ms: 1,
-                train_end_ms: 10,
-                total_train_duration_ms: 10,
-                val_start_ms: 10,
-                val_end_ms: 12,
-                val_duration_ms: 2,
-                test_start_ms: 12,
-                test_end_ms: 14,
-                test_duration_ms: 2,
-                peak_active_memory_mb: 64.0,
-                peak_model_params_mb: 12.0,
-                peak_gradient_mb: 20.0,
-                peak_optim_state_mb: 8.0,
-                peak_activation_mb: 24.0,
-                samples_per_sec: 150.0,
-                inference_msec_per_sample: 1.9,
-                batch_count: 4,
-                early_stop_epoch: None,
-            }),
-        )
-        .expect("save hidden genome");
-
-        let cache_dir = get_weight_cache_dir();
-        fs::create_dir_all(&cache_dir).expect("create cache dir");
-        let device = WgpuDevice::default();
-        let model = GraphModel::<Backend>::build(&genome, &device, None, None);
-        weight_io::save_weights(runtime_genome_id, Some(&model), &cache_dir)
-            .expect("seed runtime cached weights");
-
-        let hidden_id_has_cache = futures::executor::block_on(has_cached_weights(hidden_entry.id.clone()))
-            .expect("has cached weights");
-        assert!(hidden_id_has_cache);
-
-        let response = futures::executor::block_on(export_genome_with_weights(
-            hidden_entry.id.clone(),
-            output_dir.to_string_lossy().to_string(),
-        ))
-        .expect("hidden export command succeeds");
-
-        let metadata_json = fs::read_to_string(response.metadata_path).expect("read metadata json");
-        let metadata_value: serde_json::Value =
-            serde_json::from_str(&metadata_json).expect("parse metadata json");
-
-        assert_eq!(metadata_value["genome_id"], hidden_entry.id);
-        assert_eq!(metadata_value["accuracy"], 93.5);
-        assert_eq!(metadata_value["inference_latency_ms"], 1.9);
-        assert_eq!(metadata_value["model_size_mb"], 3.4);
-        assert_eq!(metadata_value["train_duration_ms"], 12345);
-        assert_eq!(metadata_value["lineage"][0], "p-1");
-        assert_eq!(metadata_value["lineage"][1], "p-2");
 
         let _ = fs::remove_dir_all(temp_storage);
     }

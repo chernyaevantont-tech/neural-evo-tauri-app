@@ -120,9 +120,18 @@ export const GenomeLibraryPage: React.FC = () => {
                     <div className={styles.sidebar}>
                         <div className={styles.sidebarHeader}>
                             <h2 className={styles.sidebarTitle}>🧬 Genome Library</h2>
-                            <button className={styles.addButton} onClick={handleImport} title="Import from file">
-                                <BsFileEarmarkPlus />
-                            </button>
+                            <div style={{ display: 'flex', gap: '0.35rem' }}>
+                                <button
+                                    className={styles.addButton}
+                                    onClick={() => navigate('/hidden-archive')}
+                                    title="Open hidden archive"
+                                >
+                                    <BsSearch />
+                                </button>
+                                <button className={styles.addButton} onClick={handleImport} title="Import from file">
+                                    <BsFileEarmarkPlus />
+                                </button>
+                            </div>
                         </div>
 
                         {/* Search & Sort */}

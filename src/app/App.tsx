@@ -4,6 +4,7 @@ import { HomePage } from "../pages/home-page/HomePage";
 import { DatasetManagerPage } from "../pages/dataset-manager-page/DatasetManagerPage";
 import { EvolutionStudioPage } from "../pages/evolution-studio-page/EvolutionStudioPage";
 import { GenomeLibraryPage } from "../pages/genome-library-page/GenomeLibraryPage";
+import { HiddenArchivePage } from "../pages/hidden-archive-page";
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
         <Route path="/dataset-manager" element={<DatasetManagerPage />} />
         <Route path="/evolution-studio" element={<EvolutionStudioPage />} />
         <Route path="/genome-library" element={<GenomeLibraryPage />} />
+        <Route path="/hidden-archive" element={<HiddenArchivePage />} />
       </Routes>
     </BrowserRouter>
   )

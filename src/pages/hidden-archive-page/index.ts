@@ -1,0 +1,1 @@
+export { HiddenArchivePage } from './HiddenArchivePage';
