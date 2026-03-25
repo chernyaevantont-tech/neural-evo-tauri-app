@@ -752,6 +752,10 @@
     font-weight: 600;
 }
 
+.postRunPanelWrap {
+    margin-top: 0.5rem;
+}
+
 .evaluatingRow {
     background-color: rgba(100, 108, 255, 0.15) !important;
     position: relative;

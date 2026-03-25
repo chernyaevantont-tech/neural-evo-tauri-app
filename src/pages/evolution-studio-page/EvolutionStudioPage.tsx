@@ -23,6 +23,7 @@ import { InspectGenomeModal } from './InspectGenomeModal';
 import { GenomeProfilerModal } from '../../features/evolution-studio/ui/GenomeProfilerModal';
 import { ExportGenomeWithWeightsModal } from '../../features/evolution-studio/ui/ExportGenomeWithWeightsModal';
 import { EvolutionDashboard } from '../../widgets/evolution-dashboard';
+import { PostEvolutionPanel } from '../../widgets/post-evolution-panel';
 import type { GenerationParetoFront, GenomeObjectives } from '../../shared/lib';
 
 function isDominatedBy(a: GenomeObjectives, b: GenomeObjectives): boolean {
@@ -608,6 +609,31 @@ export const EvolutionStudioPage: React.FC = () => {
                         onSaveCheckpoint={saveCheckpoint}
                         onOpenProfiler={(genome) => setProfilerGenome(genome)}
                     />
+
+                    {!isRunning && evolutionCompleted && generationHistory.length > 0 && (
+                        <div className={styles.postRunPanelWrap}>
+                            <PostEvolutionPanel
+                                paretoHistory={settings.paretoHistory}
+                                genealogyTree={settings.genealogyTree}
+                                onSyncGenealogyTree={settings.setGenealogyTree}
+                                onOpenGenomeDetails={handleOpenParetoDetails}
+                                onExportWeights={handleExportParetoSelected}
+                                onContinueEvolution={handleStart}
+                                generation={generation}
+                                elapsedRuntimeSeconds={elapsedRuntimeSeconds}
+                                stoppingPolicy={settings.stoppingPolicy.criteria}
+                                stoppingReason={
+                                    stoppingTriggeredIndex !== null
+                                        ? `Triggered: ${settings.stoppingPolicy.criteria[stoppingTriggeredIndex]?.type}`
+                                        : 'Completed'
+                                }
+                                genomeById={genomeById}
+                                activeDeviceConstraints={activeDeviceConstraints}
+                                feasibilityByGenomeId={feasibilityByGenomeId}
+                                constraintViolationScoreByGenomeId={constraintViolationScoreByGenomeId}
+                            />
+                        </div>
+                    )}
 
                 </div>
 
