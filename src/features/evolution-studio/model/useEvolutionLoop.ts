@@ -66,6 +66,7 @@ function getAdaptiveMutationRates(settings: AdaptiveMutationSettings, currentNod
 export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }: UseEvolutionLoopParams) => {
 
     const [isRunning, setIsRunning] = useState(false);
+    const [isPaused, setIsPaused] = useState(false);
     const [generation, setGeneration] = useState(0);
     const [population, setPopulation] = useState<PopulatedGenome[]>([]);
     const [hallOfFame, setHallOfFame] = useState<PopulatedGenome[]>([]);
@@ -83,6 +84,7 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
 
     // Using refs for safe async access within loops
     const isRunningRef = useRef(false);
+    const isPausedRef = useRef(false);
 
     useEffect(() => {
         let unlistenGenome: (() => void) | undefined;
@@ -208,11 +210,54 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
 
     const stopEvolution = useCallback(() => {
         setIsRunning(false);
+        setIsPaused(false);
         isRunningRef.current = false;
+        isPausedRef.current = false;
         // Signal the Rust backend to stop the current evaluation pass
         invoke('stop_evolution').catch(err => console.error('Failed to stop backend:', err));
         addLog("Evolution stopped by user.", "warn");
     }, [addLog]);
+
+    const pauseEvolution = useCallback(() => {
+        if (!isRunningRef.current || isPausedRef.current) {
+            return;
+        }
+
+        setIsPaused(true);
+        isPausedRef.current = true;
+        isRunningRef.current = false;
+        addLog('Pause requested. Current generation will finish, then loop will halt.', 'warn');
+    }, [addLog]);
+
+    const resumeEvolution = useCallback(() => {
+        if (!isRunning || !isPausedRef.current) {
+            return;
+        }
+
+        setIsPaused(false);
+        isPausedRef.current = false;
+        isRunningRef.current = true;
+        addLog('Evolution resumed.', 'success');
+    }, [addLog, isRunning]);
+
+    const saveCheckpoint = useCallback(async () => {
+        const snapshotPayload = {
+            savedAt: new Date().toISOString(),
+            generation,
+            isRunning,
+            isPaused,
+            hallOfFameIds: hallOfFame.map((g) => g.id),
+            populationIds: population.map((g) => g.id),
+            generationHistorySize: generationHistory.length,
+        };
+
+        try {
+            localStorage.setItem('evolution-runtime-checkpoint', JSON.stringify(snapshotPayload));
+            addLog(`Checkpoint saved for generation ${generation}.`, 'success');
+        } catch (e) {
+            addLog(`Checkpoint save failed: ${String(e)}`, 'error');
+        }
+    }, [addLog, generation, generationHistory.length, hallOfFame, isPaused, isRunning, population]);
 
     // Initial Spawning (from multiple library seeds or a fallback graph)
     const initPopulation = useCallback(async (seedJSONs: string[]) => {
@@ -680,6 +725,11 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
             // 5. Check if we should stop
             if (!isRunningRef.current) return;
 
+            if (isPausedRef.current) {
+                addLog(`Paused after generation ${generation}.`, 'warn');
+                return;
+            }
+
             // Max generations auto-stop
             if (settings.useMaxGenerations && generation + 1 >= settings.maxGenerations) {
                 addLog(`Reached max generations limit (${settings.maxGenerations}). Stopping evolution.`, "warn");
@@ -1020,7 +1070,9 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
             }
 
             setIsRunning(true);
+            setIsPaused(false);
             isRunningRef.current = true;
+            isPausedRef.current = false;
 
             initPopulation(seedGenomes);
         } catch (err: any) {
@@ -1030,19 +1082,23 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
     }, [datasetProfileId, addLog, initPopulation, settings]);
 
     useEffect(() => {
-        if (isRunning && population.length > 0) {
+        if (isRunning && !isPaused && population.length > 0) {
             // Need a slight delay to allow React rendering/logging to flush
             const timer = setTimeout(() => {
                 runGeneration();
             }, 100);
             return () => clearTimeout(timer);
         }
-    }, [isRunning, population, runGeneration]);
+    }, [isRunning, isPaused, population, runGeneration]);
 
     return {
         isRunning,
+        isPaused,
         startEvolution,
         stopEvolution,
+        pauseEvolution,
+        resumeEvolution,
+        saveCheckpoint,
         generation,
         population,
         hallOfFame,

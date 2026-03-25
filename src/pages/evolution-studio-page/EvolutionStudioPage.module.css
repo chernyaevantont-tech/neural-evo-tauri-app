@@ -77,6 +77,10 @@
     overflow: hidden;
 }
 
+.contentLayout > * {
+    min-width: 0;
+}
+
 .mainArea {
     flex: 1;
     display: flex;
@@ -84,6 +88,8 @@
     padding: 2rem;
     gap: 2rem;
     overflow-y: auto;
+    overflow-x: hidden;
+    min-width: 0;
 }
 
 /* Dashboard Layout */
@@ -428,12 +434,63 @@
 /* Side Panel */
 .sidePanel {
     width: 300px;
+    min-width: 300px;
+    flex-shrink: 0;
     background-color: var(--color-bg-secondary);
     border-left: 1px solid var(--color-border-primary);
     padding: 2rem 1.5rem;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+}
+
+@media (max-width: 1500px) {
+    .mainArea {
+        padding: 1.25rem;
+        gap: 1.25rem;
+    }
+
+    .sidePanel {
+        width: 260px;
+        min-width: 260px;
+        padding: 1.25rem 1rem;
+    }
+}
+
+@media (max-width: 1120px) {
+    .contentLayout {
+        flex-direction: column;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    .mainArea {
+        order: 2;
+        overflow: visible;
+    }
+
+    .sidePanel {
+        order: 3;
+        width: 100%;
+        min-width: 0;
+        border-left: none;
+        border-top: 1px solid var(--color-border-primary);
+    }
+}
+
+@media (max-width: 760px) {
+    .header {
+        padding: 0.75rem 1rem;
+        gap: 1rem;
+    }
+
+    .title {
+        font-size: 1.2rem;
+    }
+
+    .mainArea {
+        padding: 0.75rem;
+    }
 }
 
 .panelSubtitle {

@@ -10,6 +10,24 @@
     padding: 1.5rem;
 }
 
+@media (max-width: 1500px) {
+    .panel {
+        width: 280px;
+        min-width: 280px;
+        padding: 1.1rem;
+    }
+}
+
+@media (max-width: 1120px) {
+    .panel {
+        width: 100%;
+        min-width: 0;
+        border-right: none;
+        border-bottom: 1px solid var(--color-border-primary);
+        max-height: 48vh;
+    }
+}
+
 .panel.disabled {
     opacity: 0.6;
 }

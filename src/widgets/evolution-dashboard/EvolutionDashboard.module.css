@@ -1,0 +1,306 @@
+.dashboard {
+    display: grid;
+    grid-template-rows: auto auto auto auto;
+    gap: 14px;
+    min-width: 0;
+}
+
+.controlBar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 10px;
+    border: 1px solid var(--color-border-primary);
+    border-radius: 10px;
+    background-color: var(--color-bg-secondary);
+}
+
+.controlButton {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
+    transition: filter 0.15s ease, border-color 0.15s ease;
+}
+
+.controlButton:hover:not(:disabled) {
+    filter: brightness(1.06);
+}
+
+.controlPrimary {
+    border-color: var(--color-success);
+    color: var(--color-success);
+}
+
+.controlWarn {
+    border-color: var(--color-warning);
+    color: var(--color-warning);
+}
+
+.controlDanger {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+}
+
+.controlMuted {
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    border-color: var(--color-border-primary);
+}
+
+.controlButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.overviewCards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    min-width: 0;
+}
+
+.card {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 10px;
+    padding: 10px;
+    background-color: var(--color-bg-secondary);
+}
+
+.cardLabel {
+    color: var(--color-text-secondary);
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.cardValue {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-top: 4px;
+}
+
+.chartsAndJobs {
+    display: grid;
+    grid-template-columns: 1.8fr 1fr;
+    gap: 12px;
+    min-width: 0;
+}
+
+.chartPanel {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 10px;
+    background-color: var(--color-bg-secondary);
+    padding: 10px;
+    min-height: 280px;
+    min-width: 0;
+}
+
+.chartTitle {
+    margin: 0 0 8px;
+    font-size: 0.9rem;
+    color: var(--color-text-primary);
+}
+
+.jobsPanel {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 10px;
+    background-color: var(--color-bg-secondary);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    min-height: 280px;
+    min-width: 0;
+}
+
+.jobsHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.jobsFilters {
+    display: flex;
+    gap: 6px;
+}
+
+.filterButton {
+    border: 1px solid var(--color-border-primary);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    cursor: pointer;
+}
+
+.filterButtonActive {
+    color: var(--color-text-primary);
+    border-color: var(--color-accent-primary, #646cff);
+    background: color-mix(in srgb, var(--color-accent-primary, #646cff) 18%, transparent);
+}
+
+.jobsTableWrap {
+    overflow: auto;
+    flex: 1;
+}
+
+.jobsTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    table-layout: fixed;
+}
+
+.jobsTable th,
+.jobsTable td {
+    text-align: left;
+    padding: 6px 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.status {
+    text-transform: uppercase;
+    font-size: 0.68rem;
+    letter-spacing: 0.05em;
+}
+
+.statusRunning {
+    color: #78e08f;
+}
+
+.statusCompleted {
+    color: #8cc7ff;
+}
+
+.statusFailed {
+    color: #ff8a8a;
+}
+
+.statusQueued {
+    color: #d8cc9a;
+}
+
+.tabs {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 10px;
+    background-color: var(--color-bg-secondary);
+    padding: 10px;
+}
+
+.tabList {
+    display: flex;
+    flex-wrap: wrap;
+    border: 1px solid var(--color-border-primary);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    width: 100%;
+}
+
+.tabButton {
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    flex: 1 1 150px;
+}
+
+.tabButtonActive {
+    background: color-mix(in srgb, var(--color-accent-primary, #646cff) 22%, transparent);
+    color: var(--color-text-primary);
+}
+
+.tabBody {
+    min-height: 220px;
+}
+
+.performanceTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    margin-bottom: 10px;
+    table-layout: fixed;
+}
+
+.performanceTable th,
+.performanceTable td {
+    padding: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.eventLog {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 10px;
+    background-color: var(--color-bg-secondary);
+    padding: 10px;
+}
+
+.logTitle {
+    margin: 0 0 6px;
+    font-size: 0.84rem;
+}
+
+.logList {
+    max-height: 160px;
+    overflow: auto;
+    font-size: 0.77rem;
+}
+
+.logEntry {
+    padding: 3px 0;
+}
+
+.logMuted {
+    color: var(--color-text-secondary);
+}
+
+.unavailable {
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    padding: 16px 0;
+}
+
+.inlineAction {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 6px;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    cursor: pointer;
+}
+
+@media (max-width: 1200px) {
+    .chartsAndJobs {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 740px) {
+    .overviewCards {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+    }
+
+    .controlBar {
+        gap: 6px;
+        padding: 8px;
+    }
+
+    .controlButton {
+        flex: 1 1 140px;
+    }
+}

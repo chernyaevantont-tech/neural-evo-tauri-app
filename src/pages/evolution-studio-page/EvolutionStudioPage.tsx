@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { TitleBar } from '../../widgets/title-bar/TitleBar';
 import styles from './EvolutionStudioPage.module.css';
-import { useNavigate } from 'react-router-dom';
-import { BsArrowLeft, BsPlay, BsStop, BsPlus, BsX } from 'react-icons/bs';
+import { BsPlay, BsPlus, BsX } from 'react-icons/bs';
 import { useEvolutionLoop } from '../../features/evolution-studio';
 import {
     evaluateGenomeFeasibility,
@@ -22,38 +21,9 @@ import { EvolutionSettingsPanel } from './EvolutionSettingsPanel';
 import { GenomeSvgPreview } from '../../entities/canvas-genome/ui/GenomeSvgPreview/GenomeSvgPreview';
 import { InspectGenomeModal } from './InspectGenomeModal';
 import { GenomeProfilerModal } from '../../features/evolution-studio/ui/GenomeProfilerModal';
-import { GenerationStatsTable } from '../../features/evolution-studio/ui/GenerationStatsTable';
 import { ExportGenomeWithWeightsModal } from '../../features/evolution-studio/ui/ExportGenomeWithWeightsModal';
-import { ComparisonCharts } from '../../widgets/genome-comparison/ComparisonCharts';
-import { ParetoFrontVisualizer } from '../../widgets/pareto-front-visualizer';
-import { GenealogicTreeView } from '../../widgets/genealogy-tree-viewer';
-import { GenerationsModal } from './GenerationsModal';
+import { EvolutionDashboard } from '../../widgets/evolution-dashboard';
 import type { GenerationParetoFront, GenomeObjectives } from '../../shared/lib';
-import {
-    Chart as ChartJS,
-    CategoryScale,
-    LinearScale,
-    PointElement,
-    LineElement,
-    Title,
-    Tooltip,
-    Legend,
-    ChartOptions,
-    ChartData,
-    Filler
-} from 'chart.js';
-import { Line } from 'react-chartjs-2';
-
-ChartJS.register(
-    CategoryScale,
-    LinearScale,
-    PointElement,
-    LineElement,
-    Title,
-    Tooltip,
-    Legend,
-    Filler
-);
 
 function isDominatedBy(a: GenomeObjectives, b: GenomeObjectives): boolean {
     const strictBetter =
@@ -93,20 +63,21 @@ function mapToObjectives(genome: PopulatedGenome): GenomeObjectives {
 }
 
 export const EvolutionStudioPage: React.FC = () => {
-    const navigate = useNavigate();
     const datasetProfileId = useDatasetManagerStore(state => state.selectedProfileId);
     const profiles = useDatasetManagerStore(state => state.profiles);
     const settings = useEvolutionSettingsStore();
     const {
         isRunning,
+        isPaused,
         startEvolution,
         stopEvolution,
+        pauseEvolution,
+        resumeEvolution,
+        saveCheckpoint,
         generation,
         population,
         hallOfFame,
-        stats,
         logs,
-        runGeneration,
         currentEvaluatingIndex,
         liveMetrics,
         generationHistory
@@ -124,8 +95,6 @@ export const EvolutionStudioPage: React.FC = () => {
     const [paretoSeedJsonByGenomeId, setParetoSeedJsonByGenomeId] = useState<Record<string, string>>({});
     const [inspectingGenome, setInspectingGenome] = useState<PopulatedGenome | null>(null);
     const [profilerGenome, setProfilerGenome] = useState<PopulatedGenome | null>(null);
-    const [showGenerationsModal, setShowGenerationsModal] = useState(false);
-    const [analysisTab, setAnalysisTab] = useState<'pareto' | 'genealogy'>('pareto');
     const [exportGenomeId, setExportGenomeId] = useState<string | null>(null);
     const [stoppingTriggeredIndex, setStoppingTriggeredIndex] = useState<number | null>(null);
     const [evolutionCompleted, setEvolutionCompleted] = useState(false);
@@ -189,10 +158,6 @@ export const EvolutionStudioPage: React.FC = () => {
         ? generationHistory[generationHistory.length - 1] 
         : undefined;
     const profilerStats = useProfilerStats(currentSnapshot?.genomes ?? []);
-    const sortedGenomes = useMemo(() => {
-        if (!currentSnapshot) return [];
-        return [...currentSnapshot.genomes];
-    }, [currentSnapshot]);
     const bestAccuracyNormalized = useMemo(() => {
         const best = population.reduce((max, genome) => Math.max(max, genome.accuracy ?? 0), 0);
         return best > 1 ? best / 100 : best;
@@ -446,135 +411,6 @@ export const EvolutionStudioPage: React.FC = () => {
     const bestFitness = hallOfFame.length > 0
         ? hallOfFame[0].adjustedFitness?.toFixed(4) || '--'
         : '--';
-
-
-
-    // Chart.js Data and Options
-    const liveChartData: ChartData<'line'> = {
-        labels: liveMetrics.map(m => m.batch.toString()),
-        datasets: [
-            {
-                label: 'Loss',
-                yAxisID: 'y',
-                data: liveMetrics.map(m => m.loss),
-                borderColor: '#ffb86c',
-                backgroundColor: 'rgba(255, 184, 108, 0.15)',
-                tension: 0.2,
-                pointRadius: 0,
-                borderWidth: 2,
-            },
-            {
-                label: 'Accuracy (%)',
-                yAxisID: 'y1',
-                data: liveMetrics.map(m => m.accuracy),
-                borderColor: '#50fa7b',
-                backgroundColor: 'rgba(80, 250, 123, 0.15)',
-                tension: 0.2,
-                pointRadius: 0,
-                borderWidth: 2,
-            }
-        ]
-    };
-
-    const liveChartOptions: ChartOptions<'line'> = {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        interaction: {
-            mode: 'index',
-            intersect: false,
-        },
-        scales: {
-            x: {
-                display: false,
-            },
-            y: {
-                type: 'linear',
-                display: true,
-                position: 'left',
-                title: { display: true, text: 'Loss', color: '#999' },
-                ticks: { color: '#aaa' },
-                grid: { color: 'rgba(255, 255, 255, 0.08)' }
-            },
-            y1: {
-                type: 'linear',
-                display: true,
-                position: 'right',
-                title: { display: true, text: 'Accuracy %', color: '#999' },
-                ticks: { color: '#aaa' },
-                min: 0,
-                max: 100,
-                grid: { drawOnChartArea: false },
-            }
-        },
-        plugins: {
-            legend: {
-                position: 'top',
-                labels: { color: '#ccc' }
-            },
-            tooltip: {
-                callbacks: {
-                    title: (context) => {
-                        const idx = context[0].dataIndex;
-                        const m = liveMetrics[idx];
-                        return `Epoch: ${m.epoch} | Batch: ${m.batch} / ${m.total_batches}`;
-                    }
-                }
-            }
-        }
-    };
-
-    const fitnessChartData: ChartData<'line'> = {
-        labels: stats.map(s => s.generation.toString()),
-        datasets: [
-            {
-                label: 'Best Fitness',
-                data: stats.map(s => s.bestFitness),
-                borderColor: '#bd93f9',
-                backgroundColor: 'rgba(189, 147, 249, 0.15)',
-                tension: 0.3,
-                pointRadius: 3,
-                pointBackgroundColor: '#bd93f9',
-                borderWidth: 2,
-                fill: true,
-            }
-        ]
-    };
-
-    const fitnessChartOptions: ChartOptions<'line'> = {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: { duration: 400 },
-        interaction: {
-            mode: 'index',
-            intersect: false,
-        },
-        scales: {
-            x: {
-                display: true,
-                title: { display: true, text: 'Generation', color: '#999' },
-                ticks: { color: '#aaa', maxTicksLimit: 10 },
-                grid: { color: 'rgba(255, 255, 255, 0.08)' }
-            },
-            y: {
-                display: true,
-                title: { display: true, text: 'Fitness', color: '#999' },
-                ticks: { color: '#aaa' },
-                grid: { color: 'rgba(255, 255, 255, 0.08)' }
-            }
-        },
-        plugins: {
-            legend: {
-                display: false,
-            },
-            tooltip: {
-                callbacks: {
-                    title: (context) => `Generation: ${context[0].label}`,
-                }
-            }
-        }
-    };
-
     return (
         <div className={styles.pageContainer}>
             <TitleBar />
@@ -589,14 +425,6 @@ export const EvolutionStudioPage: React.FC = () => {
                         style={{ opacity: isRunning ? 0.5 : 1, cursor: isRunning ? 'not-allowed' : 'pointer' }}
                     >
                         <BsPlay /> Start Evolution
-                    </button>
-                    <button
-                        className={`${styles.actionButton} ${styles.stopBtn}`}
-                        onClick={stopEvolution}
-                        disabled={!isRunning}
-                        style={{ opacity: !isRunning ? 0.5 : 1, cursor: !isRunning ? 'not-allowed' : 'pointer' }}
-                    >
-                        <BsStop /> Stop
                     </button>
                 </div>
             </div>
@@ -749,128 +577,37 @@ export const EvolutionStudioPage: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Live Genome Metrics Chart (Full Width) */}
-                    <div className={styles.liveChartArea}>
-                        <h3 className={styles.sectionTitle} style={{ marginBottom: "0.5rem" }}>
-                            Live Evaluation Metrics
-                            {liveMetrics.length > 0 && (
-                                <span style={{ fontSize: '0.8rem', fontWeight: 'normal', marginLeft: '0.8rem', color: 'var(--color-text-muted)' }}>
-                                    (Batch {liveMetrics[liveMetrics.length - 1].batch} / {liveMetrics[liveMetrics.length - 1].total_batches})
-                                </span>
-                            )}
-                        </h3>
-                        <div className={styles.liveChartContainer} style={{ padding: '1rem' }}>
-                            {liveMetrics.length > 0 ? (
-                                <Line data={liveChartData} options={liveChartOptions} />
-                            ) : (
-                                <div className={styles.chartPlaceholder}>
-                                    Waiting for evaluation to start...
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className={styles.chartArea}>
-                        <h3 className={styles.sectionTitle}>Fitness Over Time</h3>
-                        <div className={styles.chartContainer} style={{ padding: '1rem' }}>
-                            {stats.length > 0 ? (
-                                <Line data={fitnessChartData} options={fitnessChartOptions} />
-                            ) : (
-                                <div className={styles.chartPlaceholder}>
-                                    Waiting for first generation training complete
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className={styles.chartArea}>
-                        <h3 className={styles.sectionTitle}>Profiler Comparisons</h3>
-                        <div style={{ padding: '0.2rem 0 0.4rem', color: 'var(--color-text-secondary)', fontSize: '0.82rem' }}>
-                            <button 
-                                onClick={() => setShowGenerationsModal(true)}
-                                className={styles.viewGenerationsBtn}
-                            >
-                                📊 View All Generations ({generationHistory.length})
-                            </button>
-                            {currentSnapshot && (
-                                <>
-                                    Total train {((currentSnapshot.totalTrainingMs ?? 0) / 1000).toFixed(2)}s | 
-                                    Avg inference {((currentSnapshot.totalInferenceMs ?? 0) / Math.max(1, currentSnapshot.genomes.length ?? 1)).toFixed(3)}ms | 
-                                    Avg throughput {(currentSnapshot.avgSamplesPerSec ?? 0).toFixed(1)} samples/s
-                                </>
-                            )}
-                        </div>
-                        <ComparisonCharts genomes={sortedGenomes} />
-                    </div>
-
-                    <div className={styles.chartArea}>
-                        <div className={styles.analysisTabBar}>
-                            <button
-                                type="button"
-                                className={`${styles.analysisTabButton} ${analysisTab === 'pareto' ? styles.analysisTabButtonActive : ''}`}
-                                onClick={() => setAnalysisTab('pareto')}
-                            >
-                                Pareto
-                            </button>
-                            <button
-                                type="button"
-                                className={`${styles.analysisTabButton} ${analysisTab === 'genealogy' ? styles.analysisTabButtonActive : ''}`}
-                                onClick={() => setAnalysisTab('genealogy')}
-                            >
-                                Genealogy
-                            </button>
-                        </div>
-
-                        {analysisTab === 'pareto' ? (
-                            <>
-                                <ParetoFrontVisualizer
-                                    currentParetoFront={settings.currentParetoFront}
-                                    paretoHistory={settings.paretoHistory}
-                                    feasibilityByGenomeId={feasibilityByGenomeId}
-                                    constraintViolationScoreByGenomeId={constraintViolationScoreByGenomeId}
-                                    showOnlyFeasible={settings.showOnlyFeasible}
-                                    onUseAsSeed={handleUseParetoAsSeed}
-                                    onOpenDetails={handleOpenParetoDetails}
-                                    onExportSelected={handleExportParetoSelected}
-                                />
-                                {Object.keys(paretoSeedJsonByGenomeId).length > 0 && (
-                                    <div style={{ marginTop: '0.7rem', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                                        Queued Pareto seeds: {Object.keys(paretoSeedJsonByGenomeId).length}
-                                    </div>
-                                )}
-                            </>
-                        ) : (
-                            <div className={styles.genealogyPanel}>
-                                <GenealogicTreeView
-                                    genealogyTree={settings.genealogyTree}
-                                    paretoHistory={settings.paretoHistory}
-                                    onOpenGenomeDetails={handleOpenParetoDetails}
-                                    onGenealogyTreeSync={settings.setGenealogyTree}
-                                />
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Bottom Tabbed Panel: Generations / Event Log */}
-                    {/* Bottom Panel: Event Log */}
-                    <div className={styles.logArea}>
-                        <div className={styles.logHeader}>
-                            <h4 className={styles.logTitle}>Event Log</h4>
-                        </div>
-                        <div className={styles.logConsole}>
-                            {logs.map((log, idx) => (
-                                <div key={idx} className={styles.logEntry} style={{
-                                    color: log.type === 'error' ? 'var(--color-danger)' :
-                                        log.type === 'warn' ? 'var(--color-warning)' :
-                                            log.type === 'success' ? 'var(--color-success)' : 'inherit'
-                                }}>
-                                    <span style={{ opacity: 0.5, marginRight: '8px' }}>[{log.time}]</span>
-                                    {log.message}
-                                </div>
-                            ))}
-                            {logs.length === 0 && <div className={styles.logEntry}>[System] Evolution Studio initialized. Waiting for User...</div>}
-                        </div>
-                    </div>
+                    <EvolutionDashboard
+                        isRunning={isRunning}
+                        isPaused={isPaused}
+                        generation={generation}
+                        generationHistory={generationHistory}
+                        liveMetrics={liveMetrics}
+                        currentEvaluatingIndex={currentEvaluatingIndex}
+                        population={population}
+                        logs={logs}
+                        elapsedRuntimeSeconds={elapsedRuntimeSeconds}
+                        useMaxGenerations={settings.useMaxGenerations}
+                        maxGenerations={settings.maxGenerations}
+                        currentParetoFront={settings.currentParetoFront}
+                        paretoHistory={settings.paretoHistory}
+                        feasibilityByGenomeId={feasibilityByGenomeId}
+                        constraintViolationScoreByGenomeId={constraintViolationScoreByGenomeId}
+                        showOnlyFeasible={settings.showOnlyFeasible}
+                        genealogyTree={settings.genealogyTree}
+                        onGenealogyTreeSync={settings.setGenealogyTree}
+                        onUseAsSeed={handleUseParetoAsSeed}
+                        onOpenGenomeDetails={handleOpenParetoDetails}
+                        onExportSelected={handleExportParetoSelected}
+                        stoppingCriteria={settings.stoppingPolicy.criteria}
+                        triggeredCriterionIndex={stoppingTriggeredIndex}
+                        bestAccuracyNormalized={bestAccuracyNormalized}
+                        onPause={pauseEvolution}
+                        onResume={resumeEvolution}
+                        onStop={stopEvolution}
+                        onSaveCheckpoint={saveCheckpoint}
+                        onOpenProfiler={(genome) => setProfilerGenome(genome)}
+                    />
 
                 </div>
 
@@ -947,18 +684,6 @@ export const EvolutionStudioPage: React.FC = () => {
                     genomeId={profilerGenome.id}
                     profiler={profilerGenome.profiler}
                     onClose={() => setProfilerGenome(null)}
-                />
-            )}
-
-            {showGenerationsModal && (
-                <GenerationsModal
-                    generations={generationHistory}
-                    selectedGeneration={currentSnapshot?.generation}
-                    onSelectGeneration={(gen) => {
-                        // Just close the modal; the selection doesn't affect current snapshot anymore
-                        setShowGenerationsModal(false);
-                    }}
-                    onClose={() => setShowGenerationsModal(false)}
                 />
             )}
 
