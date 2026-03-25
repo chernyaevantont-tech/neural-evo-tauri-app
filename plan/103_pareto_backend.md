@@ -1,67 +1,74 @@
 # Задача 103: Pareto Front Computation (Backend)
 
-**Фаза**: 2 (Core Features - Multi-Objective)  
+**Фаза**: 2 (Core Features)  
 **Сложность**: Medium  
 **Время**: 8 часов  
-**Зависимости**: Task 001 (dtos)  
+**Зависимости**: Task 001  
 **Выполнит**: Backend разработчик (Rust)
 
 ---
 
-## Краткое описание
+## Описание
 
-Реализовать функции для вычисления Парето-фронта: dominance relation, frontier computation, O(N²) алгоритм. Интегрировать в `lib.rs` как новую Tauri command `compute_pareto_front`.
+Реализовать backend вычисление Pareto front для multi-objective эволюции:
+- dominance relation
+- frontier computation O(N^2)
+- payload generation для фронтенд-визуализации
 
 ---
 
-## Ключевые функции
+## Входные данные
 
-```rust
-pub fn is_dominated(a: &GenomeObjectives, b: &GenomeObjectives) -> bool {
-    // A доминирует B если A лучше или равна B по всем целям,
-    // и хотя бы по одной цели A строго лучше
-    (b.accuracy >= a.accuracy) &&
-    (b.inference_latency_ms <= a.inference_latency_ms) &&
-    (b.model_size_mb <= a.model_size_mb) &&
-    !(a.accuracy == b.accuracy && ...)
-}
+- `src-tauri/src/pareto.rs` (создать)
+- `src-tauri/src/dtos.rs`
+- `src-tauri/src/lib.rs`
 
-pub fn compute_pareto_front(genomes: &[GenomeObjectives]) -> Vec<GenomeObjectives> {
-    // O(N²) frontier computation
-}
+---
+
+## Пошаговое выполнение
+
+### Шаг 1: Реализовать dominance relation
+
+`is_dominated(a, b)` с учетом целей accuracy/latency/model_size.
+
+### Шаг 2: Реализовать frontier computation
+
+`compute_pareto_front(genomes)` с O(N^2).
+
+### Шаг 3: Добавить Tauri command
+
+Экспортировать `compute_pareto_front` в `lib.rs`.
+
+### Шаг 4: Сформировать `GenerationParetoFront`
+
+Вернуть структуру, пригодную для `widgets/pareto-front-visualizer`.
+
+---
+
+## Тесты
+
+```bash
+cargo test --lib pareto
 ```
 
----
-
-## Этапы реализации
-
-### 1. Создать модуль `src-tauri/src/pareto.rs`
-### 2. Реализовать dominance relation и Парето-фронт вычисление
-### 3. Добавить в lib.rs command `compute_pareto_front`
-### 4. Написать unit и integration tests
-### 5. Проверить компиляцию и performance (O(N²) < 100ms для N=100)
+Проверить:
+- корректность frontier на известных примерах
+- стабильность для равных objective vectors
+- performance sanity для N=100+
 
 ---
 
 ## Критерии готовности
 
-- ✅ Модуль `pareto.rs` создан с dominance и frontier функциями
-- ✅ Pareto front O(N²) < 100ms для N=100+
-- ✅ Command `compute_pareto_front` доступна в Tauri
-- ✅ Все тесты проходят
-- ✅ Генерирует `GenerationParetoFront` DTO
+-  Pareto backend модуль реализован
+-  Command доступна для фронтенда
+-  DTO-контракт совместим с текущим `src/shared/lib/dtos.ts`
+-  Тесты проходят
 
 ---
 
 ## Вывод
 
-- Файл: `src-tauri/src/pareto.rs` (~150 LOC)
-- Зависимость: Task 104 (frontend visualization)
-
----
-
-## Ссылки
-
-- План.md раздел 19 (Multi-Objective Optimization)
-- DTO: `GenomeObjectives`, `GenerationParetoFront`
+- Изменения: `src-tauri/src/pareto.rs`, `src-tauri/src/lib.rs`
+- Основа для T104/T118/T119
 
