@@ -177,6 +177,8 @@ pub struct GraphModel<B: Backend> {
     pub num_outputs: usize,
     pub input_shapes: Vec<Vec<usize>>,
     pub output_shapes: Vec<Vec<usize>>,
+    pub node_output_shapes: Ignored<Vec<Vec<usize>>>,
+    pub estimated_parameter_elements: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +334,7 @@ impl<B: Backend> GraphModel<B> {
 
         let mut execution_plan: Vec<Instruction> = Vec::new();
         let mut shape_cache = vec![vec![]; num_nodes];
+        let mut estimated_parameter_elements: usize = 0;
         let mut num_inputs = 0;
         let mut num_outputs = 0;
         let mut input_shapes = Vec::new();
@@ -769,6 +772,87 @@ impl<B: Backend> GraphModel<B> {
                 "Compiled Node {node_id}: {:?} -> Out Shape: {:?}",
                 op, out_shape
             );
+
+            let estimated_node_params = match config {
+                NodeDtoJSON::Dense { units, use_bias, .. } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let in_features = *prev_shape.first().unwrap_or(&0);
+                    let out_features = *units as usize;
+                    in_features * out_features + if *use_bias { out_features } else { 0 }
+                }
+                NodeDtoJSON::Conv2D {
+                    filters,
+                    kernel_size,
+                    use_bias,
+                    ..
+                } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let in_channels = *prev_shape.first().unwrap_or(&0);
+                    let out_channels = *filters as usize;
+                    let kernel_elems = kernel_size.h as usize * kernel_size.w as usize;
+                    out_channels * in_channels * kernel_elems
+                        + if *use_bias { out_channels } else { 0 }
+                }
+                NodeDtoJSON::Conv1D {
+                    filters,
+                    kernel_size,
+                    use_bias,
+                    ..
+                } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let in_channels = *prev_shape.get(1).unwrap_or(&1);
+                    let out_channels = *filters as usize;
+                    out_channels * in_channels * (*kernel_size as usize)
+                        + if *use_bias { out_channels } else { 0 }
+                }
+                NodeDtoJSON::BatchNorm { .. } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let features = *prev_shape.first().unwrap_or(&0);
+                    // gamma + beta
+                    features * 2
+                }
+                NodeDtoJSON::LayerNorm { .. } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let features = *prev_shape.last().unwrap_or(&0);
+                    // gamma + beta
+                    features * 2
+                }
+                NodeDtoJSON::LSTM {
+                    hidden_units,
+                    use_bias,
+                    ..
+                } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let input_size = *prev_shape.get(1).unwrap_or(&1);
+                    let hidden = *hidden_units as usize;
+                    let weights = 4 * hidden * input_size + 4 * hidden * hidden;
+                    let bias = if *use_bias { 8 * hidden } else { 0 };
+                    weights + bias
+                }
+                NodeDtoJSON::GRU {
+                    hidden_units,
+                    use_bias,
+                    ..
+                } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let input_size = *prev_shape.get(1).unwrap_or(&1);
+                    let hidden = *hidden_units as usize;
+                    let weights = 3 * hidden * input_size + 3 * hidden * hidden;
+                    let bias = if *use_bias { 6 * hidden } else { 0 };
+                    weights + bias
+                }
+                NodeDtoJSON::MultiHeadAttention { .. }
+                | NodeDtoJSON::TransformerEncoderBlock { .. } => {
+                    let prev_shape = &shape_cache[inputs_for_node[0]];
+                    let d_model = *prev_shape.get(1).unwrap_or(&1);
+                    // q, k, v, out projections (with bias)
+                    4 * (d_model * d_model + d_model)
+                }
+                _ => 0,
+            };
+            estimated_parameter_elements =
+                estimated_parameter_elements.saturating_add(estimated_node_params);
+
             shape_cache[node_id] = out_shape;
             execution_plan.push(Instruction {
                 node_id,
@@ -798,6 +882,8 @@ impl<B: Backend> GraphModel<B> {
             num_outputs,
             input_shapes,
             output_shapes,
+            node_output_shapes: Ignored(shape_cache),
+            estimated_parameter_elements,
         }
     }
 
@@ -1547,6 +1633,29 @@ pub struct BatchMetrics {
     pub accuracy: f32,
 }
 
+pub fn estimate_model_params_mb<B: Backend>(model: &GraphModel<B>) -> f32 {
+    crate::profiler::estimate_mb_from_elements(model.estimated_parameter_elements, 4)
+}
+
+pub fn estimate_gradients_mb<B: Backend>(model: &GraphModel<B>) -> f32 {
+    // In standard dense training, gradient tensors mirror trainable parameter tensors.
+    crate::profiler::estimate_mb_from_elements(model.estimated_parameter_elements, 4)
+}
+
+pub fn estimate_optimizer_state_mb<O, B: Backend>(_optimizer: &O, model: &GraphModel<B>) -> f32 {
+    // Adam keeps two fp32 state tensors per trainable parameter (m and v).
+    crate::profiler::estimate_mb_from_elements(model.estimated_parameter_elements * 2, 4)
+}
+
+pub fn estimate_activations_mb(batch_shapes: &[Vec<usize>], batch_size: usize) -> f32 {
+    let elements = batch_shapes
+        .iter()
+        .filter(|shape| !shape.is_empty())
+        .map(|shape| shape.iter().product::<usize>() * batch_size)
+        .sum::<usize>();
+    crate::profiler::estimate_mb_from_elements(elements, 4)
+}
+
 #[allow(clippy::type_complexity)]
 pub fn run_eval_pass<B: AutodiffBackend>(
     app_handle: &tauri::AppHandle,
@@ -1565,6 +1674,15 @@ pub fn run_eval_pass<B: AutodiffBackend>(
     }
 
     let mut optim = burn::optim::AdamConfig::new().init::<B, GraphModel<B>>();
+
+    let params_mb = estimate_model_params_mb(model);
+    let grads_mb = estimate_gradients_mb(model);
+    let optim_mb = estimate_optimizer_state_mb(&optim, model);
+    if let Some(p) = profiler.as_mut() {
+        p.set_model_params_mb(params_mb);
+        p.set_gradients_mb(grads_mb);
+        p.set_optimizer_state_mb(optim_mb);
+    }
 
     let mut final_loss = 999.0;
     let mut final_acc = 0.0;
@@ -1616,6 +1734,10 @@ pub fn run_eval_pass<B: AutodiffBackend>(
             };
             if let Some(p) = profiler.as_mut() {
                 p.record_batch(batch_size);
+                p.set_activation_mb(estimate_activations_mb(
+                    &model.node_output_shapes.0,
+                    batch_size,
+                ));
             }
 
             let predictions = model.forward_internal(&cloned_inputs, true, false);
@@ -1715,10 +1837,12 @@ pub fn run_validation_pass<B: AutodiffBackend>(
     if split_name.eq_ignore_ascii_case("validation") {
         if let Some(p) = profiler.as_mut() {
             p.mark_val_start();
+            p.set_model_params_mb(estimate_model_params_mb(model));
         }
     } else if split_name.eq_ignore_ascii_case("test") {
         if let Some(p) = profiler.as_mut() {
             p.mark_test_start();
+            p.set_model_params_mb(estimate_model_params_mb(model));
         }
     }
 
@@ -1749,6 +1873,15 @@ pub fn run_validation_pass<B: AutodiffBackend>(
 
         if let Some(p) = profiler.as_mut() {
             p.record_inference_samples(count);
+            let batch_size = match &batch.inputs[0] {
+                DynamicTensor::Dim2(t) => t.dims()[0],
+                DynamicTensor::Dim3(t) => t.dims()[0],
+                DynamicTensor::Dim4(t) => t.dims()[0],
+            };
+            p.set_activation_mb(estimate_activations_mb(
+                &model.node_output_shapes.0,
+                batch_size,
+            ));
         }
 
         // Yield during validation too, especially for large test sets
@@ -1781,4 +1914,17 @@ pub fn run_validation_pass<B: AutodiffBackend>(
     }
 
     (avg_loss, acc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::estimate_activations_mb;
+
+    #[test]
+    fn test_activation_estimate_is_positive_for_nontrivial_shapes() {
+        // Two intermediate tensors for one batch pass.
+        let shapes = vec![vec![64], vec![16, 16, 8]];
+        let mb = estimate_activations_mb(&shapes, 32);
+        assert!(mb > 0.0);
+    }
 }

@@ -432,6 +432,7 @@ async fn evaluate_population(
     test_split: usize,
     genome_ids: Option<Vec<String>>,
     source_generation: Option<u32>,
+    profiling: Option<crate::profiler::ProfilingConfig>,
 ) -> Result<Vec<EvaluationResult>, String> {
     eprintln!(
         ">>> Entered evaluate_population. Preparing to process dataset profile '{}'...",
@@ -920,10 +921,15 @@ async fn evaluate_population(
                     let train_batches_local = train_batches.clone();
                     let val_batches_local = val_batches.clone();
                     let test_batches_local = test_batches.clone();
+                    let memory_mode = profiling
+                        .as_ref()
+                        .and_then(|cfg| cfg.memory_mode)
+                        .unwrap_or(crate::profiler::MemoryMode::Hybrid);
 
                     let (final_loss, final_acc, profiler_result, trained_model) = tokio::task::spawn_blocking(move || {
                         let mut model_local = model;
                         let mut profiler = crate::profiler::ProfilerCollector::new();
+                        profiler.set_memory_mode(memory_mode);
 
                         if epochs > 0 {
                             crate::entities::run_eval_pass(
