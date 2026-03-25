@@ -1,0 +1,144 @@
+.container {
+    display: grid;
+    gap: 0.6rem;
+    border-top: 1px dashed var(--color-border-primary);
+    padding-top: 0.7rem;
+}
+
+.headerRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+
+.title {
+    margin: 0;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-muted);
+}
+
+.activeBadge {
+    font-size: 0.74rem;
+    color: var(--color-accent-primary, #2563eb);
+    border: 1px solid var(--color-accent-primary, #2563eb);
+    border-radius: 999px;
+    padding: 0.15rem 0.45rem;
+}
+
+.toolbar {
+    display: flex;
+    gap: 0.45rem;
+    align-items: center;
+}
+
+.input,
+.select {
+    min-width: 0;
+    flex: 1;
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border-primary);
+    color: var(--color-text-primary);
+    padding: 0.3rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.82rem;
+}
+
+.select {
+    flex: 0 0 100px;
+}
+
+.button,
+.buttonDanger {
+    border: 1px solid var(--color-border-primary);
+    background: transparent;
+    color: var(--color-text-primary);
+    border-radius: 6px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+}
+
+.button:hover:enabled {
+    border-color: var(--color-accent-primary, #2563eb);
+    color: var(--color-accent-primary, #2563eb);
+}
+
+.buttonDanger {
+    color: var(--color-danger, #ef4444);
+    border-color: var(--color-danger, #ef4444);
+}
+
+.buttonDanger:disabled,
+.button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.tableWrap {
+    overflow-x: auto;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+
+.table th,
+.table td {
+    border-bottom: 1px solid var(--color-border-primary);
+    padding: 0.35rem 0.3rem;
+    text-align: left;
+    vertical-align: top;
+}
+
+.table th {
+    color: var(--color-text-secondary);
+    font-weight: 600;
+}
+
+.actionRow {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.activeRow td {
+    background: color-mix(in srgb, var(--color-accent-primary, #2563eb) 12%, transparent);
+}
+
+.empty,
+.info,
+.error {
+    font-size: 0.78rem;
+}
+
+.empty,
+.info {
+    color: var(--color-text-secondary);
+}
+
+.error {
+    color: var(--color-danger, #ef4444);
+}
+
+.editRow td {
+    background: color-mix(in srgb, var(--color-bg-tertiary) 85%, transparent);
+}
+
+.editGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.45rem;
+    margin-bottom: 0.45rem;
+}
+
+.editField {
+    display: grid;
+    gap: 0.2rem;
+    font-size: 0.74rem;
+    color: var(--color-text-secondary);
+}

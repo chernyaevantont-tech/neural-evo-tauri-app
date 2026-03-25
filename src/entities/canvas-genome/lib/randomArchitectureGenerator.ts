@@ -96,6 +96,7 @@ const buildConvolutionalPath = (
     depth: number
 ): BaseNode => {
     let currentDepth = 0;
+    let hasConv2D = false;
 
     while (currentDepth < depth && currentDepth < 4) {
         const choice = randomInt(0, 100);
@@ -112,6 +113,7 @@ const buildConvolutionalPath = (
             currentNode.AddNext(conv);
             nodes.push(conv);
             currentNode = conv;
+            hasConv2D = true;
         } else if (choice < 70) {
             // Add Pooling layer
             const poolType = randomChoice(['max', 'avg'] as const);
@@ -137,6 +139,14 @@ const buildConvolutionalPath = (
         }
 
         currentDepth++;
+    }
+
+    // Keep image branch semantically convolutional even when random sampling skipped Conv2D.
+    if (!hasConv2D) {
+        const fallbackConv = new Conv2DNode(32, { h: 3, w: 3 }, 1, 1, 1, true, 'relu');
+        currentNode.AddNext(fallbackConv);
+        nodes.push(fallbackConv);
+        currentNode = fallbackConv;
     }
 
     // Flatten for transition to dense layers

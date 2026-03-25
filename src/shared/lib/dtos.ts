@@ -57,6 +57,39 @@ export interface DeviceProfile {
     target_fps?: number;
 }
 
+export interface DeviceResourceConstraints {
+    mops_budget: number;
+    ram_budget_mb: number;
+    flash_budget_mb: number;
+    max_latency_ms: number;
+}
+
+export interface DeviceTemplateDto {
+    id: string;
+    name: string;
+    constraints: DeviceResourceConstraints;
+    notes?: string;
+    tags: string[];
+    created_at_unix_ms: number;
+    updated_at_unix_ms: number;
+}
+
+export interface CreateDeviceTemplateInput {
+    name: string;
+    constraints: DeviceResourceConstraints;
+    notes?: string;
+    tags: string[];
+}
+
+export interface UpdateDeviceTemplatePatch {
+    name?: string;
+    constraints?: DeviceResourceConstraints;
+    notes?: string;
+    tags?: string[];
+}
+
+export type DeviceLibraryImportMode = 'merge' | 'replace';
+
 export type MutationType =
     | { type: 'Random' }
     | { type: 'AddNode'; data: { node_type: string; source: string; target: string } }

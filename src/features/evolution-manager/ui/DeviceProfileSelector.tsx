@@ -4,9 +4,15 @@ import { useEvolutionSettingsStore } from '../model/store';
 import { validateDeviceConstraintParams, type DeviceConstraintParams } from '../model/deviceConstraints';
 import styles from './DeviceProfileSelector.module.css';
 
+export type SaveDeviceTemplatePayload = {
+    name: string;
+    notes?: string;
+    tags: string[];
+    constraints: DeviceConstraintParams;
+};
+
 type DeviceTemplateCallbacks = {
-    onSaveAsTemplate?: (name: string) => void;
-    onLoadTemplate?: (templateId: string) => void;
+    onSaveAsTemplate?: (payload: SaveDeviceTemplatePayload) => void;
 };
 
 type BuiltInProfile = {
@@ -70,10 +76,12 @@ function toCustomFromConstraints(constraints: DeviceConstraintParams) {
 export function DeviceProfileSelector({
     disabled = false,
     onSaveAsTemplate,
-    onLoadTemplate,
 }: { disabled?: boolean } & DeviceTemplateCallbacks) {
     const settings = useEvolutionSettingsStore();
+    const [showSaveTemplateForm, setShowSaveTemplateForm] = useState(false);
     const [templateName, setTemplateName] = useState('');
+    const [templateNotes, setTemplateNotes] = useState('');
+    const [templateTags, setTemplateTags] = useState('');
 
     const activeConstraints = useMemo<DeviceConstraintParams>(() => {
         const selectedProfile = BUILT_IN_PROFILES.find((profile) => profile.id === settings.deviceProfileId);
@@ -139,12 +147,27 @@ export function DeviceProfileSelector({
         if (!trimmed || disabled) {
             return;
         }
+
+        const payload: SaveDeviceTemplatePayload = {
+            name: trimmed,
+            notes: templateNotes.trim() || undefined,
+            tags: templateTags
+                .split(',')
+                .map((tag) => tag.trim())
+                .filter(Boolean),
+            constraints: activeConstraints,
+        };
+
         if (onSaveAsTemplate) {
-            onSaveAsTemplate(trimmed);
+            onSaveAsTemplate(payload);
         } else {
-            console.info('TODO(T116): save device template', trimmed);
+            console.info('TODO(T116): save device template', payload);
         }
+
         setTemplateName('');
+        setTemplateNotes('');
+        setTemplateTags('');
+        setShowSaveTemplateForm(false);
     };
 
     return (
@@ -267,32 +290,61 @@ export function DeviceProfileSelector({
 
             <div className={styles.templates}>
                 <p className={styles.templateTitle}>Device templates</p>
-                <div className={styles.templateRow}>
-                    <input
-                        className={styles.templateInput}
-                        value={templateName}
-                        onChange={(event) => setTemplateName(event.target.value)}
-                        placeholder="Template name"
-                        disabled={disabled}
-                        aria-label="Template name"
-                    />
-                    <button
-                        type="button"
-                        className={styles.button}
-                        onClick={saveTemplate}
-                        disabled={disabled || !templateName.trim()}
-                    >
-                        Save
-                    </button>
-                </div>
                 <button
                     type="button"
                     className={styles.button}
-                    onClick={() => (onLoadTemplate ? onLoadTemplate(settings.deviceProfileId) : console.info('TODO(T116): load device template'))}
+                    onClick={() => setShowSaveTemplateForm((prev) => !prev)}
                     disabled={disabled}
                 >
-                    Load template
+                    Save as device template
                 </button>
+
+                {showSaveTemplateForm && (
+                    <div className={styles.templateForm}>
+                        <input
+                            className={styles.templateInput}
+                            value={templateName}
+                            onChange={(event) => setTemplateName(event.target.value)}
+                            placeholder="Template name"
+                            disabled={disabled}
+                            aria-label="Template name"
+                        />
+                        <input
+                            className={styles.templateInput}
+                            value={templateNotes}
+                            onChange={(event) => setTemplateNotes(event.target.value)}
+                            placeholder="Notes (optional)"
+                            disabled={disabled}
+                            aria-label="Template notes"
+                        />
+                        <input
+                            className={styles.templateInput}
+                            value={templateTags}
+                            onChange={(event) => setTemplateTags(event.target.value)}
+                            placeholder="Tags (comma separated)"
+                            disabled={disabled}
+                            aria-label="Template tags"
+                        />
+                        <div className={styles.templateActions}>
+                            <button
+                                type="button"
+                                className={styles.button}
+                                onClick={saveTemplate}
+                                disabled={disabled || !templateName.trim()}
+                            >
+                                Save template
+                            </button>
+                            <button
+                                type="button"
+                                className={styles.button}
+                                onClick={() => setShowSaveTemplateForm(false)}
+                                disabled={disabled}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

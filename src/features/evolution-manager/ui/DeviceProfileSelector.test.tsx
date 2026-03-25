@@ -54,20 +54,25 @@ describe('DeviceProfileSelector', () => {
 
     it('calls template extension-point callbacks', () => {
         const onSaveAsTemplate = vi.fn();
-        const onLoadTemplate = vi.fn();
 
         render(
             <DeviceProfileSelector
                 onSaveAsTemplate={onSaveAsTemplate}
-                onLoadTemplate={onLoadTemplate}
             />,
         );
 
+        fireEvent.click(screen.getByRole('button', { name: 'Save as device template' }));
         fireEvent.change(screen.getByLabelText('Template name'), { target: { value: 'Edge Custom' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Load template' }));
+        fireEvent.change(screen.getByLabelText('Template notes'), { target: { value: 'My board' } });
+        fireEvent.change(screen.getByLabelText('Template tags'), { target: { value: 'edge, tiny' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save template' }));
 
-        expect(onSaveAsTemplate).toHaveBeenCalledWith('Edge Custom');
-        expect(onLoadTemplate).toHaveBeenCalledWith(useEvolutionSettingsStore.getState().deviceProfileId);
+        expect(onSaveAsTemplate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                name: 'Edge Custom',
+                notes: 'My board',
+                tags: ['edge', 'tiny'],
+            }),
+        );
     });
 });

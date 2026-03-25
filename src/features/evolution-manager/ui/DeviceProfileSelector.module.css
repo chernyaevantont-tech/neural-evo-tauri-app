@@ -92,6 +92,16 @@
     align-items: center;
 }
 
+.templateForm {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.templateActions {
+    display: flex;
+    gap: 0.45rem;
+}
+
 .templateInput {
     flex: 1;
     min-width: 0;

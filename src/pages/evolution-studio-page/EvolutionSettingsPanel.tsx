@@ -1,11 +1,15 @@
 import React from 'react';
 import styles from './EvolutionSettingsPanel.module.css';
 import {
+    DeviceLibraryManager,
     DeviceProfileSelector,
     StoppingCriteriaPanel,
+    useDeviceLibrary,
     useEvolutionSettingsStore,
     type CrossoverStrategy,
+    type SaveDeviceTemplatePayload,
 } from '../../features/evolution-manager';
+import type { DeviceLibraryImportMode, DeviceTemplateDto, UpdateDeviceTemplatePatch } from '../../shared/lib';
 
 interface EvolutionSettingsPanelProps {
     disabled?: boolean;
@@ -13,6 +17,71 @@ interface EvolutionSettingsPanelProps {
 
 export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ disabled = false }) => {
     const settings = useEvolutionSettingsStore();
+    const deviceLibrary = useDeviceLibrary();
+
+    const MB_TO_BYTES = 1024 * 1024;
+
+    const applyTemplateToSettings = (template: DeviceTemplateDto) => {
+        settings.setIsCustomDevice(true);
+        settings.setSelectedDeviceProfile({
+            device_id: template.id,
+            device_name: template.name,
+            compute_capability: 'X86',
+            ram_mb: Math.round(template.constraints.ram_budget_mb),
+            inference_latency_budget_ms: template.constraints.max_latency_ms,
+            training_available: true,
+            max_model_size_mb: template.constraints.flash_budget_mb,
+        });
+        settings.setCustomDeviceParams({
+            mops_budget: template.constraints.mops_budget,
+            ram_mb: template.constraints.ram_budget_mb,
+            flash_mb: template.constraints.flash_budget_mb,
+            latency_budget_ms: template.constraints.max_latency_ms,
+            max_model_size_mb: template.constraints.flash_budget_mb,
+        });
+        settings.setResourceTarget('ram', Math.round(template.constraints.ram_budget_mb * MB_TO_BYTES));
+        settings.setResourceTarget('flash', Math.round(template.constraints.flash_budget_mb * MB_TO_BYTES));
+        settings.setResourceTarget('macs', Math.round(template.constraints.mops_budget * 1_000_000));
+    };
+
+    const handleSaveAsTemplate = async (payload: SaveDeviceTemplatePayload) => {
+        const created = await deviceLibrary.createTemplate({
+            name: payload.name,
+            notes: payload.notes,
+            tags: payload.tags,
+            constraints: {
+                mops_budget: payload.constraints.mops_budget,
+                ram_budget_mb: payload.constraints.ram_mb,
+                flash_budget_mb: payload.constraints.flash_mb,
+                max_latency_ms: payload.constraints.latency_budget_ms,
+            },
+        });
+        applyTemplateToSettings(created);
+    };
+
+    const handleApplyTemplate = (template: DeviceTemplateDto) => {
+        applyTemplateToSettings(template);
+    };
+
+    const handleUpdateTemplate = async (id: string, patch: UpdateDeviceTemplatePatch) => {
+        await deviceLibrary.updateTemplate(id, patch);
+    };
+
+    const handleDuplicateTemplate = async (id: string, newName: string) => {
+        await deviceLibrary.duplicateTemplate(id, newName);
+    };
+
+    const handleDeleteTemplate = async (id: string) => {
+        await deviceLibrary.deleteTemplate(id);
+    };
+
+    const handleImportLibrary = async (path: string, mode: DeviceLibraryImportMode) => {
+        await deviceLibrary.importLibrary(path, mode);
+    };
+
+    const handleExportLibrary = async (path: string) => {
+        await deviceLibrary.exportLibrary(path);
+    };
 
     const handleCrossoverChange = (strategy: CrossoverStrategy) => {
         if (disabled) return;
@@ -221,12 +290,23 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
                 <h4 className={styles.sectionTitle}>Device Constraints</h4>
                 <DeviceProfileSelector
                     disabled={disabled}
-                    onSaveAsTemplate={(name) => {
-                        console.info('TODO(T116): Save device template', name);
-                    }}
-                    onLoadTemplate={(templateId) => {
-                        console.info('TODO(T116): Load device template', templateId);
-                    }}
+                    onSaveAsTemplate={handleSaveAsTemplate}
+                />
+                <DeviceLibraryManager
+                    disabled={disabled}
+                    templates={deviceLibrary.templates}
+                    isLoading={deviceLibrary.isLoading}
+                    isMutating={deviceLibrary.isMutating}
+                    error={deviceLibrary.error}
+                    activeTemplateId={settings.selectedDeviceProfile?.device_id}
+                    lastImportCount={deviceLibrary.lastImportCount}
+                    lastExportCount={deviceLibrary.lastExportCount}
+                    onApplyTemplate={handleApplyTemplate}
+                    onUpdateTemplate={handleUpdateTemplate}
+                    onDuplicateTemplate={handleDuplicateTemplate}
+                    onDeleteTemplate={handleDeleteTemplate}
+                    onImportLibrary={handleImportLibrary}
+                    onExportLibrary={handleExportLibrary}
                 />
             </div>
 
