@@ -1,15 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 import styles from './EvolutionSettingsPanel.module.css';
 import {
-    DeviceLibraryManager,
-    DeviceProfileSelector,
-    StoppingCriteriaPanel,
-    useDeviceLibrary,
+    AdvancedPerformanceSection,
+    DeviceTargetingSection,
+    ObjectivesSection,
+    StoppingCriteriaSection,
+    applySettingsPreset,
+    buildEvolutionRunConfig,
+    createSettingsPreset,
+    loadLastUsedSettingsFromLocalStorage,
+    saveLastUsedSettingsToLocalStorage,
+    saveSettingsPresetToLocalStorage,
     useEvolutionSettingsStore,
     type CrossoverStrategy,
-    type SaveDeviceTemplatePayload,
 } from '../../features/evolution-manager';
-import type { DeviceLibraryImportMode, DeviceTemplateDto, UpdateDeviceTemplatePatch } from '../../shared/lib';
 
 interface EvolutionSettingsPanelProps {
     disabled?: boolean;
@@ -17,71 +21,7 @@ interface EvolutionSettingsPanelProps {
 
 export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ disabled = false }) => {
     const settings = useEvolutionSettingsStore();
-    const deviceLibrary = useDeviceLibrary();
-
-    const MB_TO_BYTES = 1024 * 1024;
-
-    const applyTemplateToSettings = (template: DeviceTemplateDto) => {
-        settings.setIsCustomDevice(true);
-        settings.setSelectedDeviceProfile({
-            device_id: template.id,
-            device_name: template.name,
-            compute_capability: 'X86',
-            ram_mb: Math.round(template.constraints.ram_budget_mb),
-            inference_latency_budget_ms: template.constraints.max_latency_ms,
-            training_available: true,
-            max_model_size_mb: template.constraints.flash_budget_mb,
-        });
-        settings.setCustomDeviceParams({
-            mops_budget: template.constraints.mops_budget,
-            ram_mb: template.constraints.ram_budget_mb,
-            flash_mb: template.constraints.flash_budget_mb,
-            latency_budget_ms: template.constraints.max_latency_ms,
-            max_model_size_mb: template.constraints.flash_budget_mb,
-        });
-        settings.setResourceTarget('ram', Math.round(template.constraints.ram_budget_mb * MB_TO_BYTES));
-        settings.setResourceTarget('flash', Math.round(template.constraints.flash_budget_mb * MB_TO_BYTES));
-        settings.setResourceTarget('macs', Math.round(template.constraints.mops_budget * 1_000_000));
-    };
-
-    const handleSaveAsTemplate = async (payload: SaveDeviceTemplatePayload) => {
-        const created = await deviceLibrary.createTemplate({
-            name: payload.name,
-            notes: payload.notes,
-            tags: payload.tags,
-            constraints: {
-                mops_budget: payload.constraints.mops_budget,
-                ram_budget_mb: payload.constraints.ram_mb,
-                flash_budget_mb: payload.constraints.flash_mb,
-                max_latency_ms: payload.constraints.latency_budget_ms,
-            },
-        });
-        applyTemplateToSettings(created);
-    };
-
-    const handleApplyTemplate = (template: DeviceTemplateDto) => {
-        applyTemplateToSettings(template);
-    };
-
-    const handleUpdateTemplate = async (id: string, patch: UpdateDeviceTemplatePatch) => {
-        await deviceLibrary.updateTemplate(id, patch);
-    };
-
-    const handleDuplicateTemplate = async (id: string, newName: string) => {
-        await deviceLibrary.duplicateTemplate(id, newName);
-    };
-
-    const handleDeleteTemplate = async (id: string) => {
-        await deviceLibrary.deleteTemplate(id);
-    };
-
-    const handleImportLibrary = async (path: string, mode: DeviceLibraryImportMode) => {
-        await deviceLibrary.importLibrary(path, mode);
-    };
-
-    const handleExportLibrary = async (path: string) => {
-        await deviceLibrary.exportLibrary(path);
-    };
+    const [statusMessage, setStatusMessage] = useState<string>('');
 
     const handleCrossoverChange = (strategy: CrossoverStrategy) => {
         if (disabled) return;
@@ -109,9 +49,55 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
         changeLayerType: 'Change Layer Type',
     };
 
+    const handleApplySettings = () => {
+        try {
+            settings.normalizeObjectiveWeights();
+            buildEvolutionRunConfig(settings);
+            saveLastUsedSettingsToLocalStorage(createSettingsPreset(settings));
+            setStatusMessage('Settings applied and validated.');
+        } catch (error) {
+            setStatusMessage(error instanceof Error ? error.message : String(error));
+        }
+    };
+
+    const handleSavePreset = () => {
+        saveSettingsPresetToLocalStorage(createSettingsPreset(settings));
+        setStatusMessage('Preset saved locally.');
+    };
+
+    const handleLoadLastUsed = () => {
+        const preset = loadLastUsedSettingsFromLocalStorage();
+        if (!preset) {
+            setStatusMessage('No last used config found.');
+            return;
+        }
+
+        applySettingsPreset(settings, preset);
+        setStatusMessage('Last used config restored.');
+    };
+
     return (
         <div className={`${styles.panel} ${disabled ? styles.disabled : ''}`}>
             <h3 className={styles.panelTitle}>Evolution Settings</h3>
+
+            <div className={styles.section}>
+                <div className={styles.actionsRow}>
+                    <button type="button" className={styles.actionButton} onClick={handleApplySettings} disabled={disabled}>
+                        Apply
+                    </button>
+                    <button type="button" className={styles.actionButton} onClick={handleSavePreset} disabled={disabled}>
+                        Save preset
+                    </button>
+                    <button type="button" className={styles.actionButton} onClick={handleLoadLastUsed} disabled={disabled}>
+                        Load last used config
+                    </button>
+                </div>
+                {statusMessage && <p className={styles.helperText}>{statusMessage}</p>}
+            </div>
+
+            <div className={styles.section}>
+                <ObjectivesSection disabled={disabled} />
+            </div>
 
             {/* Crossover Strategies */}
             <div className={styles.section}>
@@ -287,27 +273,7 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
 
             {/* Device Constraints */}
             <div className={styles.section}>
-                <h4 className={styles.sectionTitle}>Device Constraints</h4>
-                <DeviceProfileSelector
-                    disabled={disabled}
-                    onSaveAsTemplate={handleSaveAsTemplate}
-                />
-                <DeviceLibraryManager
-                    disabled={disabled}
-                    templates={deviceLibrary.templates}
-                    isLoading={deviceLibrary.isLoading}
-                    isMutating={deviceLibrary.isMutating}
-                    error={deviceLibrary.error}
-                    activeTemplateId={settings.selectedDeviceProfile?.device_id}
-                    lastImportCount={deviceLibrary.lastImportCount}
-                    lastExportCount={deviceLibrary.lastExportCount}
-                    onApplyTemplate={handleApplyTemplate}
-                    onUpdateTemplate={handleUpdateTemplate}
-                    onDuplicateTemplate={handleDuplicateTemplate}
-                    onDeleteTemplate={handleDeleteTemplate}
-                    onImportLibrary={handleImportLibrary}
-                    onExportLibrary={handleExportLibrary}
-                />
+                <DeviceTargetingSection disabled={disabled} />
             </div>
 
             {/* Random Initialization */}
@@ -427,7 +393,11 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
 
             {/* Stopping Criteria */}
             <div className={styles.section}>
-                <StoppingCriteriaPanel disabled={disabled} />
+                <StoppingCriteriaSection disabled={disabled} />
+            </div>
+
+            <div className={styles.section}>
+                <AdvancedPerformanceSection disabled={disabled} />
             </div>
 
             {/* Zero-Cost Proxy Evaluation */}

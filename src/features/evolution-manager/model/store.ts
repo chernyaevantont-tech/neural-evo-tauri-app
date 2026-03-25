@@ -8,7 +8,9 @@ import type {
 } from '../../../shared/lib';
 
 export type CrossoverStrategy = 'subgraph-insertion' | 'subgraph-replacement' | 'neat-style' | 'multi-point';
-export type SecondaryObjective = 'latency' | 'model_size' | 'training_time' | 'energy';
+export type SecondaryObjective = 'latency' | 'model_size' | 'train_time' | 'training_time' | 'energy';
+export type ObjectiveWeightKey = 'accuracy' | 'latency' | 'model_size' | 'train_time';
+export type MemoryMode = 'estimate' | 'runtime' | 'hybrid';
 
 export interface GenerationProfilingStats {
     generation: number;
@@ -110,6 +112,8 @@ export interface EvolutionSettingsState {
     setMemorySafetyMarginMb: (val: number) => void;
     estimatorSafetyFactor: number;
     setEstimatorSafetyFactor: (val: number) => void;
+    memoryMode: MemoryMode;
+    setMemoryMode: (val: MemoryMode) => void;
 
     // Multi-Objective
     mobjEnabled: boolean;
@@ -117,6 +121,11 @@ export interface EvolutionSettingsState {
     primaryObjective: 'accuracy';
     secondaryObjectives: SecondaryObjective[];
     setSecondaryObjectives: (val: SecondaryObjective[]) => void;
+    objectiveWeights: Record<ObjectiveWeightKey, number>;
+    objectiveWeightsEnabled: boolean;
+    setObjectiveWeightsEnabled: (val: boolean) => void;
+    setObjectiveWeight: (key: ObjectiveWeightKey, value: number) => void;
+    normalizeObjectiveWeights: () => void;
 
     // Device Targeting
     deviceProfileId: string;
@@ -259,12 +268,52 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
     setMemorySafetyMarginMb: (val) => set({ memorySafetyMarginMb: Math.max(0, val) }),
     estimatorSafetyFactor: 1.1,
     setEstimatorSafetyFactor: (val) => set({ estimatorSafetyFactor: Math.max(1, val) }),
+    memoryMode: 'hybrid',
+    setMemoryMode: (val) => set({ memoryMode: val }),
 
     mobjEnabled: false,
     setMobjEnabled: (val) => set({ mobjEnabled: val }),
     primaryObjective: 'accuracy',
     secondaryObjectives: ['latency', 'model_size'],
     setSecondaryObjectives: (val) => set({ secondaryObjectives: val }),
+    objectiveWeights: {
+        accuracy: 0.5,
+        latency: 0.2,
+        model_size: 0.2,
+        train_time: 0.1,
+    },
+    objectiveWeightsEnabled: true,
+    setObjectiveWeightsEnabled: (val) => set({ objectiveWeightsEnabled: val }),
+    setObjectiveWeight: (key, value) => set((state) => ({
+        objectiveWeights: {
+            ...state.objectiveWeights,
+            [key]: Math.max(0, Math.min(1, value)),
+        },
+    })),
+    normalizeObjectiveWeights: () =>
+        set((state) => {
+            const keys = Object.keys(state.objectiveWeights) as ObjectiveWeightKey[];
+            const sum = keys.reduce((acc, key) => acc + Math.max(0, state.objectiveWeights[key]), 0);
+
+            if (sum <= Number.EPSILON) {
+                const uniform = 1 / keys.length;
+                return {
+                    objectiveWeights: {
+                        accuracy: uniform,
+                        latency: uniform,
+                        model_size: uniform,
+                        train_time: uniform,
+                    },
+                };
+            }
+
+            const normalized = keys.reduce((acc, key) => {
+                acc[key] = Math.max(0, state.objectiveWeights[key]) / sum;
+                return acc;
+            }, {} as Record<ObjectiveWeightKey, number>);
+
+            return { objectiveWeights: normalized };
+        }),
 
     deviceProfileId: 'default-device',
     setDeviceProfileId: (val) => set({ deviceProfileId: val }),

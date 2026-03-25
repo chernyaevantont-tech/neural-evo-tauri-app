@@ -1,0 +1,129 @@
+.section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.sectionTitle {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-text-secondary);
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.label {
+    font-size: 0.88rem;
+    color: var(--color-text-primary);
+}
+
+.helper {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+    line-height: 1.35;
+}
+
+.warning {
+    font-size: 0.78rem;
+    color: #f6ad55;
+}
+
+.error {
+    font-size: 0.78rem;
+    color: #ff7b72;
+}
+
+.checkboxGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.checkboxLabel {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.88rem;
+    color: var(--color-text-primary);
+}
+
+.sliderRow {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.sliderTrack {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.slider {
+    flex: 1;
+    height: 4px;
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--color-bg-tertiary);
+    border-radius: 4px;
+}
+
+.slider::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--color-accent-primary, #646cff);
+}
+
+.sliderValue {
+    min-width: 40px;
+    text-align: right;
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+}
+
+.badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.badge {
+    font-size: 0.72rem;
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border-primary);
+    color: var(--color-text-primary);
+    border-radius: 999px;
+    padding: 0.15rem 0.5rem;
+}
+
+.numberInput {
+    width: 100px;
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border-primary);
+    color: var(--color-text-primary);
+    padding: 0.28rem 0.45rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    text-align: right;
+}
+
+.select {
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border-primary);
+    color: var(--color-text-primary);
+    padding: 0.28rem 0.45rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+}
