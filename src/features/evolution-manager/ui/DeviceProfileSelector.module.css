@@ -1,0 +1,124 @@
+.container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+
+.select {
+    width: 100%;
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border-primary);
+    color: var(--color-text-primary);
+    padding: 0.38rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+}
+
+.select:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.fields {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+}
+
+.field {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.label {
+    font-size: 0.84rem;
+    color: var(--color-text-secondary);
+}
+
+.input {
+    width: 95px;
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border-primary);
+    color: var(--color-text-primary);
+    padding: 0.3rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    text-align: right;
+}
+
+.fieldError {
+    color: var(--color-danger, #ef4444);
+    font-size: 0.74rem;
+}
+
+.warning {
+    color: var(--color-warning, #f59e0b);
+    font-size: 0.76rem;
+    line-height: 1.35;
+}
+
+.feasibleFilter {
+    border-top: 1px dashed var(--color-border-primary);
+    padding-top: 0.6rem;
+}
+
+.templates {
+    border-top: 1px dashed var(--color-border-primary);
+    padding-top: 0.6rem;
+    display: grid;
+    gap: 0.55rem;
+}
+
+.templateTitle {
+    margin: 0;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-muted);
+}
+
+.templateRow {
+    display: flex;
+    gap: 0.45rem;
+    align-items: center;
+}
+
+.templateInput {
+    flex: 1;
+    min-width: 0;
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border-primary);
+    color: var(--color-text-primary);
+    padding: 0.3rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.82rem;
+}
+
+.button {
+    border: 1px solid var(--color-border-primary);
+    background: transparent;
+    color: var(--color-text-primary);
+    border-radius: 6px;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.button:hover:enabled {
+    border-color: var(--color-accent-primary, #646cff);
+    color: var(--color-accent-primary, #646cff);
+}

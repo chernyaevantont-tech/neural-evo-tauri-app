@@ -26,6 +26,30 @@ export function ParetoSelector({
                     <div>Accuracy: {selectedGenome.accuracy.toFixed(4)}</div>
                     <div>Latency: {selectedGenome.inference_latency_ms.toFixed(3)} ms</div>
                     <div>Model: {selectedGenome.model_size_mb.toFixed(3)} MB</div>
+                    <div>
+                        Feasibility:{' '}
+                        <span
+                            className={
+                                selectedGenome.device_feasible === true
+                                    ? styles.feasibleBadge
+                                    : selectedGenome.device_feasible === false
+                                        ? styles.notFeasibleBadge
+                                        : styles.unknownBadge
+                            }
+                        >
+                            {selectedGenome.device_feasible === undefined
+                                ? 'Unknown'
+                                : selectedGenome.device_feasible
+                                    ? 'Feasible'
+                                    : 'Not feasible'}
+                        </span>
+                    </div>
+                    <div>
+                        Constraint score:{' '}
+                        {selectedGenome.constraint_violation_score === undefined
+                            ? 'n/a'
+                            : selectedGenome.constraint_violation_score.toFixed(3)}
+                    </div>
                 </div>
             ) : (
                 <div className={styles.selectorEmpty}>Click any point to inspect actions.</div>

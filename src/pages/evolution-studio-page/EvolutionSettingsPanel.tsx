@@ -1,6 +1,10 @@
 import React from 'react';
 import styles from './EvolutionSettingsPanel.module.css';
-import { useEvolutionSettingsStore, type CrossoverStrategy } from '../../features/evolution-manager';
+import {
+    DeviceProfileSelector,
+    useEvolutionSettingsStore,
+    type CrossoverStrategy,
+} from '../../features/evolution-manager';
 
 interface EvolutionSettingsPanelProps {
     disabled?: boolean;
@@ -209,6 +213,20 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
                         </div>
                     </div>
                 )}
+            </div>
+
+            {/* Device Constraints */}
+            <div className={styles.section}>
+                <h4 className={styles.sectionTitle}>Device Constraints</h4>
+                <DeviceProfileSelector
+                    disabled={disabled}
+                    onSaveAsTemplate={(name) => {
+                        console.info('TODO(T116): Save device template', name);
+                    }}
+                    onLoadTemplate={(templateId) => {
+                        console.info('TODO(T116): Load device template', templateId);
+                    }}
+                />
             </div>
 
             {/* Random Initialization */}

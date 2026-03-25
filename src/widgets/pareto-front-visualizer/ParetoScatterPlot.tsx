@@ -34,6 +34,25 @@ type Props = {
     constraintViolationScoreByGenomeId?: Record<string, number>;
 };
 
+function clamp01(value: number): number {
+    return Math.max(0, Math.min(1, value));
+}
+
+function colorByFeasibility(point: ParetoPoint, frontier: boolean): string {
+    if (point.feasible === true) {
+        return frontier ? 'rgba(34, 197, 94, 0.95)' : 'rgba(34, 197, 94, 0.58)';
+    }
+
+    if (point.feasible === false) {
+        const score = clamp01((point.violationScore ?? 0) / 1.5);
+        const alphaBase = frontier ? 0.35 : 0.25;
+        const alpha = alphaBase + score * 0.55;
+        return `rgba(239, 68, 68, ${alpha.toFixed(3)})`;
+    }
+
+    return frontier ? 'rgba(59, 130, 246, 0.8)' : 'rgba(148, 163, 184, 0.4)';
+}
+
 function toPoint(
     objective: GenomeObjectives,
     feasibilityByGenomeId?: Record<string, boolean>,
@@ -96,7 +115,10 @@ export function ParetoScatterPlot({
             {
                 label: 'Dominated',
                 data: dominatedPoints,
-                backgroundColor: 'rgba(148, 163, 184, 0.4)',
+                backgroundColor: (ctx) => {
+                    const point = ctx.raw as ParetoPoint;
+                    return colorByFeasibility(point, false);
+                },
                 pointRadius: 4,
                 pointHoverRadius: 6,
                 pointBorderColor: (ctx) => {
@@ -111,7 +133,10 @@ export function ParetoScatterPlot({
             {
                 label: 'Non-dominated frontier',
                 data: frontierPoints,
-                backgroundColor: 'rgba(34, 197, 94, 0.95)',
+                backgroundColor: (ctx) => {
+                    const point = ctx.raw as ParetoPoint;
+                    return colorByFeasibility(point, true);
+                },
                 pointBorderColor: (ctx) => {
                     const point = ctx.raw as ParetoPoint;
                     return point?.genomeId === selectedGenomeId ? '#f59e0b' : '#14532d';

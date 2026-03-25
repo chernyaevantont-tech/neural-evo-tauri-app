@@ -4,7 +4,11 @@ import styles from './EvolutionStudioPage.module.css';
 import { useNavigate } from 'react-router-dom';
 import { BsArrowLeft, BsPlay, BsStop, BsPlus, BsX } from 'react-icons/bs';
 import { useEvolutionLoop } from '../../features/evolution-studio';
-import { useEvolutionSettingsStore } from '../../features/evolution-manager';
+import {
+    evaluateGenomeFeasibility,
+    useEvolutionSettingsStore,
+    type DeviceConstraintParams,
+} from '../../features/evolution-manager';
 import { useDatasetManagerStore } from '../../features/dataset-manager';
 import { useCanvasGenomeStore, serializeGenome } from '../../entities/canvas-genome';
 import type { GenerationSnapshot, PopulatedGenome } from '../../entities/genome';
@@ -156,6 +160,90 @@ export const EvolutionStudioPage: React.FC = () => {
     }, [currentSnapshot]);
 
     const activeProfile = profiles.find(p => p.id === datasetProfileId);
+    const activeDeviceConstraints = useMemo<DeviceConstraintParams | undefined>(() => {
+        if (settings.customDeviceParams) {
+            const fromCustom = {
+                mops_budget:
+                    settings.customDeviceParams.mops_budget ??
+                    Math.max(1, settings.resourceTargets.macs / 1_000_000),
+                ram_mb: settings.customDeviceParams.ram_mb,
+                flash_mb:
+                    settings.customDeviceParams.flash_mb ??
+                    settings.customDeviceParams.max_model_size_mb ??
+                    Math.max(1, settings.resourceTargets.flash / (1024 * 1024)),
+                latency_budget_ms: settings.customDeviceParams.latency_budget_ms,
+            };
+
+            if (
+                fromCustom.mops_budget <= 0 ||
+                fromCustom.ram_mb <= 0 ||
+                fromCustom.flash_mb <= 0 ||
+                fromCustom.latency_budget_ms <= 0
+            ) {
+                return undefined;
+            }
+
+            return fromCustom;
+        }
+
+        if (settings.selectedDeviceProfile) {
+            const fallbackFlash =
+                settings.selectedDeviceProfile.max_model_size_mb ??
+                Math.max(1, settings.resourceTargets.flash / (1024 * 1024));
+            return {
+                mops_budget: Math.max(1, settings.resourceTargets.macs / 1_000_000),
+                ram_mb: settings.selectedDeviceProfile.ram_mb,
+                flash_mb: fallbackFlash,
+                latency_budget_ms: settings.selectedDeviceProfile.inference_latency_budget_ms,
+            };
+        }
+
+        return undefined;
+    }, [
+        settings.customDeviceParams,
+        settings.resourceTargets.flash,
+        settings.resourceTargets.macs,
+        settings.selectedDeviceProfile,
+    ]);
+
+    const feasibilityByGenomeId = useMemo<Record<string, boolean>>(() => {
+        const result: Record<string, boolean> = {};
+        if (!activeDeviceConstraints) {
+            return result;
+        }
+
+        for (const [_, front] of settings.paretoHistory) {
+            const all = front.all_genomes ?? front.pareto_members;
+            for (const objective of all) {
+                result[objective.genome_id] = evaluateGenomeFeasibility(
+                    objective,
+                    activeDeviceConstraints,
+                ).isFeasible;
+            }
+        }
+
+        return result;
+    }, [activeDeviceConstraints, settings.paretoHistory]);
+
+    const constraintViolationScoreByGenomeId = useMemo<Record<string, number>>(() => {
+        const result: Record<string, number> = {};
+        if (!activeDeviceConstraints) {
+            return result;
+        }
+
+        for (const [_, front] of settings.paretoHistory) {
+            const all = front.all_genomes ?? front.pareto_members;
+            for (const objective of all) {
+                result[objective.genome_id] = evaluateGenomeFeasibility(
+                    objective,
+                    activeDeviceConstraints,
+                ).violationScore;
+            }
+        }
+
+        return result;
+    }, [activeDeviceConstraints, settings.paretoHistory]);
+
     const genomeById = useMemo(() => {
         const map = new Map<string, PopulatedGenome>();
         for (const genome of population) {
@@ -625,6 +713,9 @@ export const EvolutionStudioPage: React.FC = () => {
                         <ParetoFrontVisualizer
                             currentParetoFront={settings.currentParetoFront}
                             paretoHistory={settings.paretoHistory}
+                            feasibilityByGenomeId={feasibilityByGenomeId}
+                            constraintViolationScoreByGenomeId={constraintViolationScoreByGenomeId}
+                            showOnlyFeasible={settings.showOnlyFeasible}
                             onUseAsSeed={handleUseParetoAsSeed}
                             onOpenDetails={handleOpenParetoDetails}
                             onExportSelected={handleExportParetoSelected}

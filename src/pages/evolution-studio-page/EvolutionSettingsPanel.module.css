@@ -210,3 +210,15 @@
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+.helpText {
+    margin: 0.2rem 0 0;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    line-height: 1.3;
+}
+
+.checkboxRow {
+    display: flex;
+    align-items: center;
+}

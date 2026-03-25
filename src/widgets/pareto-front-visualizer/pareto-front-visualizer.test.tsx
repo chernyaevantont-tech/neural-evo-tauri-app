@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { GenerationParetoFront, GenomeObjectives } from '../../shared/lib';
+import { ParetoFrontVisualizer } from './ParetoFrontVisualizer';
 import { ParetoScatterPlot } from './ParetoScatterPlot';
 import { ParetoSelector } from './ParetoSelector';
 
@@ -137,5 +138,24 @@ describe('Pareto front visualizer parts', () => {
         expect(onUseAsSeed).toHaveBeenCalledWith('g-front');
         expect(onOpenDetails).toHaveBeenCalledWith('g-front');
         expect(onExportSelected).toHaveBeenCalledWith('g-front');
+    });
+
+    it('passes feasibility maps and filters to feasible-only points', () => {
+        render(
+            <ParetoFrontVisualizer
+                currentParetoFront={pareto.pareto_members}
+                paretoHistory={new Map([[pareto.generation, pareto]])}
+                feasibilityByGenomeId={{ 'g-front': true, 'g-dom': false }}
+                constraintViolationScoreByGenomeId={{ 'g-front': 0, 'g-dom': 0.8 }}
+                showOnlyFeasible={true}
+            />,
+        );
+
+        const dominatedPoints = capturedScatterProps.data.datasets[0].data;
+        const frontierPoints = capturedScatterProps.data.datasets[1].data;
+
+        expect(dominatedPoints).toHaveLength(0);
+        expect(frontierPoints).toHaveLength(1);
+        expect(frontierPoints[0].genomeId).toBe('g-front');
     });
 });

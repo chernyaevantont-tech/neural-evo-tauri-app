@@ -124,7 +124,9 @@ export interface EvolutionSettingsState {
     isCustomDevice: boolean;
     setIsCustomDevice: (val: boolean) => void;
     customDeviceParams?: {
+        mops_budget?: number;
         ram_mb: number;
+        flash_mb?: number;
         vram_mb?: number;
         latency_budget_ms: number;
         max_model_size_mb?: number;
@@ -132,6 +134,8 @@ export interface EvolutionSettingsState {
     setCustomDeviceParams: (val?: EvolutionSettingsState['customDeviceParams']) => void;
     selectedDeviceProfile?: DeviceProfile;
     setSelectedDeviceProfile: (val?: DeviceProfile) => void;
+        showOnlyFeasible: boolean;
+        setShowOnlyFeasible: (val: boolean) => void;
 
     // Stopping Criteria
     stoppingPolicy: StoppingPolicy;
@@ -270,6 +274,8 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
     setCustomDeviceParams: (val) => set({ customDeviceParams: val }),
     selectedDeviceProfile: undefined,
     setSelectedDeviceProfile: (val) => set({ selectedDeviceProfile: val }),
+        showOnlyFeasible: false,
+        setShowOnlyFeasible: (val) => set({ showOnlyFeasible: val }),
 
     stoppingPolicy: {
         criteria: [{ type: 'ManualStop' }],
