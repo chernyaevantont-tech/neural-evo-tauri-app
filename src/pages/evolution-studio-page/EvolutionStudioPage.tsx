@@ -23,6 +23,7 @@ import { GenomeProfilerModal } from '../../features/evolution-studio/ui/GenomePr
 import { GenerationStatsTable } from '../../features/evolution-studio/ui/GenerationStatsTable';
 import { ComparisonCharts } from '../../widgets/genome-comparison/ComparisonCharts';
 import { ParetoFrontVisualizer } from '../../widgets/pareto-front-visualizer';
+import { GenealogicTreeView } from '../../widgets/genealogy-tree-viewer';
 import { GenerationsModal } from './GenerationsModal';
 import type { GenerationParetoFront, GenomeObjectives } from '../../shared/lib';
 import {
@@ -121,6 +122,7 @@ export const EvolutionStudioPage: React.FC = () => {
     const [inspectingGenome, setInspectingGenome] = useState<PopulatedGenome | null>(null);
     const [profilerGenome, setProfilerGenome] = useState<PopulatedGenome | null>(null);
     const [showGenerationsModal, setShowGenerationsModal] = useState(false);
+    const [analysisTab, setAnalysisTab] = useState<'pareto' | 'genealogy'>('pareto');
 
     // Auto-follow latest generation
     useEffect(() => {
@@ -147,6 +149,10 @@ export const EvolutionStudioPage: React.FC = () => {
             totalJobsCompleted: evaluated.genomes.length,
             totalJobsFailed: 0,
         });
+
+        if (evaluated.genealogy && evaluated.genealogy.size > 0) {
+            settings.setGenealogyTree(new Map(evaluated.genealogy));
+        }
     }, [generationHistory, settings]);
 
     // Current snapshot (latest generation)
@@ -710,19 +716,49 @@ export const EvolutionStudioPage: React.FC = () => {
                     </div>
 
                     <div className={styles.chartArea}>
-                        <ParetoFrontVisualizer
-                            currentParetoFront={settings.currentParetoFront}
-                            paretoHistory={settings.paretoHistory}
-                            feasibilityByGenomeId={feasibilityByGenomeId}
-                            constraintViolationScoreByGenomeId={constraintViolationScoreByGenomeId}
-                            showOnlyFeasible={settings.showOnlyFeasible}
-                            onUseAsSeed={handleUseParetoAsSeed}
-                            onOpenDetails={handleOpenParetoDetails}
-                            onExportSelected={handleExportParetoSelected}
-                        />
-                        {Object.keys(paretoSeedJsonByGenomeId).length > 0 && (
-                            <div style={{ marginTop: '0.7rem', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                                Queued Pareto seeds: {Object.keys(paretoSeedJsonByGenomeId).length}
+                        <div className={styles.analysisTabBar}>
+                            <button
+                                type="button"
+                                className={`${styles.analysisTabButton} ${analysisTab === 'pareto' ? styles.analysisTabButtonActive : ''}`}
+                                onClick={() => setAnalysisTab('pareto')}
+                            >
+                                Pareto
+                            </button>
+                            <button
+                                type="button"
+                                className={`${styles.analysisTabButton} ${analysisTab === 'genealogy' ? styles.analysisTabButtonActive : ''}`}
+                                onClick={() => setAnalysisTab('genealogy')}
+                            >
+                                Genealogy
+                            </button>
+                        </div>
+
+                        {analysisTab === 'pareto' ? (
+                            <>
+                                <ParetoFrontVisualizer
+                                    currentParetoFront={settings.currentParetoFront}
+                                    paretoHistory={settings.paretoHistory}
+                                    feasibilityByGenomeId={feasibilityByGenomeId}
+                                    constraintViolationScoreByGenomeId={constraintViolationScoreByGenomeId}
+                                    showOnlyFeasible={settings.showOnlyFeasible}
+                                    onUseAsSeed={handleUseParetoAsSeed}
+                                    onOpenDetails={handleOpenParetoDetails}
+                                    onExportSelected={handleExportParetoSelected}
+                                />
+                                {Object.keys(paretoSeedJsonByGenomeId).length > 0 && (
+                                    <div style={{ marginTop: '0.7rem', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                                        Queued Pareto seeds: {Object.keys(paretoSeedJsonByGenomeId).length}
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <div className={styles.genealogyPanel}>
+                                <GenealogicTreeView
+                                    genealogyTree={settings.genealogyTree}
+                                    paretoHistory={settings.paretoHistory}
+                                    onOpenGenomeDetails={handleOpenParetoDetails}
+                                    onGenealogyTreeSync={settings.setGenealogyTree}
+                                />
                             </div>
                         )}
                     </div>

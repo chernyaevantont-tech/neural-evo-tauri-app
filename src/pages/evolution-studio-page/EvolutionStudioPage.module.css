@@ -284,6 +284,37 @@
     flex-direction: column;
 }
 
+.analysisTabBar {
+    display: inline-flex;
+    width: fit-content;
+    border: 1px solid var(--color-border-primary);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 0.8rem;
+}
+
+.analysisTabButton {
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 0.82rem;
+    padding: 0.38rem 0.82rem;
+    cursor: pointer;
+}
+
+.analysisTabButton:hover {
+    background: var(--color-bg-tertiary);
+}
+
+.analysisTabButtonActive {
+    background: var(--color-accent-primary, #646cff);
+    color: white;
+}
+
+.genealogyPanel {
+    width: 100%;
+}
+
 .chartContainer {
     width: 100%;
     height: 120px;

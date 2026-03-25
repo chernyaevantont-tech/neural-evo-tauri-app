@@ -1,0 +1,249 @@
+.card {
+    background-color: var(--color-bg-secondary);
+    border: 1px solid var(--color-border-primary);
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+}
+
+.headerRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+}
+
+.title {
+    margin: 0;
+    font-size: 1.05rem;
+    color: var(--color-text-secondary);
+}
+
+.filtersPanel {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(110px, 1fr));
+    gap: 0.6rem;
+}
+
+.filterItem {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.78rem;
+    color: var(--color-text-secondary);
+}
+
+.filterItem input {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 6px;
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    padding: 0.28rem 0.38rem;
+}
+
+.filterCheckbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    color: var(--color-text-secondary);
+}
+
+.meta {
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+}
+
+.canvasWrap {
+    width: 100%;
+    height: 420px;
+    background: var(--color-bg-primary);
+    border: 1px dashed var(--color-border-primary);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.emptyState {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-muted);
+}
+
+.edgeLine {
+    stroke: rgba(173, 181, 189, 0.7);
+    stroke-width: 2;
+}
+
+.edgeLabel {
+    fill: var(--color-text-muted);
+    font-size: 12px;
+    text-anchor: middle;
+}
+
+.nodeGroup {
+    cursor: pointer;
+}
+
+.nodeCircle {
+    fill: #1f2937;
+    stroke: #64748b;
+    stroke-width: 2;
+    transition: transform 0.15s ease, stroke 0.15s ease;
+}
+
+.nodeGroup:hover .nodeCircle {
+    stroke: #38bdf8;
+}
+
+.nodePareto {
+    stroke: #f59e0b;
+    stroke-width: 3;
+}
+
+.nodeSelected {
+    stroke: #22d3ee;
+    stroke-width: 4;
+}
+
+.nodeText {
+    fill: #f8fafc;
+    font-size: 11px;
+    font-weight: 600;
+    pointer-events: none;
+}
+
+.nodeSubText {
+    fill: var(--color-text-muted);
+    font-size: 11px;
+    pointer-events: none;
+}
+
+.detailsCard {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 8px;
+    padding: 0.75rem;
+    background: var(--color-bg-primary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.emptyDetails {
+    color: var(--color-text-muted);
+    font-size: 0.84rem;
+}
+
+.detailsTitle {
+    color: var(--color-text-primary);
+    font-weight: 600;
+}
+
+.detailsGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    color: var(--color-text-secondary);
+}
+
+.parentSection {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.parentTitle {
+    font-size: 0.82rem;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.parentList {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.parentButton {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-text-primary);
+    font-size: 0.78rem;
+    padding: 0.3rem 0.55rem;
+    cursor: pointer;
+}
+
+.parentButton:hover {
+    border-color: #22d3ee;
+    color: #22d3ee;
+}
+
+.parentEmpty {
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+}
+
+.compareBox {
+    border: 1px solid rgba(34, 211, 238, 0.4);
+    background: rgba(34, 211, 238, 0.08);
+    border-radius: 8px;
+    padding: 0.55rem;
+}
+
+.compareTitle {
+    font-size: 0.82rem;
+    color: #67e8f9;
+    margin-bottom: 0.35rem;
+}
+
+.actionRow {
+    display: flex;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+}
+
+.actionButton {
+    border: 1px solid var(--color-border-primary);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-text-primary);
+    font-size: 0.8rem;
+    padding: 0.35rem 0.65rem;
+    cursor: pointer;
+}
+
+.actionButton:hover:enabled {
+    border-color: #22d3ee;
+    color: #22d3ee;
+}
+
+.actionButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.backendMeta {
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+}
+
+@media (max-width: 1024px) {
+    .filtersPanel {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+    }
+
+    .detailsGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .canvasWrap {
+        height: 360px;
+    }
+}
