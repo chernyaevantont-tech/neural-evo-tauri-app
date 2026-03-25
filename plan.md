@@ -912,7 +912,7 @@ pub struct RustGenomeLibraryEntry {
     pub parent_genomes: Vec<String>,  // NEW: for genealogy traceability
     pub fitness_metrics: Option<GenomeObjectives>,  // NEW: accuracy, latency, size from evolution
     pub profiler_data: Option<TrainingProfiler>,    // NEW: timing/memory from evolution
-    pub model_weights: Option<String>,              // NEW: path to .safetensors or weight file
+    pub model_weights: Option<String>,              // NEW: path to .mpk or weight file
     pub device_profile_target: Option<DeviceProfile>, // NEW: which device optimized for
 }
 ```
@@ -951,7 +951,7 @@ pub async fn export_genome_with_weights(genome_id: String, output_path: String) 
     let (model, loss, accuracy) = rebuild_and_train_genome(&genome, full_epochs)?;
     
     // Save weights using Burn's .save() API
-    let weights_path = format!("{}/genome-weights.safetensors", output_path);
+    let weights_path = format!("{}/genome-weights.mpk", output_path);
     model.save(&weights_path)?;
     
     // Save metadata
@@ -986,7 +986,7 @@ pub async fn export_genome_with_weights(genome_id: String, output_path: String) 
 1. Select genome from hidden or public library
 2. Click "Export Model Weights"
 3. Dialog: select output folder
-4. Backend re-trains (or loads cached weights if available) + saves .safetensors + metadata.json
+4. Backend re-trains (or loads cached weights if available) + saves .mpk + metadata.json
 5. Options: include genome JSON, include history/genealogy
 
 ### 22.5 Store/API Changes
@@ -1442,7 +1442,7 @@ fn test_mutation_type_serialization() {
 
 ```rust
 #[test]
-fn test_weights_export_to_safetensors() {
+fn test_weights_export_to_mpk() {
     // Build dummy model, export weights, verify file created
     // Verify metadata.json includes accuracy/loss
 }
@@ -1594,7 +1594,7 @@ async fn test_auto_save_and_weight_export() {
     // 1. Run evolution 2 generations
     // 2. Verify all genomes auto-saved to hidden library
     // 3. Export best genome with weights
-    // 4. Verify .safetensors + metadata.json files created
+    // 4. Verify .mpk + metadata.json files created
     // 5. Load weights, verify model inference works
 }
 ```
@@ -1648,7 +1648,7 @@ describe('Complete MOO Evolution E2E', () => {
     // 6. Stop evolution
     // 7. View post-evolution analysis
     // 8. Select genome, export weights
-    // 9. Verify .safetensors + metadata.json downloaded
+    // 9. Verify .mpk + metadata.json downloaded
   });
 });
 ```
@@ -1706,9 +1706,9 @@ describe('Weight Export E2E', () => {
     // 5. Dialog: choose folder, confirm
     // 6. Verify zip contains:
     //    - genome.json
-    //    - model-weights.safetensors
+    //    - model-weights.mpk
     //    - metadata.json (accuracy, loss, timestamp, profiler data)
-    // 7. Load .safetensors in external tool, verify valid
+    // 7. Load .mpk in external tool, verify valid
   });
 });
 ```
@@ -1769,7 +1769,7 @@ describe('Weight Export E2E', () => {
 ### Phase 5: Hidden Library & Weight Persistence (Weeks 5-7)
 - Backend: extend library DTO, auto-save during evolution, weight export API
 - Frontend: hidden archive page, unhide workflow, export dialog
-- Burn integration: model.save() for .safetensors
+- Burn integration: model.save() for .mpk
 - Effort: ~250 LOC backend, ~200 LOC frontend
 - Blockers: Burn.save() API availability
 - Acceptance: genomes auto-saved, weights exportable, archive page functional
@@ -1806,7 +1806,7 @@ describe('Weight Export E2E', () => {
 - [ ] Genealogy tracked, tree viewer functional
 - [ ] Hidden library auto-saves all genomes, unhide + reseed works
 - [ ] Stopping criteria: all types working (generation, plateau, time, target accuracy)
-- [ ] Weight export produces valid .safetensors + metadata
+- [ ] Weight export produces valid .mpk + metadata
 
 ### Performance (Measured)
 - Profiling overhead < 5% total training time

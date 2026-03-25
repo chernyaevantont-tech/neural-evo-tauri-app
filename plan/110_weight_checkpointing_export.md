@@ -11,7 +11,7 @@
 ## Описание
 
 Добавить экспорт весов trained моделей для выбранного genome:
-- сохранение в `.safetensors`
+- сохранение в `.mpk`
 - metadata рядом в `metadata.json`
 - повторное использование cached weights (если уже были сохранены)
 
@@ -86,7 +86,7 @@
   - save/load весов
   - metadata schema validation
 - Integration:
-  - export command создает `.safetensors` + `metadata.json`
+  - export command создает `.mpk` + `metadata.json`
 - Frontend:
   - happy-path export flow
   - error state при invalid path
@@ -102,7 +102,7 @@ npx vitest run src/features/genome-library
 
 ## Критерии готовности
 
-- ✅ Весы экспортируются в `.safetensors`
+- ✅ Весы экспортируются в `.mpk`
 - ✅ Metadata сохраняется рядом
 - ✅ API для export/cached-status работает
 - ✅ Frontend flow завершает экспорт без ручных шагов вне UI

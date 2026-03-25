@@ -30,6 +30,7 @@ pub mod profiler;
 pub mod pareto;
 pub mod device_profiles;
 pub mod genealogy;
+pub mod weight_io;
 
 /// Global session counter. Incremented by `stop_evolution`.
 /// Each `evaluate_population` call captures a snapshot; if the current value
@@ -881,6 +882,7 @@ async fn evaluate_population(
                 let mut best_loss = 999.0_f32;
                 let mut best_acc = 0.0_f32;
                 let mut best_profiler: Option<TrainingProfiler> = None;
+                let mut best_model: Option<GraphModel<Backend>> = None;
 
                 for attempt in 0..MAX_RETRIES {
                     // Check cancellation
@@ -918,7 +920,7 @@ async fn evaluate_population(
                     let val_batches_local = val_batches.clone();
                     let test_batches_local = test_batches.clone();
 
-                    let (final_loss, final_acc, profiler_result) = tokio::task::spawn_blocking(move || {
+                    let (final_loss, final_acc, profiler_result, trained_model) = tokio::task::spawn_blocking(move || {
                         let mut model_local = model;
                         let mut profiler = crate::profiler::ProfilerCollector::new();
 
@@ -970,7 +972,7 @@ async fn evaluate_population(
                             )
                         };
 
-                        (loss, acc, profiler.finalize())
+                        (loss, acc, profiler.finalize(), model_local)
                     })
                     .await
                     .map_err(|e| format!("Training task failed: {}", e))?;
@@ -990,6 +992,7 @@ async fn evaluate_population(
                         best_loss = final_loss;
                         best_acc = final_acc;
                         best_profiler = Some(profiler_result);
+                        best_model = Some(trained_model);
                     }
 
                     // If accuracy is above random chance, accept and stop retrying
@@ -1011,6 +1014,18 @@ async fn evaluate_population(
                 // Check cancellation before pushing result
                 if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
                     break;
+                }
+
+                if let Some(model) = best_model.as_ref() {
+                    let cache_dir = get_weight_cache_dir();
+                    if let Err(e) = fs::create_dir_all(&cache_dir).map_err(|err| err.to_string()) {
+                        eprintln!("[weight_io] failed to ensure cache dir: {}", e);
+                    } else if let Err(e) = crate::weight_io::save_weights(&genome_id, Some(model), &cache_dir) {
+                        eprintln!(
+                            "[weight_io] failed to checkpoint weights for genome '{}': {}",
+                            genome_id, e
+                        );
+                    }
                 }
 
                 results.push(EvaluationResult {
@@ -1710,6 +1725,10 @@ fn get_meta_path() -> PathBuf {
     get_genomes_dir().join("meta.json")
 }
 
+fn get_weight_cache_dir() -> PathBuf {
+    get_genomes_dir().join("weights_cache")
+}
+
 fn current_unix_ms() -> u64 {
     chrono::Utc::now().timestamp_millis().max(0) as u64
 }
@@ -2064,6 +2083,103 @@ async fn load_library_genome(id: String) -> Result<String, String> {
     let dir = get_genomes_dir();
     let file_path = dir.join(format!("{}.evog", id));
     fs::read_to_string(&file_path).map_err(|e| format!("Failed to load genome {}: {}", id, e))
+}
+
+fn find_library_entry_for_genome(genome_id: &str) -> Option<GenomeLibraryEntry> {
+    let mut entries = read_meta();
+    if entries.is_empty() {
+        return None;
+    }
+
+    // Prefer direct ID match first (library-selected export path).
+    if let Some(entry) = entries.iter().find(|e| e.id == genome_id) {
+        return Some(entry.clone());
+    }
+
+    // Evolution runtime typically tracks logical genome IDs while hidden archive uses UUID IDs.
+    // We map by autosave naming convention and take the most recent match.
+    let hidden_name = format!("Hidden {}", genome_id);
+    entries
+        .drain(..)
+        .filter(|e| e.is_hidden && e.name == hidden_name)
+        .max_by_key(|e| e.created_at_unix_ms)
+}
+
+#[derive(serde::Serialize)]
+struct WeightExportResponse {
+    weights_path: String,
+    metadata_path: String,
+    used_cached_weights: bool,
+}
+
+#[tauri::command]
+async fn has_cached_weights(genome_id: String) -> Result<bool, String> {
+    let cache_dir = get_weight_cache_dir();
+    Ok(weight_io::load_weights(&genome_id, &cache_dir)?.is_some())
+}
+
+#[tauri::command]
+async fn export_genome_with_weights(
+    genome_id: String,
+    output_path: String,
+) -> Result<WeightExportResponse, String> {
+    let output_dir = PathBuf::from(output_path);
+    if output_dir.as_os_str().is_empty() {
+        return Err("Output path is empty".to_string());
+    }
+    fs::create_dir_all(&output_dir).map_err(|e| e.to_string())?;
+
+    let cache_dir = get_weight_cache_dir();
+    fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+
+    let cache_hit = weight_io::load_weights(&genome_id, &cache_dir)?;
+    let used_cached_weights = cache_hit.is_some();
+
+    let cache_weights_path = if let Some(path) = cache_hit {
+        path
+    } else {
+        return Err(format!(
+            "No cached trained weights found for genome '{}'. Run evaluation first to create a checkpoint.",
+            genome_id
+        ));
+    };
+
+    let export_weights_path = output_dir.join(format!("{}.mpk", genome_id));
+    fs::copy(&cache_weights_path, &export_weights_path).map_err(|e| e.to_string())?;
+
+    let entry = find_library_entry_for_genome(&genome_id);
+    let fitness = entry.as_ref().and_then(|e| e.fitness_metrics.as_ref());
+    let profiler = entry.as_ref().and_then(|e| e.profiler_data.as_ref());
+    let lineage = if let Some(e) = entry.as_ref() {
+        e.parent_genomes.clone()
+    } else if let Ok(store) = GENEALOGY_STORE.lock() {
+        store
+            .graph()
+            .nodes
+            .get(&genome_id)
+            .map(|n| n.parent_ids.clone())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let objectives = weight_io::ExportObjectives {
+        accuracy: fitness.map(|m| m.accuracy),
+        inference_latency_ms: fitness.and_then(|m| m.inference_latency_ms),
+        model_size_mb: fitness.and_then(|m| m.model_size_mb),
+        train_duration_ms: fitness.and_then(|m| m.training_time_ms),
+        device_profile_id: None,
+        lineage,
+    };
+
+    let (_weights_path, metadata_path) =
+        weight_io::export_with_metadata(&genome_id, &output_dir, &objectives, profiler)?;
+
+    Ok(WeightExportResponse {
+        weights_path: export_weights_path.to_string_lossy().to_string(),
+        metadata_path: metadata_path.to_string_lossy().to_string(),
+        used_cached_weights,
+    })
 }
 
 // --- Dataset Profiles Persistence ---
@@ -2506,6 +2622,66 @@ mod hidden_library_tests {
     }
 }
 
+#[cfg(test)]
+mod weight_export_command_tests {
+    use super::*;
+    use std::sync::{LazyLock, Mutex};
+
+    static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn with_test_storage() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("weight-export-test-{}", uuid::Uuid::new_v4()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp dir");
+        unsafe {
+            std::env::set_var("NEURAL_EVO_GENOMES_DIR", dir.to_string_lossy().to_string());
+        }
+        dir
+    }
+
+    #[test]
+    fn export_command_creates_mpk_and_metadata() {
+        let _guard = TEST_LOCK.lock().expect("test lock");
+        let temp_storage = with_test_storage();
+        let output_dir = temp_storage.join("exports");
+
+        let cache_dir = get_weight_cache_dir();
+        fs::create_dir_all(&cache_dir).expect("create cache dir");
+        let device = WgpuDevice::default();
+        let genome = [
+            r#"{"node":"Input","params":{"output_shape":[4]}}"#,
+            r#"{"node":"Dense","params":{"units":3,"activation":"relu","use_bias":true}}"#,
+            r#"{"node":"Output","params":{"input_shape":[3]}}"#,
+            "CONNECTIONS",
+            "0 1",
+            "1 2",
+        ]
+        .join("\n");
+        let model = GraphModel::<Backend>::build(&genome, &device, None, None);
+        weight_io::save_weights("genome-export-1", Some(&model), &cache_dir)
+            .expect("seed cached weights");
+
+        let response = futures::executor::block_on(export_genome_with_weights(
+            "genome-export-1".to_string(),
+            output_dir.to_string_lossy().to_string(),
+        ))
+        .expect("export command succeeds");
+
+        let weights_path = PathBuf::from(response.weights_path);
+        let metadata_path = PathBuf::from(response.metadata_path);
+
+        assert!(weights_path.exists());
+        assert!(metadata_path.exists());
+
+        let metadata_json = fs::read_to_string(metadata_path).expect("read metadata json");
+        let metadata_value: serde_json::Value =
+            serde_json::from_str(&metadata_json).expect("parse metadata json");
+        assert_eq!(metadata_value["genome_id"], "genome-export-1");
+
+        let _ = fs::remove_dir_all(temp_storage);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2528,6 +2704,8 @@ pub fn run() {
             delete_hidden_genome,
             delete_from_library,
             load_library_genome,
+            export_genome_with_weights,
+            has_cached_weights,
             save_dataset_profiles,
             load_dataset_profiles,
             preview_csv,

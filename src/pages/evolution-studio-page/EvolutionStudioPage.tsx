@@ -21,6 +21,7 @@ import { GenomeSvgPreview } from '../../entities/canvas-genome/ui/GenomeSvgPrevi
 import { InspectGenomeModal } from './InspectGenomeModal';
 import { GenomeProfilerModal } from '../../features/evolution-studio/ui/GenomeProfilerModal';
 import { GenerationStatsTable } from '../../features/evolution-studio/ui/GenerationStatsTable';
+import { ExportGenomeWithWeightsModal } from '../../features/evolution-studio/ui/ExportGenomeWithWeightsModal';
 import { ComparisonCharts } from '../../widgets/genome-comparison/ComparisonCharts';
 import { ParetoFrontVisualizer } from '../../widgets/pareto-front-visualizer';
 import { GenealogicTreeView } from '../../widgets/genealogy-tree-viewer';
@@ -123,6 +124,7 @@ export const EvolutionStudioPage: React.FC = () => {
     const [profilerGenome, setProfilerGenome] = useState<PopulatedGenome | null>(null);
     const [showGenerationsModal, setShowGenerationsModal] = useState(false);
     const [analysisTab, setAnalysisTab] = useState<'pareto' | 'genealogy'>('pareto');
+    const [exportGenomeId, setExportGenomeId] = useState<string | null>(null);
 
     // Auto-follow latest generation
     useEffect(() => {
@@ -307,19 +309,7 @@ export const EvolutionStudioPage: React.FC = () => {
     };
 
     const handleExportParetoSelected = async (genomeId: string) => {
-        const selected = genomeById.get(genomeId);
-        if (!selected) {
-            return;
-        }
-
-        const serialized = await serializeGenome(selected.genome);
-        const blob = new Blob([serialized], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `genome-${genomeId}.json`;
-        link.click();
-        URL.revokeObjectURL(url);
+        setExportGenomeId(genomeId);
     };
 
     const handleStart = async () => {
@@ -871,6 +861,13 @@ export const EvolutionStudioPage: React.FC = () => {
                         setShowGenerationsModal(false);
                     }}
                     onClose={() => setShowGenerationsModal(false)}
+                />
+            )}
+
+            {exportGenomeId && (
+                <ExportGenomeWithWeightsModal
+                    genomeId={exportGenomeId}
+                    onClose={() => setExportGenomeId(null)}
                 />
             )}
         </div>
