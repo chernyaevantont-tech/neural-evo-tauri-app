@@ -31,6 +31,7 @@ pub mod pareto;
 pub mod device_profiles;
 pub mod genealogy;
 pub mod weight_io;
+pub mod stopping_criteria;
 
 /// Global session counter. Incremented by `stop_evolution`.
 /// Each `evaluate_population` call captures a snapshot; if the current value
@@ -2682,6 +2683,24 @@ mod weight_export_command_tests {
     }
 }
 
+/// Validate stopping criteria configuration
+#[tauri::command]
+async fn validate_stopping_criteria(
+    criteria: Vec<dtos::StoppingCriterion>,
+    policy: String,
+) -> Result<(), String> {
+    stopping_criteria::validate_stopping_config(&criteria, &policy)
+}
+
+/// Generate preview of stopping criteria behavior
+#[tauri::command]
+async fn generate_stopping_preview(
+    criteria: Vec<dtos::StoppingCriterion>,
+    policy: String,
+) -> Result<stopping_criteria::StoppingPreview, String> {
+    stopping_criteria::generate_stopping_preview(&criteria, &policy)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2720,6 +2739,8 @@ pub fn run() {
             get_genealogy,
             get_ancestors,
             get_descendants,
+            validate_stopping_criteria,
+            generate_stopping_preview,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
