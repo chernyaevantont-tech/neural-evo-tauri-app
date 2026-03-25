@@ -27,6 +27,7 @@ pub mod csv_loader;
 pub mod shape_inference;
 pub mod orchestrator;
 pub mod profiler;
+pub mod pareto;
 
 /// Global session counter. Incremented by `stop_evolution`.
 /// Each `evaluate_population` call captures a snapshot; if the current value
@@ -1876,6 +1877,14 @@ async fn compute_zero_cost_score(
     Ok(result)
 }
 
+#[tauri::command]
+async fn compute_pareto_front(
+    generation: u32,
+    genomes: Vec<dtos::GenomeObjectives>,
+) -> Result<dtos::GenerationParetoFront, String> {
+    Ok(pareto::compute_generation_pareto_front(generation, &genomes))
+}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -1900,6 +1909,7 @@ pub fn run() {
             load_dataset_profiles,
             preview_csv,
             compute_zero_cost_score,
+            compute_pareto_front,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
