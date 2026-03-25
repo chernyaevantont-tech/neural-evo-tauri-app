@@ -18,7 +18,9 @@ import { InspectGenomeModal } from './InspectGenomeModal';
 import { GenomeProfilerModal } from '../../features/evolution-studio/ui/GenomeProfilerModal';
 import { GenerationStatsTable } from '../../features/evolution-studio/ui/GenerationStatsTable';
 import { ComparisonCharts } from '../../widgets/genome-comparison/ComparisonCharts';
+import { ParetoFrontVisualizer } from '../../widgets/pareto-front-visualizer';
 import { GenerationsModal } from './GenerationsModal';
+import type { GenerationParetoFront, GenomeObjectives } from '../../shared/lib';
 import {
     Chart as ChartJS,
     CategoryScale,
@@ -44,6 +46,43 @@ ChartJS.register(
     Legend,
     Filler
 );
+
+function isDominatedBy(a: GenomeObjectives, b: GenomeObjectives): boolean {
+    const strictBetter =
+        b.accuracy > a.accuracy ||
+        b.inference_latency_ms < a.inference_latency_ms ||
+        b.model_size_mb < a.model_size_mb;
+
+    return (
+        b.accuracy >= a.accuracy &&
+        b.inference_latency_ms <= a.inference_latency_ms &&
+        b.model_size_mb <= a.model_size_mb &&
+        strictBetter
+    );
+}
+
+function computeParetoMembers(objectives: GenomeObjectives[]): GenomeObjectives[] {
+    return objectives.filter((candidate) => {
+        return !objectives.some(
+            (other) => other.genome_id !== candidate.genome_id && isDominatedBy(candidate, other),
+        );
+    });
+}
+
+function mapToObjectives(genome: PopulatedGenome): GenomeObjectives {
+    const totalFlashBytes = genome.resources?.totalFlash ?? 0;
+    const modelSizeMb = totalFlashBytes / (1024 * 1024);
+
+    return {
+        genome_id: genome.id,
+        accuracy: genome.accuracy ?? 0,
+        inference_latency_ms: genome.profiler?.inference_msec_per_sample ?? 0,
+        model_size_mb: modelSizeMb,
+        training_time_ms: genome.profiler?.total_train_duration_ms ?? 0,
+        is_dominated: false,
+        domination_count: 0,
+    };
+}
 
 export const EvolutionStudioPage: React.FC = () => {
     const navigate = useNavigate();
@@ -74,6 +113,7 @@ export const EvolutionStudioPage: React.FC = () => {
 
     const [showCatalogPicker, setShowCatalogPicker] = useState(false);
     const [selectedSeedIds, setSelectedSeedIds] = useState<string[]>([]);
+    const [paretoSeedJsonByGenomeId, setParetoSeedJsonByGenomeId] = useState<Record<string, string>>({});
     const [inspectingGenome, setInspectingGenome] = useState<PopulatedGenome | null>(null);
     const [profilerGenome, setProfilerGenome] = useState<PopulatedGenome | null>(null);
     const [showGenerationsModal, setShowGenerationsModal] = useState(false);
@@ -116,6 +156,77 @@ export const EvolutionStudioPage: React.FC = () => {
     }, [currentSnapshot]);
 
     const activeProfile = profiles.find(p => p.id === datasetProfileId);
+    const genomeById = useMemo(() => {
+        const map = new Map<string, PopulatedGenome>();
+        for (const genome of population) {
+            map.set(genome.id, genome);
+        }
+        for (const genome of hallOfFame) {
+            map.set(genome.id, genome);
+        }
+        for (const genome of currentSnapshot?.genomes ?? []) {
+            map.set(genome.id, genome);
+        }
+        return map;
+    }, [currentSnapshot?.genomes, hallOfFame, population]);
+
+    useEffect(() => {
+        if (!currentSnapshot || currentSnapshot.genomes.length === 0) {
+            return;
+        }
+
+        const allObjectives = currentSnapshot.genomes.map(mapToObjectives);
+        const paretoMembers = computeParetoMembers(allObjectives);
+        const payload: GenerationParetoFront = {
+            generation: currentSnapshot.generation,
+            total_genomes: allObjectives.length,
+            pareto_members: paretoMembers,
+            objectives_3d: paretoMembers.map((item) => [
+                item.accuracy,
+                item.inference_latency_ms,
+                item.model_size_mb,
+            ]),
+            all_genomes: allObjectives,
+            frontier_genome_ids: paretoMembers.map((item) => item.genome_id),
+        };
+
+        settings.setParetoForGeneration(currentSnapshot.generation, payload);
+    }, [currentSnapshot, settings]);
+
+    const handleUseParetoAsSeed = async (genomeId: string) => {
+        const selected = genomeById.get(genomeId);
+        if (!selected) {
+            return;
+        }
+        const serialized = await serializeGenome(selected.genome);
+        setParetoSeedJsonByGenomeId((prev) => ({
+            ...prev,
+            [genomeId]: serialized,
+        }));
+    };
+
+    const handleOpenParetoDetails = (genomeId: string) => {
+        const selected = genomeById.get(genomeId);
+        if (selected) {
+            setInspectingGenome(selected);
+        }
+    };
+
+    const handleExportParetoSelected = async (genomeId: string) => {
+        const selected = genomeById.get(genomeId);
+        if (!selected) {
+            return;
+        }
+
+        const serialized = await serializeGenome(selected.genome);
+        const blob = new Blob([serialized], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `genome-${genomeId}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+    };
 
     const handleStart = async () => {
         try {
@@ -150,6 +261,11 @@ export const EvolutionStudioPage: React.FC = () => {
                     alert("Please either:\n1. Add seeds from the Library, OR\n2. Create an architecture in the Sandbox, OR\n3. Enable 'Random Initialization' to generate random architectures");
                     return;
                 }
+            }
+
+            const paretoSeedJsons = Object.values(paretoSeedJsonByGenomeId);
+            if (paretoSeedJsons.length > 0) {
+                seedJsonList.push(...paretoSeedJsons);
             }
 
             // Allow evolution with or without seeds if random initialization is enabled
@@ -503,6 +619,21 @@ export const EvolutionStudioPage: React.FC = () => {
                             )}
                         </div>
                         <ComparisonCharts genomes={sortedGenomes} />
+                    </div>
+
+                    <div className={styles.chartArea}>
+                        <ParetoFrontVisualizer
+                            currentParetoFront={settings.currentParetoFront}
+                            paretoHistory={settings.paretoHistory}
+                            onUseAsSeed={handleUseParetoAsSeed}
+                            onOpenDetails={handleOpenParetoDetails}
+                            onExportSelected={handleExportParetoSelected}
+                        />
+                        {Object.keys(paretoSeedJsonByGenomeId).length > 0 && (
+                            <div style={{ marginTop: '0.7rem', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                                Queued Pareto seeds: {Object.keys(paretoSeedJsonByGenomeId).length}
+                            </div>
+                        )}
                     </div>
 
                     {/* Bottom Tabbed Panel: Generations / Event Log */}

@@ -26,8 +26,11 @@ export interface GenomeObjectives {
     inference_latency_ms: number;
     model_size_mb: number;
     training_time_ms: number;
+    train_time_ms?: number;
     is_dominated: boolean;
     domination_count: number;
+    device_feasible?: boolean;
+    constraint_violation_score?: number;
 }
 
 export interface GenerationParetoFront {
@@ -35,6 +38,8 @@ export interface GenerationParetoFront {
     total_genomes: number;
     pareto_members: GenomeObjectives[];
     objectives_3d: [number, number, number][];
+    all_genomes?: GenomeObjectives[];
+    frontier_genome_ids?: string[];
 }
 
 export type ComputeType = 'ARM' | 'X86' | 'GPU';
