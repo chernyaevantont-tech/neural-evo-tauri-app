@@ -29,6 +29,7 @@ pub mod orchestrator;
 pub mod profiler;
 pub mod pareto;
 pub mod device_profiles;
+pub mod genealogy;
 
 /// Global session counter. Incremented by `stop_evolution`.
 /// Each `evaluate_population` call captures a snapshot; if the current value
@@ -40,6 +41,10 @@ static EVOLUTION_SESSION: AtomicU64 = AtomicU64::new(0);
 static GENOME_EVAL_CACHE: std::sync::LazyLock<Mutex<HashMap<u64, (f32, f32)>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Global in-memory genealogy graph for lineage tracking across evolution operations.
+static GENEALOGY_STORE: std::sync::LazyLock<Mutex<genealogy::GenealogyStore>> =
+    std::sync::LazyLock::new(|| Mutex::new(genealogy::GenealogyStore::new()));
+
 #[tauri::command]
 async fn stop_evolution() -> Result<(), String> {
     let prev = EVOLUTION_SESSION.fetch_add(1, Ordering::SeqCst);
@@ -49,6 +54,80 @@ async fn stop_evolution() -> Result<(), String> {
         prev + 1
     );
     Ok(())
+}
+
+#[tauri::command]
+async fn register_founder(genome_id: String, generation: u32) -> Result<(), String> {
+    let mut store = GENEALOGY_STORE
+        .lock()
+        .map_err(|e| format!("Genealogy store lock poisoned: {}", e))?;
+    store
+        .register_founder(genome_id, generation)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn register_mutation(
+    parent_id: String,
+    child_id: String,
+    mutation_type: dtos::MutationType,
+    generation: u32,
+) -> Result<(), String> {
+    let mut store = GENEALOGY_STORE
+        .lock()
+        .map_err(|e| format!("Genealogy store lock poisoned: {}", e))?;
+    store
+        .register_mutation(parent_id, child_id, mutation_type, generation)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn register_crossover(
+    parent_a: String,
+    parent_b: String,
+    child_id: String,
+    generation: u32,
+) -> Result<(), String> {
+    let mut store = GENEALOGY_STORE
+        .lock()
+        .map_err(|e| format!("Genealogy store lock poisoned: {}", e))?;
+    store
+        .register_crossover(parent_a, parent_b, child_id, generation)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_genealogy(genome_id: String) -> Result<genealogy::GenealogyPath, String> {
+    let store = GENEALOGY_STORE
+        .lock()
+        .map_err(|e| format!("Genealogy store lock poisoned: {}", e))?;
+    store.get_genealogy(&genome_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_ancestors(
+    genome_id: String,
+    depth: Option<u32>,
+) -> Result<Vec<genealogy::GenomeLineageRecord>, String> {
+    let store = GENEALOGY_STORE
+        .lock()
+        .map_err(|e| format!("Genealogy store lock poisoned: {}", e))?;
+    store
+        .get_ancestors(&genome_id, depth)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_descendants(
+    genome_id: String,
+    depth: Option<u32>,
+) -> Result<Vec<genealogy::GenomeLineageRecord>, String> {
+    let store = GENEALOGY_STORE
+        .lock()
+        .map_err(|e| format!("Genealogy store lock poisoned: {}", e))?;
+    store
+        .get_descendants(&genome_id, depth)
+        .map_err(|e| e.to_string())
 }
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -665,6 +744,8 @@ async fn evaluate_population(
     // 5. Evaluation Loop over each Genome
 
     for (i, genome_str) in genomes.iter().enumerate() {
+        let genome_id = format!("genome_{}", i);
+
         // Check cancellation between genomes
         if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
             println!(">>> Evolution cancelled. Aborting remaining genomes.");
@@ -706,7 +787,7 @@ async fn evaluate_population(
                 i, cache_key, cached_loss, cached_acc
             );
             results.push(EvaluationResult {
-                genome_id: format!("genome_{}", i),
+                genome_id: genome_id.clone(),
                 loss: cached_loss,
                 accuracy: cached_acc,
                 profiler: None,
@@ -882,7 +963,7 @@ async fn evaluate_population(
                 }
 
                 results.push(EvaluationResult {
-                    genome_id: format!("genome_{}", i),
+                    genome_id: genome_id.clone(),
                     loss: best_loss,
                     accuracy: best_acc,
                     profiler: best_profiler,
@@ -925,7 +1006,7 @@ async fn evaluate_population(
                     i, msg
                 );
                 results.push(EvaluationResult {
-                    genome_id: format!("genome_{}", i),
+                    genome_id: genome_id,
                     loss: 999.0,
                     accuracy: 0.0,
                     profiler: None,
@@ -1965,6 +2046,12 @@ pub fn run() {
             get_device_profiles,
             validate_genome_for_device,
             apply_device_penalty,
+            register_founder,
+            register_mutation,
+            register_crossover,
+            get_genealogy,
+            get_ancestors,
+            get_descendants,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

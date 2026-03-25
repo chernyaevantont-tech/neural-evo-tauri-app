@@ -59,12 +59,12 @@ export interface DeviceProfile {
 
 export type MutationType =
     | { type: 'Random' }
-    | { type: 'AddNode'; node_type: string; source: string; target: string }
-    | { type: 'RemoveNode'; node_id: string }
-    | { type: 'RemoveSubgraph'; node_ids: string[] }
-    | { type: 'ParameterMutation'; layer_id: string; param_name: string }
-    | { type: 'ParameterScale'; layer_id: string; scale_factor: number }
-    | { type: 'Crossover'; parent1: string; parent2: string };
+    | { type: 'AddNode'; data: { node_type: string; source: string; target: string } }
+    | { type: 'RemoveNode'; data: { node_id: string } }
+    | { type: 'RemoveSubgraph'; data: { node_ids: string[] } }
+    | { type: 'ParameterMutation'; data: { layer_id: string; param_name: string } }
+    | { type: 'ParameterScale'; data: { layer_id: string; scale_factor: number } }
+    | { type: 'Crossover'; data: { parent1: string; parent2: string } };
 
 export interface GenomeGenealogy {
     genome_id: string;

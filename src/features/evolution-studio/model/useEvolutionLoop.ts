@@ -2,7 +2,13 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Genome, serializeGenome, deserializeGenome, generateRandomArchitecture, extractShapesFromDatasetProfile } from '../../../entities/canvas-genome';
 import type { BatchMetrics, GenerationSnapshot, PopulatedGenome } from '../../../entities/genome';
-import type { AdaptiveMutationSettings, TrainingProfiler, UseEvolutionLoopParams } from '../../../shared/lib';
+import type {
+    AdaptiveMutationSettings,
+    GenomeGenealogy,
+    MutationType,
+    TrainingProfiler,
+    UseEvolutionLoopParams,
+} from '../../../shared/lib';
 import { computeZeroCostScore, ZeroCostMetrics } from './useZeroCostEvaluation';
 
 export interface EvaluationResult {
@@ -73,6 +79,7 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
     // Per-genome metrics accumulator (ref to avoid re-renders on every batch)
     const perGenomeMetricsRef = useRef<Map<number, BatchMetrics[]>>(new Map());
     const activeGenomeIndexRef = useRef<number>(0);
+    const genealogyMapRef = useRef<Map<string, GenomeGenealogy>>(new Map());
 
     // Using refs for safe async access within loops
     const isRunningRef = useRef(false);
@@ -148,6 +155,56 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
     const addLog = useCallback((msg: string, type: LogEntry['type'] = 'info') => {
         setLogs(prev => [...prev.slice(-49), { time: new Date().toLocaleTimeString(), message: msg, type }]);
     }, []);
+
+    const registerGenealogyEvent = useCallback(async (
+        genomeId: string,
+        generationNum: number,
+        parentIds: string[],
+        mutationType: MutationType,
+        mutationParams: Record<string, unknown>,
+    ) => {
+        if (!settings.genealogyTrackingEnabled) {
+            return;
+        }
+
+        const record: GenomeGenealogy = {
+            genome_id: genomeId,
+            generation: generationNum,
+            parent_ids: parentIds,
+            mutation_type: mutationType,
+            mutation_params: mutationParams,
+            fitness: 0,
+            accuracy: 0,
+            created_at_ms: Date.now(),
+        };
+        genealogyMapRef.current.set(genomeId, record);
+
+        try {
+            if (parentIds.length === 0) {
+                await invoke('register_founder', { genomeId, generation: generationNum });
+                return;
+            }
+
+            if (mutationType.type === 'Crossover' && parentIds.length >= 2) {
+                await invoke('register_crossover', {
+                    parentA: parentIds[0],
+                    parentB: parentIds[1],
+                    childId: genomeId,
+                    generation: generationNum,
+                });
+                return;
+            }
+
+            await invoke('register_mutation', {
+                parentId: parentIds[0],
+                childId: genomeId,
+                mutationType,
+                generation: generationNum,
+            });
+        } catch (e) {
+            addLog(`Genealogy backend sync failed for ${genomeId}: ${String(e)}`, 'warn');
+        }
+    }, [addLog, settings.genealogyTrackingEnabled]);
 
     const stopEvolution = useCallback(() => {
         setIsRunning(false);
@@ -381,6 +438,19 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                 genomes.length = popSize;
             }
 
+            genealogyMapRef.current = new Map();
+            if (settings.genealogyTrackingEnabled) {
+                for (const genome of genomes) {
+                    await registerGenealogyEvent(
+                        genome.id,
+                        0,
+                        [],
+                        { type: 'Random' },
+                        { source: 'generation_0' },
+                    );
+                }
+            }
+
             setPopulation(genomes);
             setGeneration(0);
             setStats([]);
@@ -392,14 +462,15 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                 bestFitness: 0,
                 avgNodes: Math.round(genomes.reduce((acc, g) => acc + g.nodes.length, 0) / genomes.length),
                 timestamp: new Date().toLocaleTimeString(),
-                evaluated: false
+                evaluated: false,
+                genealogy: settings.genealogyTrackingEnabled ? new Map(genealogyMapRef.current) : undefined,
             }]);
 
             addLog(`Spawned Generation 0: ${numFromSeeds} direct seeds, ${numRandom} random archs, ${Math.max(0, genomes.length - numFromSeeds - numRandom)} mutated clones.`, "info");
         } catch (e) {
             addLog(`Failed to initialize population: ${String(e)}`, "error");
         }
-    }, [addLog, settings, datasetProfileId]);
+    }, [addLog, settings, datasetProfileId, registerGenealogyEvent]);
 
     // Main Async Loop
     const runGeneration = useCallback(async () => {
@@ -636,12 +707,18 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
 
             const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
 
+            const nextGenNum = generation + 1;
             let breedAttempts = 0;
             while (nextGen.length < popSize && breedAttempts < popSize * 10) {
                 breedAttempts++;
                 try {
-                    const parentA = tournamentSelect()!.genome;
-                    const parentB = tournamentSelect()!.genome;
+                    const parentAEntry = tournamentSelect()!;
+                    const parentBEntry = tournamentSelect()!;
+                    const parentA = parentAEntry.genome;
+                    const parentB = parentBEntry.genome;
+                    let childParentIds: string[] = [parentAEntry.id];
+                    let childMutationType: MutationType = { type: 'Random' };
+                    const childMutationParams: Record<string, unknown> = {};
 
                     // Crossover
                     let childGenome: Genome | null = null;
@@ -654,17 +731,49 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                         try {
                             if (strategy === 'subgraph-replacement') {
                                 const res = parentA.BreedByReplacement(parentB, maxNodes);
-                                if (res) childGenome = res.genome;
+                                if (res) {
+                                    childGenome = res.genome;
+                                    childParentIds = [parentAEntry.id, parentBEntry.id];
+                                    childMutationType = {
+                                        type: 'Crossover',
+                                        data: { parent1: parentAEntry.id, parent2: parentBEntry.id },
+                                    };
+                                    childMutationParams.crossover_strategy = strategy;
+                                }
                             } else if (strategy === 'neat-style') {
                                 const res = parentA.BreedNeatStyle(parentB, maxNodes);
-                                if (res) childGenome = res.genome;
+                                if (res) {
+                                    childGenome = res.genome;
+                                    childParentIds = [parentAEntry.id, parentBEntry.id];
+                                    childMutationType = {
+                                        type: 'Crossover',
+                                        data: { parent1: parentAEntry.id, parent2: parentBEntry.id },
+                                    };
+                                    childMutationParams.crossover_strategy = strategy;
+                                }
                             } else if (strategy === 'multi-point') {
                                 const res = parentA.BreedMultiPoint(parentB, maxNodes);
-                                if (res) childGenome = res.genome;
+                                if (res) {
+                                    childGenome = res.genome;
+                                    childParentIds = [parentAEntry.id, parentBEntry.id];
+                                    childMutationType = {
+                                        type: 'Crossover',
+                                        data: { parent1: parentAEntry.id, parent2: parentBEntry.id },
+                                    };
+                                    childMutationParams.crossover_strategy = strategy;
+                                }
                             } else {
                                 // Default 'subgraph-insertion'
                                 const res = parentA.Breed(parentB, maxNodes);
-                                if (res) childGenome = res.genome;
+                                if (res) {
+                                    childGenome = res.genome;
+                                    childParentIds = [parentAEntry.id, parentBEntry.id];
+                                    childMutationType = {
+                                        type: 'Crossover',
+                                        data: { parent1: parentAEntry.id, parent2: parentBEntry.id },
+                                    };
+                                    childMutationParams.crossover_strategy = strategy;
+                                }
                             }
                         } catch (e) {
                             // silently fail crossover and fallback
@@ -676,6 +785,9 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                         const parentAStr = await serializeGenome(parentA);
                         const { genome: clone } = await deserializeGenome(parentAStr);
                         childGenome = clone;
+                        childParentIds = [parentAEntry.id];
+                        childMutationType = { type: 'Random' };
+                        childMutationParams.crossover_fallback = true;
                     }
 
                     // Mutation
@@ -689,23 +801,52 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
 
                     if (Math.random() < dynamicRates.removeSubgraph) {
                         const res = childGenome.MutateRemoveSubgraph();
-                        if (res) childGenome = res.genome;
+                        if (res) {
+                            childGenome = res.genome;
+                            childMutationType = { type: 'RemoveSubgraph', data: { node_ids: [] } };
+                            childMutationParams.last_structural_mutation = 'remove_subgraph';
+                        }
                     }
                     if (Math.random() < dynamicRates.removeNode) {
                         const res = childGenome.MutateRemoveNode();
-                        if (res) childGenome = res.genome;
+                        if (res) {
+                            childGenome = res.genome;
+                            childMutationType = { type: 'RemoveNode', data: { node_id: '' } };
+                            childMutationParams.last_structural_mutation = 'remove_node';
+                        }
                     }
                     if (Math.random() < dynamicRates.addNode) {
                         const res = childGenome.MutateAddNode(maxNodes);
-                        if (res) childGenome = res.genome;
+                        if (res) {
+                            childGenome = res.genome;
+                            childMutationType = {
+                                type: 'AddNode',
+                                data: { node_type: 'unknown', source: 'unknown', target: 'unknown' },
+                            };
+                            childMutationParams.last_structural_mutation = 'add_node';
+                        }
                     }
                     if (settings.mutationRates.addSkipConnection && Math.random() < settings.mutationRates.addSkipConnection) {
                         const res = childGenome.MutateAddSkipConnection(maxNodes);
-                        if (res) childGenome = res.genome;
+                        if (res) {
+                            childGenome = res.genome;
+                            childMutationType = {
+                                type: 'ParameterMutation',
+                                data: { layer_id: 'graph', param_name: 'add_skip_connection' },
+                            };
+                            childMutationParams.last_structural_mutation = 'add_skip_connection';
+                        }
                     }
                     if (settings.mutationRates.changeLayerType && Math.random() < settings.mutationRates.changeLayerType) {
                         const res = childGenome.MutateChangeLayerType(maxNodes);
-                        if (res) childGenome = res.genome;
+                        if (res) {
+                            childGenome = res.genome;
+                            childMutationType = {
+                                type: 'ParameterMutation',
+                                data: { layer_id: 'graph', param_name: 'change_layer_type' },
+                            };
+                            childMutationParams.last_structural_mutation = 'change_layer_type';
+                        }
                     }
 
                     // Params mutation
@@ -717,6 +858,11 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                                 (node as any).Mutate(mutationOpts);
                             }
                         });
+                        childMutationType = {
+                            type: 'ParameterMutation',
+                            data: { layer_id: 'multiple', param_name: 'params' },
+                        };
+                        childMutationParams.params_mutation_rate = settings.mutationRates.params;
                     }
 
                     const nextGenNodes = childGenome.getAllNodes();
@@ -727,10 +873,23 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                         continue;
                     }
 
+                    const childId = crypto.randomUUID();
+                    await registerGenealogyEvent(
+                        childId,
+                        nextGenNum,
+                        childParentIds,
+                        childMutationType,
+                        childMutationParams,
+                    );
+
                     nextGen.push({
-                        id: crypto.randomUUID(),
+                        id: childId,
                         genome: childGenome,
-                        nodes: nextGenNodes
+                        nodes: nextGenNodes,
+                        generation: nextGenNum,
+                        parent_ids: childParentIds,
+                        mutation_type: childMutationType,
+                        mutation_params: childMutationParams,
                     });
                 } catch (e) {
                     console.warn(`[Breed] Child generation failed (likely shape mismatch). Attempt ${breedAttempts}/${popSize * 10}`, e);
@@ -742,14 +901,14 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
             setGeneration(g => g + 1);
 
             // Save pre-eval snapshot for the new generation immediately
-            const nextGenNum = generation + 1;
             setGenerationHistory(prev => [...prev, {
                 generation: nextGenNum,
                 genomes: [...nextGen],
                 bestFitness: 0,
                 avgNodes: Math.round(nextGen.reduce((acc, g) => acc + g.nodes.length, 0) / nextGen.length),
                 timestamp: new Date().toLocaleTimeString(),
-                evaluated: false
+                evaluated: false,
+                genealogy: settings.genealogyTrackingEnabled ? new Map(genealogyMapRef.current) : undefined,
             }]);
 
             // Timeout to yield to React rendering before next loop iteration
@@ -770,6 +929,7 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
 
     const startEvolution = useCallback((seedGenomes: string[]) => {
         try {
+            genealogyMapRef.current = new Map();
             if (!datasetProfileId) {
                 addLog("Cannot start: No dataset selected!", "error");
                 return;

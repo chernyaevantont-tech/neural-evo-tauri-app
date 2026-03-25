@@ -39,6 +39,7 @@ export type EvolutionLoopSettings = AdaptiveMutationSettings & {
     };
     useMaxGenerations: boolean;
     maxGenerations: number;
+    genealogyTrackingEnabled: boolean;
     selectedCrossovers: Array<'subgraph-insertion' | 'subgraph-replacement' | 'neat-style' | 'multi-point'>;
 };
 
