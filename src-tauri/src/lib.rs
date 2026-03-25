@@ -29,6 +29,7 @@ pub mod orchestrator;
 pub mod profiler;
 pub mod pareto;
 pub mod device_profiles;
+pub mod device_library;
 pub mod genealogy;
 pub mod weight_io;
 pub mod stopping_criteria;
@@ -2426,6 +2427,52 @@ async fn apply_device_penalty(
     ))
 }
 
+#[tauri::command]
+async fn list_device_templates() -> Result<Vec<dtos::DeviceTemplateDto>, String> {
+    device_library::list_device_templates()
+}
+
+#[tauri::command]
+async fn create_device_template(
+    input: dtos::CreateDeviceTemplateInput,
+) -> Result<dtos::DeviceTemplateDto, String> {
+    device_library::create_device_template(input)
+}
+
+#[tauri::command]
+async fn update_device_template(
+    id: String,
+    patch: dtos::UpdateDeviceTemplatePatch,
+) -> Result<dtos::DeviceTemplateDto, String> {
+    device_library::update_device_template(id, patch)
+}
+
+#[tauri::command]
+async fn delete_device_template(id: String) -> Result<(), String> {
+    device_library::delete_device_template(id)
+}
+
+#[tauri::command]
+async fn duplicate_device_template(
+    id: String,
+    new_name: String,
+) -> Result<dtos::DeviceTemplateDto, String> {
+    device_library::duplicate_device_template(id, new_name)
+}
+
+#[tauri::command]
+async fn export_device_library(path: String) -> Result<usize, String> {
+    device_library::export_device_library(path)
+}
+
+#[tauri::command]
+async fn import_device_library(
+    path: String,
+    mode: dtos::DeviceLibraryImportMode,
+) -> Result<Vec<dtos::DeviceTemplateDto>, String> {
+    device_library::import_device_library(path, mode)
+}
+
 
 #[cfg(test)]
 mod hidden_library_tests {
@@ -2739,6 +2786,13 @@ pub fn run() {
             get_device_profiles,
             validate_genome_for_device,
             apply_device_penalty,
+            list_device_templates,
+            create_device_template,
+            update_device_template,
+            delete_device_template,
+            duplicate_device_template,
+            export_device_library,
+            import_device_library,
             register_founder,
             register_mutation,
             register_crossover,

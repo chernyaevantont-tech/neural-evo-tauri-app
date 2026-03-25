@@ -28,6 +28,23 @@ pub struct DeviceProfileDto {
     pub constraints: DeviceResourceConstraints,
 }
 
+pub fn validate_constraints(constraints: &DeviceResourceConstraints) -> Result<(), String> {
+    if constraints.mops_budget <= 0.0 {
+        return Err("mops_budget must be > 0".to_string());
+    }
+    if constraints.ram_budget_mb <= 0.0 {
+        return Err("ram_budget_mb must be > 0".to_string());
+    }
+    if constraints.flash_budget_mb <= 0.0 {
+        return Err("flash_budget_mb must be > 0".to_string());
+    }
+    if constraints.max_latency_ms <= 0.0 {
+        return Err("max_latency_ms must be > 0".to_string());
+    }
+
+    Ok(())
+}
+
 fn safe_ratio(usage: f32, budget: f32) -> f32 {
     if budget <= 0.0 {
         return f32::INFINITY;

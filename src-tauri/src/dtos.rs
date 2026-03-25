@@ -357,6 +357,58 @@ pub struct DeviceProfile {
     pub target_fps: Option<f32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DeviceTemplateDto {
+    pub id: String,
+    pub name: String,
+    pub constraints: crate::device_profiles::DeviceResourceConstraints,
+    pub notes: Option<String>,
+    pub tags: Vec<String>,
+    pub created_at_unix_ms: u64,
+    pub updated_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CreateDeviceTemplateInput {
+    pub name: String,
+    pub constraints: crate::device_profiles::DeviceResourceConstraints,
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct UpdateDeviceTemplatePatch {
+    pub name: Option<String>,
+    pub constraints: Option<crate::device_profiles::DeviceResourceConstraints>,
+    pub notes: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DuplicateDeviceTemplateInput {
+    pub id: String,
+    pub new_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceLibraryImportMode {
+    Merge,
+    Replace,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ImportDeviceLibraryInput {
+    pub path: String,
+    pub mode: DeviceLibraryImportMode,
+}
+
 // ---------------------------------------------------------------------------
 // Genealogy Tracking DTOs
 // ---------------------------------------------------------------------------
