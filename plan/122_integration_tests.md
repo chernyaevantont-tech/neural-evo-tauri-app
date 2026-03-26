@@ -67,13 +67,23 @@ cargo test --test integration_*
 
 ## Done Criteria
 
-- [ ] All required scenarios pass
-- [ ] No contract mismatch between backend and frontend
-- [ ] No flaky behavior
+- [x] All required scenarios pass
+- [x] No contract mismatch between backend and frontend
+- [x] No flaky behavior
 
 ---
 
 ## Output
 
-- Integration test suites across frontend and backend
+- Integration test suites across frontend and backend:
+	- `src/pages/evolution-studio-page/EvolutionStudioPage.integration.test.tsx`
+	- `src/app/App.integration.test.tsx`
+	- `src-tauri/tests/integration_evolution_pipeline.rs`
 - Verified page-feature-widget-backend data flow
+
+## Verification Run
+
+```bash
+npx vitest run src/pages/evolution-studio-page/EvolutionStudioPage.integration.test.tsx src/app/App.integration.test.tsx
+cargo test --test integration_evolution_pipeline
+```
