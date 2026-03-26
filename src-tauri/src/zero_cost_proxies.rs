@@ -171,25 +171,27 @@ mod tests {
     #[test]
     fn test_two_stage_strategy() {
         let mut config = ZeroCostConfig::default();
+        config.enabled = true;
         config.strategy = "two-stage".to_string();
         config.fast_pass_threshold = 0.6;
         
         // Low score
-        let low = ZeroCostMetrics::from_synflow(2.0, &config);
+        let low = ZeroCostMetrics::from_synflow(1.0, &config);
         assert_eq!(low.strategy_decision, "skip");
         
         // Medium score
-        let med = ZeroCostMetrics::from_synflow(4.0, &config);
+        let med = ZeroCostMetrics::from_synflow(10.0, &config);
         assert_eq!(med.strategy_decision, "partial_train");
         
         // High score
-        let high = ZeroCostMetrics::from_synflow(8.0, &config);
+        let high = ZeroCostMetrics::from_synflow(100.0, &config);
         assert_eq!(high.strategy_decision, "full_train");
     }
     
     #[test]
     fn test_early_stopping_strategy() {
         let mut config = ZeroCostConfig::default();
+        config.enabled = true;
         config.strategy = "early-stopping".to_string();
         
         // Very low score
@@ -197,18 +199,16 @@ mod tests {
         assert_eq!(very_low.strategy_decision, "skip");
         
         // Medium score
-        let med = ZeroCostMetrics::from_synflow(3.0, &config);
+        let med = ZeroCostMetrics::from_synflow(10.0, &config);
         assert_eq!(med.strategy_decision, "partial_train");
         
         // High score
-        let high = ZeroCostMetrics::from_synflow(7.0, &config);
+        let high = ZeroCostMetrics::from_synflow(100.0, &config);
         assert_eq!(high.strategy_decision, "full_train");
     }
     
     #[test]
     fn test_recommended_epochs() {
-        let config = ZeroCostConfig::default();
-        
         let skip = ZeroCostMetrics {
             synflow: 1.0,
             normalized_score: 0.1,

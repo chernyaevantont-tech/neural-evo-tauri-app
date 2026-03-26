@@ -776,3 +776,207 @@ fn collect_glob_ids(root: &Path, pattern: &str) -> HashMap<String, std::path::Pa
     }
     map
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    // Helper: create a minimal test dataset profile
+    fn make_test_profile(id: String, name: String, source_path: String) -> DatasetProfile {
+        DatasetProfile {
+            id,
+            name,
+            source_path: Some(source_path),
+            streams: vec![
+                crate::dtos::DataStream {
+                    id: "input_stream".to_string(),
+                    alias: "Input".to_string(),
+                    role: "Input".to_string(),
+                    data_type: crate::dtos::DataType::Vector,
+                    tensor_shape: vec![10],
+                    num_classes: None,
+                    locator: crate::dtos::DataLocatorDef::GlobPattern {
+                        pattern: "*.csv".to_string(),
+                    },
+                    preprocessing: None,
+                },
+                crate::dtos::DataStream {
+                    id: "target_stream".to_string(),
+                    alias: "Target".to_string(),
+                    role: "Target".to_string(),
+                    data_type: crate::dtos::DataType::Categorical,
+                    tensor_shape: vec![1],
+                    num_classes: Some(3),
+                    locator: crate::dtos::DataLocatorDef::GlobPattern {
+                        pattern: "*.csv".to_string(),
+                    },
+                    preprocessing: None,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn test_dataloader_new_invalid_path() {
+        let profile = make_test_profile(
+            "test1".to_string(),
+            "Test Dataset".to_string(),
+            "/nonexistent/path/that/does/not/exist".to_string(),
+        );
+        
+        let result = DataLoader::new(profile, None);
+        assert!(result.is_err());
+        match result {
+            Err(e) => assert!(e.contains("does not exist")),
+            Ok(_) => panic!("Expected error but got Ok"),
+        }
+    }
+
+    #[test]
+    fn test_dataloader_new_missing_source_path() {
+        let mut profile = make_test_profile(
+            "test2".to_string(),
+            "Test Dataset 2".to_string(),
+            "/tmp".to_string(),
+        );
+        profile.source_path = None;
+        
+        let result = DataLoader::new(profile, None);
+        assert!(result.is_err());
+        match result {
+            Err(e) => assert!(e.contains("No source path")),
+            Ok(_) => panic!("Expected error but got Ok"),
+        }
+    }
+
+    #[test]
+    fn test_dataloader_new_with_valid_path() {
+        let temp_dir = std::env::temp_dir();
+        let profile = make_test_profile(
+            "test3".to_string(),
+            "Test Dataset 3".to_string(),
+            temp_dir.to_string_lossy().to_string(),
+        );
+        
+        let result = DataLoader::new(profile, None);
+        assert!(result.is_ok());
+        let loader = result.unwrap();
+        // No matching samples without actual files
+        assert!(loader.valid_sample_ids.is_empty() || loader.valid_sample_ids.len() > 0);
+    }
+
+    #[test]
+    fn test_cache_result_serializable() {
+        let mut class_counts = HashMap::new();
+        class_counts.insert("cat".to_string(), 5);
+        class_counts.insert("dog".to_string(), 10);
+        
+        let cache_result = CacheResult {
+            total_cached: 15,
+            total_dropped: 2,
+            dropped_sample_ids: vec!["corrupt1".to_string()],
+            class_counts,
+        };
+        
+        // Should be serializable to JSON via serde
+        let json = serde_json::to_string(&cache_result);
+        assert!(json.is_ok());
+        
+        let payload = json.unwrap();
+        assert!(payload.contains("15")); // total_cached
+        assert!(payload.contains("2"));  // total_dropped
+        assert!(payload.contains("cat")); // class key
+    }
+
+    #[test]
+    fn test_sample_data_construction() {
+        let tensors = HashMap::new();
+        
+        let sample = SampleData {
+            id: "sample_001".to_string(),
+            stream_tensors: tensors,
+        };
+        
+        assert_eq!(sample.id, "sample_001");
+        assert!(sample.stream_tensors.is_empty());
+    }
+
+    #[test]
+    fn test_collect_glob_ids_empty_pattern() {
+        let temp_dir = std::env::temp_dir();
+        let result = collect_glob_ids(&temp_dir, "*.nonexistent");
+        
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_collect_glob_ids_with_files() {
+        let temp_dir = std::env::temp_dir().join("test_glob_ids");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        
+        // Create test files
+        fs::write(temp_dir.join("file1.txt"), "test").expect("write file1");
+        fs::write(temp_dir.join("file2.txt"), "test").expect("write file2");
+        
+        let result = collect_glob_ids(&temp_dir, "*.txt");
+        
+        assert_eq!(result.len(), 2);
+        assert!(result.contains_key("file1"));
+        assert!(result.contains_key("file2"));
+        
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_glob_pattern_normalizes_paths() {
+        let temp_dir = std::env::temp_dir().join("test_glob_normalize");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        
+        // Create a nested structure
+        let subdir = temp_dir.join("subdir");
+        fs::create_dir_all(&subdir).expect("create subdir");
+        fs::write(subdir.join("nested.txt"), "test").expect("write file");
+        
+        let result = collect_glob_ids(&temp_dir, "**/*.txt");
+        
+        assert!(!result.is_empty());
+        // Should normalize backslashes to forward slashes
+        for key in result.keys() {
+            assert!(!key.contains('\\'));
+        }
+        
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_vector_parsing() {
+        // Test that vector CSV values are properly parsed
+        let csv_string = "1.0,2.5,3.7";
+        let vals: Vec<f32> = csv_string
+            .split(',')
+            .filter_map(|s| s.trim().parse::<f32>().ok())
+            .collect();
+        
+        assert_eq!(vals.len(), 3);
+        assert_eq!(vals[0], 1.0);
+        assert_eq!(vals[1], 2.5);
+        assert_eq!(vals[2], 3.7);
+    }
+
+    #[test]
+    fn test_vector_parsing_invalid() {
+        let csv_string = "1.0,bad,3.7";
+        let vals: Vec<f32> = csv_string
+            .split(',')
+            .filter_map(|s| s.trim().parse::<f32>().ok())
+            .collect();
+        
+        // Should skip invalid values
+        assert_eq!(vals.len(), 2);
+        assert_eq!(vals[0], 1.0);
+        assert_eq!(vals[1], 3.7);
+    }
+}

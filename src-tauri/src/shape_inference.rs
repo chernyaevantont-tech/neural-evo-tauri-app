@@ -3,7 +3,7 @@
 /// Provides unified shape calculation for datasets across all stream types.
 /// This is the single source of truth for determining input/output dimensions.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::csv_loader::CsvDatasetLoader;
@@ -48,7 +48,7 @@ impl ShapeInference {
                 ShapeInference::infer_csv_input_shape(csv_def, &stream.data_type, root_path, &mut warnings)
             }
 
-            DataLocatorDef::GlobPattern { pattern } => {
+            DataLocatorDef::GlobPattern { pattern: _ } => {
                 // For images, return shape from tensor_shape
                 if stream.data_type == DataType::Image {
                     if stream.tensor_shape.is_empty() {
@@ -111,7 +111,7 @@ impl ShapeInference {
     fn infer_csv_input_shape(
         csv_def: &CsvDatasetDef,
         data_type: &DataType,
-        root_path: &Path,
+        _root_path: &Path,
         warnings: &mut Vec<String>,
     ) -> Result<(Vec<usize>, String, Vec<String>), String> {
         // Determine effective sample mode from data_type

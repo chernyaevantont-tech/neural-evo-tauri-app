@@ -2473,13 +2473,14 @@ async fn import_device_library(
     device_library::import_device_library(path, mode)
 }
 
+#[cfg(test)]
+static TEST_ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
 
 #[cfg(test)]
 mod hidden_library_tests {
     use super::*;
-    use std::sync::{LazyLock, Mutex};
-
-    static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     fn test_genome() -> String {
         [
@@ -2505,7 +2506,7 @@ mod hidden_library_tests {
 
     #[test]
     fn hidden_entry_serializes_and_deserializes() {
-        let _guard = TEST_LOCK.lock().expect("test lock");
+        let _guard = TEST_ENV_LOCK.lock().expect("test lock");
         let temp_dir = with_test_storage();
 
         let profiler = TrainingProfiler {
@@ -2562,7 +2563,7 @@ mod hidden_library_tests {
 
     #[test]
     fn save_list_unhide_delete_hidden_flow() {
-        let _guard = TEST_LOCK.lock().expect("test lock");
+        let _guard = TEST_ENV_LOCK.lock().expect("test lock");
         let temp_dir = with_test_storage();
 
         let saved = save_hidden_genome(
@@ -2614,7 +2615,7 @@ mod hidden_library_tests {
 
     #[test]
     fn hidden_filters_return_expected_subset() {
-        let _guard = TEST_LOCK.lock().expect("test lock");
+        let _guard = TEST_ENV_LOCK.lock().expect("test lock");
         let temp_dir = with_test_storage();
 
         let _a = save_hidden_genome(
@@ -2679,9 +2680,6 @@ mod hidden_library_tests {
 #[cfg(test)]
 mod weight_export_command_tests {
     use super::*;
-    use std::sync::{LazyLock, Mutex};
-
-    static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     fn with_test_storage() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("weight-export-test-{}", uuid::Uuid::new_v4()));
@@ -2695,7 +2693,7 @@ mod weight_export_command_tests {
 
     #[test]
     fn export_command_creates_mpk_and_metadata() {
-        let _guard = TEST_LOCK.lock().expect("test lock");
+        let _guard = TEST_ENV_LOCK.lock().expect("test lock");
         let temp_storage = with_test_storage();
         let output_dir = temp_storage.join("exports");
 

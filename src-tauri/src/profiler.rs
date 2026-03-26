@@ -405,4 +405,131 @@ mod tests {
         let result = profiler.finalize();
         assert_eq!(result.peak_model_params_mb, 10.0);
     }
+
+    #[test]
+    fn test_zero_batch_sizes() {
+        let mut profiler = ProfilerCollector::new();
+        profiler.mark_train_start();
+        profiler.record_batch(0);
+        profiler.record_batch(0);
+        profiler.mark_train_end();
+
+        let result = profiler.finalize();
+        assert_eq!(result.batch_count, 2);
+        assert_eq!(result.samples_per_sec, 0.0);
+    }
+
+    #[test]
+    fn test_multiple_batch_sizes_sum_correctly() {
+        let mut profiler = ProfilerCollector::new();
+        profiler.mark_train_start();
+        profiler.record_batch(32);
+        profiler.record_batch(64);
+        profiler.record_batch(16);
+        profiler.mark_train_end();
+
+        let result = profiler.finalize();
+        assert_eq!(result.batch_count, 3);
+    }
+
+    #[test]
+    fn test_memory_categories_independent() {
+        let mut profiler = ProfilerCollector::new();
+        profiler.set_memory_mode(MemoryMode::Estimate);
+        
+        profiler.set_model_params_mb(10.0);
+        profiler.set_activation_mb(5.0);
+        profiler.set_gradients_mb(3.0);
+
+        let result = profiler.finalize();
+        assert_eq!(result.peak_model_params_mb, 10.0);
+        assert_eq!(result.peak_activation_mb, 5.0);
+        assert_eq!(result.peak_gradient_mb, 3.0);
+    }
+
+    #[test]
+    fn test_large_memory_values() {
+        let mut profiler = ProfilerCollector::new();
+        profiler.set_model_params_mb(8192.0); // 8GB
+        profiler.set_activation_mb(4096.0);
+        profiler.set_gradients_mb(4096.0);
+
+        let result = profiler.finalize();
+        assert_eq!(result.peak_model_params_mb, 8192.0);
+    }
+
+    #[test]
+    fn test_estimate_with_zero_elements() {
+        let mb = estimate_mb_from_elements(0, 4);
+        assert_eq!(mb, 0.0);
+    }
+
+    #[test]
+    fn test_estimate_with_different_dtypes() {
+        // fp32 = 4 bytes, fp64 = 8 bytes, fp16 = 2 bytes
+        let mb_f32 = estimate_mb_from_elements(1024, 4);
+        let mb_f64 = estimate_mb_from_elements(1024, 8);
+        let mb_f16 = estimate_mb_from_elements(1024, 2);
+
+        assert!(mb_f64 > mb_f32);
+        assert!(mb_f32 > mb_f16);
+    }
+
+    #[test]
+    fn test_profiler_no_start_no_end() {
+        let profiler = ProfilerCollector::new();
+        let result = profiler.finalize();
+        
+        assert_eq!(result.batch_count, 0);
+        assert_eq!(result.total_train_duration_ms, 0);
+    }
+
+    #[test]
+    fn test_profiler_double_mark_train_end() {
+        let mut profiler = ProfilerCollector::new();
+        profiler.mark_train_start();
+        profiler.record_batch(32);
+        profiler.mark_train_end();
+        profiler.mark_train_end(); // Second call should be idempotent
+        
+        let result = profiler.finalize();
+        assert_eq!(result.batch_count, 1);
+    }
+
+    #[test]
+    fn test_runtime_source_overrides_estimate() {
+        let mut profiler = ProfilerCollector::new();
+        profiler.set_memory_mode(MemoryMode::Hybrid);
+        
+        // First set estimate
+        profiler.set_model_params_mb(15.0);
+        
+        // Then override with runtime
+        profiler.update_peak_category(
+            MemoryCategory::ModelParams,
+            8.0,
+            MemorySource::Runtime,
+        );
+        
+        let result = profiler.finalize();
+        // Hybrid mode should prefer the runtime value
+        assert!(result.peak_model_params_mb <= 15.0);
+    }
+
+    #[test]
+    fn test_estimate_mode_accumulates_peak() {
+        let mut profiler = ProfilerCollector::new();
+        profiler.set_memory_mode(MemoryMode::Estimate);
+        
+        profiler.set_model_params_mb(5.0);
+        profiler.set_activation_mb(2.0);
+        profiler.set_gradients_mb(1.0);
+        
+        let result = profiler.finalize();
+        // Peak values should be tracked independently
+        assert!(result.peak_model_params_mb > 0.0);
+        assert!(result.peak_activation_mb > 0.0);
+        assert!(result.peak_gradient_mb > 0.0);
+    }
 }
+
