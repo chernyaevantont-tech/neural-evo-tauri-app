@@ -38,7 +38,11 @@ function clamp01(value: number): number {
     return Math.max(0, Math.min(1, value));
 }
 
-function colorByFeasibility(point: ParetoPoint, frontier: boolean): string {
+function colorByFeasibility(point: ParetoPoint | undefined, frontier: boolean): string {
+    if (!point) {
+        return frontier ? 'rgba(59, 130, 246, 0.8)' : 'rgba(148, 163, 184, 0.4)';
+    }
+
     if (point.feasible === true) {
         return frontier ? 'rgba(34, 197, 94, 0.95)' : 'rgba(34, 197, 94, 0.58)';
     }
@@ -116,7 +120,8 @@ export function ParetoScatterPlot({
                 label: 'Dominated',
                 data: dominatedPoints,
                 backgroundColor: (ctx) => {
-                    const point = ctx.raw as ParetoPoint;
+                    const point = (ctx.raw ??
+                        ctx.dataset?.data?.[ctx.dataIndex]) as ParetoPoint | undefined;
                     return colorByFeasibility(point, false);
                 },
                 pointRadius: 4,
@@ -134,7 +139,8 @@ export function ParetoScatterPlot({
                 label: 'Non-dominated frontier',
                 data: frontierPoints,
                 backgroundColor: (ctx) => {
-                    const point = ctx.raw as ParetoPoint;
+                    const point = (ctx.raw ??
+                        ctx.dataset?.data?.[ctx.dataIndex]) as ParetoPoint | undefined;
                     return colorByFeasibility(point, true);
                 },
                 pointBorderColor: (ctx) => {

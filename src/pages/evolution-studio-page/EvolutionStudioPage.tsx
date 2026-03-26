@@ -67,6 +67,9 @@ export const EvolutionStudioPage: React.FC = () => {
     const datasetProfileId = useDatasetManagerStore(state => state.selectedProfileId);
     const profiles = useDatasetManagerStore(state => state.profiles);
     const settings = useEvolutionSettingsStore();
+    const setParetoForGeneration = useEvolutionSettingsStore(
+        (state) => state.setParetoForGeneration,
+    );
     const {
         isRunning,
         isPaused,
@@ -323,8 +326,8 @@ export const EvolutionStudioPage: React.FC = () => {
             frontier_genome_ids: paretoMembers.map((item) => item.genome_id),
         };
 
-        settings.setParetoForGeneration(currentSnapshot.generation, payload);
-    }, [currentSnapshot, settings]);
+        setParetoForGeneration(currentSnapshot.generation, payload);
+    }, [currentSnapshot, setParetoForGeneration]);
 
     const handleUseParetoAsSeed = async (genomeId: string) => {
         const selected = genomeById.get(genomeId);
