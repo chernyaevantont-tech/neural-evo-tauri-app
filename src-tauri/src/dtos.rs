@@ -291,6 +291,12 @@ pub struct TrainingProfiler {
     pub inference_msec_per_sample: f32,
     pub batch_count: u32,
     pub early_stop_epoch: Option<u32>,
+    #[serde(default)]
+    pub queue_wait_ms: u64,
+    #[serde(default)]
+    pub gpu_active_ms: u64,
+    #[serde(default)]
+    pub step_time_ms_ema: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -303,6 +309,12 @@ pub struct GenerationProfilingStats {
     pub peak_concurrent_vram_mb: f32,
     pub total_jobs_completed: u32,
     pub total_jobs_failed: u32,
+    #[serde(default)]
+    pub effective_gpu_workers: u32,
+    #[serde(default)]
+    pub queued_jobs: u32,
+    #[serde(default)]
+    pub avg_step_ms: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -570,6 +582,51 @@ pub struct TrainingJob {
     pub proxy_decision: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct WorkerTrainRequest {
+    pub job_id: String,
+    pub run_id: String,
+    pub genome_id: String,
+    pub genome_json: String,
+    pub dataset_profile: String,
+    pub batch_size: usize,
+    pub epochs: usize,
+    pub dataset_percent: usize,
+    pub train_split: usize,
+    pub val_split: usize,
+    pub test_split: usize,
+    pub queue_entered_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct WorkerTrainProgress {
+    pub job_id: String,
+    pub genome_id: String,
+    pub epoch: usize,
+    pub batch: usize,
+    pub total_batches: usize,
+    pub step: usize,
+    pub total_steps: usize,
+    pub queue_wait_ms: u64,
+    pub gpu_active_ms: u64,
+    pub step_time_ms: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct WorkerTrainResult {
+    pub job_id: String,
+    pub genome_id: String,
+    pub loss: f32,
+    pub accuracy: f32,
+    pub profiler: Option<TrainingProfiler>,
+    pub queue_wait_ms: u64,
+    pub wall_clock_ms: u64,
+    pub error: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Run State DTO (for Orchestrator)
 // ---------------------------------------------------------------------------
@@ -641,6 +698,9 @@ mod tests {
             inference_msec_per_sample: 10.0,
             batch_count: 100,
             early_stop_epoch: None,
+            queue_wait_ms: 0,
+            gpu_active_ms: 1000,
+            step_time_ms_ema: 10.0,
         };
 
         let json = serde_json::to_string(&profiler).unwrap();
@@ -659,6 +719,9 @@ mod tests {
             peak_concurrent_vram_mb: 8192.0,
             total_jobs_completed: 32,
             total_jobs_failed: 2,
+            effective_gpu_workers: 2,
+            queued_jobs: 8,
+            avg_step_ms: 12.5,
         };
 
         let json = serde_json::to_string(&stats).unwrap();
@@ -900,6 +963,9 @@ mod tests {
             inference_msec_per_sample: 10.0,
             batch_count: 100,
             early_stop_epoch: Some(80),
+            queue_wait_ms: 0,
+            gpu_active_ms: 1000,
+            step_time_ms_ema: 10.0,
         });
 
         let result = TrainingResult {

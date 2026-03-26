@@ -165,6 +165,21 @@ export function EvolutionDashboard(props: EvolutionDashboardProps) {
         return true;
     });
 
+    const liveEtaFallback = useMemo(() => {
+        const runningEtas = jobs
+            .filter((job) => job.status === 'running' && Number.isFinite(job.etaSeconds))
+            .map((job) => job.etaSeconds as number);
+
+        if (runningEtas.length === 0) {
+            return undefined;
+        }
+
+        // For concurrent workers, the slowest active job is the conservative wall-clock ETA.
+        return Math.max(...runningEtas);
+    }, [jobs]);
+
+    const overviewEta = overview.etaSeconds ?? liveEtaFallback;
+
     const chartData: ChartData<'line'> = {
         labels: fitnessTimeline.map((point) => point.generation.toString()),
         datasets: [
@@ -336,7 +351,7 @@ export function EvolutionDashboard(props: EvolutionDashboardProps) {
                 />
                 <Card label="Pareto front size" value={String(overview.paretoFrontSize)} />
                 <Card label="Elapsed time" value={formatDuration(overview.elapsedTimeSeconds)} />
-                <Card label="ETA" value={formatEta(overview.etaSeconds)} />
+                <Card label="ETA" value={formatEta(overviewEta)} />
                 <Card
                     label="Feasible ratio"
                     value={

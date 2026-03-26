@@ -11,6 +11,7 @@ export type CrossoverStrategy = 'subgraph-insertion' | 'subgraph-replacement' | 
 export type SecondaryObjective = 'latency' | 'model_size' | 'train_time' | 'training_time' | 'energy';
 export type ObjectiveWeightKey = 'accuracy' | 'latency' | 'model_size' | 'train_time';
 export type MemoryMode = 'estimate' | 'runtime' | 'hybrid';
+export type ExecutionMode = 'sequential' | 'parallel-cpu' | 'parallel-safe-limited';
 
 export interface GenerationProfilingStats {
     generation: number;
@@ -114,6 +115,10 @@ export interface EvolutionSettingsState {
     setEstimatorSafetyFactor: (val: number) => void;
     memoryMode: MemoryMode;
     setMemoryMode: (val: MemoryMode) => void;
+    executionMode: ExecutionMode;
+    setExecutionMode: (val: ExecutionMode) => void;
+    maxParallelJobs: number;
+    setMaxParallelJobs: (val: number) => void;
 
     // Multi-Objective
     mobjEnabled: boolean;
@@ -270,6 +275,10 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
     setEstimatorSafetyFactor: (val) => set({ estimatorSafetyFactor: Math.max(1, val) }),
     memoryMode: 'hybrid',
     setMemoryMode: (val) => set({ memoryMode: val }),
+    executionMode: 'sequential',
+    setExecutionMode: (val) => set({ executionMode: val }),
+    maxParallelJobs: 1,
+    setMaxParallelJobs: (val) => set({ maxParallelJobs: Math.max(1, Math.min(64, Math.floor(val || 1))) }),
 
     mobjEnabled: false,
     setMobjEnabled: (val) => set({ mobjEnabled: val }),

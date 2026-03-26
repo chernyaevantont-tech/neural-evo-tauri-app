@@ -45,6 +45,8 @@ export type EvolutionLoopSettings = AdaptiveMutationSettings & {
         latency_budget_ms: number;
         max_model_size_mb?: number;
     };
+    executionMode?: 'sequential' | 'parallel-cpu' | 'parallel-safe-limited';
+    maxParallelJobs?: number;
     memorySafetyMarginMb?: number;
     estimatorSafetyFactor?: number;
     useMaxGenerations: boolean;

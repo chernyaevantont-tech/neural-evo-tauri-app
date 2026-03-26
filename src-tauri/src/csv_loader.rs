@@ -1,13 +1,11 @@
-use burn::backend::Autodiff;
-use burn::backend::Wgpu;
-use burn::backend::wgpu::WgpuDevice;
 use burn::tensor::Tensor;
 use std::path::{Path, PathBuf};
 
 use crate::dtos::CsvDatasetDef;
 use crate::entities::DynamicTensor;
 
-type Backend = Autodiff<Wgpu>;
+type Backend = crate::backend::TrainBackend;
+type TrainDevice = crate::backend::TrainDevice;
 
 /// Loads CSV-based datasets in both row-wise and temporal-window modes
 #[allow(dead_code)]
@@ -170,7 +168,7 @@ impl CsvDatasetLoader {
     pub fn load_sample(
         &self,
         sample_idx: usize,
-        device: &WgpuDevice,
+        device: &TrainDevice,
     ) -> Result<(DynamicTensor<Backend>, String), String> {
         match self.config.sample_mode.as_str() {
             "row" => {

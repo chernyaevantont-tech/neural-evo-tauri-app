@@ -189,9 +189,9 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
             });
 
             listen<number>('evaluating-genome-start', (event) => {
-                setLiveMetrics([]); // Clear live charts for the new genome
                 activeGenomeIndexRef.current = event.payload;
                 perGenomeMetricsRef.current.set(event.payload, []);
+                setLiveMetrics(prev => prev.filter(m => m.genome_index !== event.payload));
                 // Add log for the user
                 addLog(`Starting evaluation for Genome #${event.payload + 1}...`, 'info');
             }).then(fn => {
@@ -199,11 +199,15 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
             });
 
             listen<BatchMetrics>('evaluating-batch-metrics', (event) => {
-                setLiveMetrics(prev => [...prev, event.payload]);
+                setLiveMetrics(prev => {
+                    const next = [...prev, event.payload];
+                    return next.length > 3000 ? next.slice(next.length - 3000) : next;
+                });
                 // Also store per-genome
-                const idx = activeGenomeIndexRef.current;
+                const idx = event.payload.genome_index ?? activeGenomeIndexRef.current;
                 const arr = perGenomeMetricsRef.current.get(idx);
                 if (arr) arr.push(event.payload);
+                else perGenomeMetricsRef.current.set(idx, [event.payload]);
             }).then(fn => {
                 unlistenBatch = fn;
             });
@@ -880,6 +884,35 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
             const perGenomeEpochs = Array.from({ length: serializedGenomes.length }, (_, i) => 
                 evalEpochsAdjustments.get(i) ?? settings.evalEpochs
             );
+
+            const configuredRamMb = settings.customDeviceParams?.ram_mb
+                ?? Math.max(1, settings.resourceTargets.ram / MB_TO_BYTES);
+            const safetyMarginMb = Math.max(0, settings.memorySafetyMarginMb ?? 128);
+            const usableRamMb = Math.max(1, configuredRamMb - safetyMarginMb);
+            const perGenomeEstimateMb = Math.max(64, Math.floor(safetyMarginMb * 0.75));
+            const memoryFitParallelJobs = Math.max(1, Math.floor(usableRamMb / perGenomeEstimateMb));
+
+            const configuredParallelJobs = Math.max(1, settings.maxParallelJobs ?? 1);
+            const explicitParallelOverride = settings.executionMode !== 'sequential' && configuredParallelJobs > 1;
+            const effectiveTargetParallelJobs = settings.executionMode === 'sequential'
+                ? 1
+                : (configuredParallelJobs <= 1 ? memoryFitParallelJobs : configuredParallelJobs);
+
+            // If the user explicitly sets parallel jobs > 1, trust that value.
+            // The memory-fit estimate is still useful as an auto/default picker, but not as a hard cap.
+            const effectiveParallelCap = explicitParallelOverride
+                ? effectiveTargetParallelJobs
+                : Math.min(effectiveTargetParallelJobs, memoryFitParallelJobs);
+
+            const requestedMaxParallelJobs = Math.max(
+                1,
+                Math.min(
+                    effectiveParallelCap,
+                    serializedGenomes.length,
+                ),
+            );
+            const requestedExecutionMode = settings.executionMode
+                ?? (requestedMaxParallelJobs > 1 ? 'parallel-safe-limited' : 'sequential');
             
             const results = await invoke<EvaluationResult[]>('evaluate_population', {
                 genomes: serializedGenomes,
@@ -892,6 +925,9 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                 testSplit,
                 genomeIds: population.map((p) => p.id),
                 sourceGeneration: generation,
+                maxParallelJobs: requestedMaxParallelJobs,
+                executionMode: requestedExecutionMode,
+                memorySafetyMarginMb: safetyMarginMb,
             });
 
             // 3. Map Results & Apply Fitness (Parsimony + Resource-Aware + Zero-Cost)

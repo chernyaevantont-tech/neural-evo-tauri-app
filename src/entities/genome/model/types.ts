@@ -13,9 +13,16 @@ export interface ZeroCostMetricsView {
 }
 
 export interface BatchMetrics {
+    genome_index?: number;
     epoch: number;
     batch: number;
     total_batches: number;
+    step?: number;
+    total_steps?: number;
+    elapsed_train_ms?: number;
+    queue_wait_ms?: number;
+    gpu_active_ms?: number;
+    step_time_ms?: number;
     loss: number;
     accuracy: number;
 }

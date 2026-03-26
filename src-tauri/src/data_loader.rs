@@ -1,6 +1,3 @@
-use burn::backend::Autodiff;
-use burn::backend::Wgpu;
-use burn::backend::wgpu::WgpuDevice;
 use burn::tensor::{Tensor, TensorData};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -9,7 +6,8 @@ use crate::dtos::{DataLocatorDef, DataType, DatasetProfile};
 use crate::entities::DynamicTensor;
 use crate::csv_loader::CsvDatasetLoader;
 
-type Backend = Autodiff<Wgpu>;
+type Backend = crate::backend::TrainBackend;
+type TrainDevice = crate::backend::TrainDevice;
 
 #[derive(serde::Serialize)]
 pub struct CacheResult {
@@ -547,7 +545,7 @@ impl DataLoader {
         Some(locator_val.clone())
     }
 
-    pub fn load_sample(&self, sample_id: &str, device: &WgpuDevice) -> Result<SampleData, String> {
+    pub fn load_sample(&self, sample_id: &str, device: &TrainDevice) -> Result<SampleData, String> {
         let mut tensors = HashMap::new();
 
         for (idx, stream) in self.profile.streams.iter().enumerate() {
@@ -783,6 +781,23 @@ fn collect_glob_ids(root: &Path, pattern: &str) -> HashMap<String, std::path::Pa
         }
     }
     map
+}
+
+/// Load dataset profiles synchronously (for worker context without tokio runtime)
+pub fn load_dataset_profiles_sync() -> Result<String, String> {
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| format!("Failed to get current exe: {}", e))?
+        .parent()
+        .ok_or("Failed to get exe parent directory")?
+        .to_path_buf();
+    
+    let path = exe_dir.join("dataset_profiles.json");
+    if path.exists() {
+        std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read dataset_profiles.json: {}", e))
+    } else {
+        Ok(r#"{"state":{"profiles":[]}}"#.to_string())
+    }
 }
 
 #[cfg(test)]

@@ -72,6 +72,7 @@ pub struct ProfilerCollector {
     train_samples: u64,
     inference_samples: u64,
     early_stop_epoch: Option<u32>,
+    queue_wait_ms: u64,
 }
 
 impl ProfilerCollector {
@@ -108,7 +109,12 @@ impl ProfilerCollector {
             train_samples: 0,
             inference_samples: 0,
             early_stop_epoch: None,
+            queue_wait_ms: 0,
         }
+    }
+
+    pub fn set_queue_wait_ms(&mut self, queue_wait_ms: u64) {
+        self.queue_wait_ms = queue_wait_ms;
     }
 
     pub fn mark_train_start(&mut self) {
@@ -282,6 +288,15 @@ impl ProfilerCollector {
             0.0
         };
 
+        let gpu_active_ms = total_train_duration_ms
+            .saturating_add(val_duration_ms)
+            .saturating_add(test_duration_ms);
+        let step_time_ms_ema = if self.batch_count > 0 {
+            total_train_duration_ms as f32 / self.batch_count as f32
+        } else {
+            0.0
+        };
+
         TrainingProfiler {
             train_start_ms: self.train_start_ms.unwrap_or(0),
             first_batch_ms: self.first_batch_ms.unwrap_or(0),
@@ -302,6 +317,9 @@ impl ProfilerCollector {
             inference_msec_per_sample,
             batch_count: self.batch_count,
             early_stop_epoch: self.early_stop_epoch,
+            queue_wait_ms: self.queue_wait_ms,
+            gpu_active_ms,
+            step_time_ms_ema,
         }
     }
 }

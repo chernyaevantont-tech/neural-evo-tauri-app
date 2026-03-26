@@ -73,6 +73,34 @@ export function AdvancedPerformanceSection({ disabled = false }: AdvancedPerform
                             <option value="hybrid">hybrid</option>
                         </select>
                     </div>
+
+                    <div className={styles.row}>
+                        <span className={styles.label}>Execution mode</span>
+                        <select
+                            className={styles.select}
+                            value={settings.executionMode}
+                            onChange={(event) => settings.setExecutionMode(event.target.value as 'sequential' | 'parallel-cpu' | 'parallel-safe-limited')}
+                            disabled={disabled}
+                        >
+                            <option value="sequential">sequential</option>
+                            <option value="parallel-safe-limited">parallel-safe-limited</option>
+                            <option value="parallel-cpu">parallel-cpu</option>
+                        </select>
+                    </div>
+
+                    <div className={styles.row}>
+                        <span className={styles.label}>Max parallel jobs</span>
+                        <input
+                            className={styles.numberInput}
+                            type="number"
+                            min="1"
+                            max="64"
+                            step="1"
+                            value={settings.maxParallelJobs}
+                            onChange={(event) => settings.setMaxParallelJobs(Number(event.target.value) || 1)}
+                            disabled={disabled || settings.executionMode === 'sequential'}
+                        />
+                    </div>
                 </>
             )}
         </div>

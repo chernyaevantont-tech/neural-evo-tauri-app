@@ -18,6 +18,9 @@ export interface TrainingProfiler {
     inference_msec_per_sample: number;
     batch_count: number;
     early_stop_epoch?: number;
+    queue_wait_ms?: number;
+    gpu_active_ms?: number;
+    step_time_ms_ema?: number;
 }
 
 export interface GenomeObjectives {

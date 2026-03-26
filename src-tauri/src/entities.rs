@@ -1463,7 +1463,7 @@ pub fn train<B: AutodiffBackend>(
 // Простой цикл обучения (без burn Learner, для прототипирования)
 // ---------------------------------------------------------------------------
 
-fn compute_accuracy<B: AutodiffBackend>(
+pub fn compute_accuracy<B: AutodiffBackend>(
     predictions: &[DynamicTensor<B>],
     targets: &[DynamicTensor<B>],
     is_classification: bool,
@@ -1626,9 +1626,16 @@ pub fn train_simple<B: AutodiffBackend>(
 
 #[derive(serde::Serialize, Clone, Debug)]
 pub struct BatchMetrics {
+    pub genome_index: usize,
     pub epoch: usize,
     pub batch: usize,
     pub total_batches: usize,
+    pub step: usize,
+    pub total_steps: usize,
+    pub elapsed_train_ms: u64,
+    pub queue_wait_ms: u64,
+    pub gpu_active_ms: u64,
+    pub step_time_ms: f32,
     pub loss: f32,
     pub accuracy: f32,
 }
@@ -1659,6 +1666,7 @@ pub fn estimate_activations_mb(batch_shapes: &[Vec<usize>], batch_size: usize) -
 #[allow(clippy::type_complexity)]
 pub fn run_eval_pass<B: AutodiffBackend>(
     app_handle: &tauri::AppHandle,
+    genome_index: usize,
     model: &mut GraphModel<B>,
     batches: &[DynamicBatch<B>],
     num_epochs: usize,
@@ -1666,8 +1674,10 @@ pub fn run_eval_pass<B: AutodiffBackend>(
     is_classification: bool,
     session_counter: &std::sync::atomic::AtomicU64,
     session_snapshot: u64,
+    queue_wait_ms: u64,
     profiler: Option<&mut ProfilerCollector>,
 ) -> (f32, f32) {
+    let train_started_at = std::time::Instant::now();
     let mut profiler = profiler;
     if let Some(p) = profiler.as_mut() {
         p.mark_train_start();
@@ -1688,6 +1698,7 @@ pub fn run_eval_pass<B: AutodiffBackend>(
     let mut final_acc = 0.0;
 
     let total_batches = batches.len();
+    let total_steps = total_batches.saturating_mul(num_epochs);
     let log_interval = (total_batches / 10).max(1);
     let mut prev_acc = 0.0;
 
@@ -1777,9 +1788,20 @@ pub fn run_eval_pass<B: AutodiffBackend>(
                 let _ = app_handle.emit(
                     "evaluating-batch-metrics",
                     BatchMetrics {
+                        genome_index,
                         epoch: epoch + 1,
                         batch: batch_idx + 1,
                         total_batches,
+                        step: epoch * total_batches + batch_idx + 1,
+                        total_steps,
+                        elapsed_train_ms: train_started_at.elapsed().as_millis() as u64,
+                        queue_wait_ms,
+                        gpu_active_ms: train_started_at.elapsed().as_millis() as u64,
+                        step_time_ms: if batch_idx + 1 > 0 {
+                            train_started_at.elapsed().as_millis() as f32 / (batch_idx + 1) as f32
+                        } else {
+                            0.0
+                        },
                         loss: current_avg_loss,
                         accuracy: current_acc,
                     },

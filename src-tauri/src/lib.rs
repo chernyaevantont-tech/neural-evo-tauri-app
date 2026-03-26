@@ -9,9 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use rfd::AsyncFileDialog;
 
 use tokio;
-use burn::backend::{Autodiff, Wgpu};
-use burn::backend::wgpu::WgpuDevice;
-type Backend = Autodiff<Wgpu>;
+type Backend = crate::backend::TrainBackend;
 use burn::tensor::Distribution;
 use burn::tensor::Tensor;
 use entities::{DynamicBatch, DynamicTensor, GraphModel, train_simple};
@@ -20,6 +18,7 @@ use zero_cost_proxies::{ZeroCostConfig, ZeroCostMetrics};
 use crate::dtos::TrainingProfiler;
 
 pub mod data_loader;
+pub mod backend;
 pub mod dtos;
 pub mod entities;
 pub mod zero_cost_proxies;
@@ -208,8 +207,8 @@ async fn pick_folder() -> Result<String, String> {
 
 #[tauri::command]
 async fn test_neural_net_training(genome_str: String) -> Result<(), String> {
-    type Backend = Autodiff<Wgpu>;
-    let device = WgpuDevice::default();
+    type Backend = crate::backend::TrainBackend;
+    let device = crate::backend::create_device();
 
     println!("Building model from genome...");
     let model = GraphModel::<Backend>::build(&genome_str, &device, None, None);
@@ -288,8 +287,8 @@ async fn test_train_on_image_folder(genome_str: String) -> Result<(), String> {
         None => return Err("Folder picking cancelled".to_string()),
     };
 
-    type Backend = Autodiff<Wgpu>;
-    let device = WgpuDevice::default();
+    type Backend = crate::backend::TrainBackend;
+    let device = crate::backend::create_device();
 
     println!("Building model from genome...");
     let model = GraphModel::<Backend>::build(&genome_str, &device, None, None);
@@ -440,12 +439,131 @@ async fn test_train_on_image_folder(genome_str: String) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub struct EvaluationResult {
     pub genome_id: String,
     pub loss: f32,
     pub accuracy: f32,
     pub profiler: Option<TrainingProfiler>,
+}
+
+async fn run_worker_job(
+    app_handle: tauri::AppHandle,
+    genome_index: usize,
+    request: crate::dtos::WorkerTrainRequest,
+) -> Result<EvaluationResult, String> {
+    use tauri::Emitter;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::process::Command;
+
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("Failed to locate current executable for worker spawn: {}", e))?;
+
+    let mut child = Command::new(current_exe)
+        .arg("--train-worker")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn train worker process: {}", e))?;
+
+    let request_json = serde_json::to_string(&request)
+        .map_err(|e| format!("Failed to serialize worker request: {}", e))?;
+
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| "Worker stdin is unavailable".to_string())?;
+        stdin
+            .write_all(request_json.as_bytes())
+            .await
+            .map_err(|e| format!("Failed writing worker request payload: {}", e))?;
+        stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|e| format!("Failed writing worker request newline: {}", e))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| format!("Failed flushing worker stdin: {}", e))?;
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+        let job_id = request.job_id.clone();
+        tokio::spawn(async move {
+            let mut err_reader = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = err_reader.next_line().await {
+                if !line.trim().is_empty() {
+                    eprintln!("[worker-stderr idx={} job={}] {}", genome_index, job_id, line);
+                }
+            }
+        });
+    }
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Worker stdout is unavailable".to_string())?;
+    let mut reader = BufReader::new(stdout).lines();
+
+    let mut final_result: Option<crate::dtos::WorkerTrainResult> = None;
+    while let Some(line) = reader
+        .next_line()
+        .await
+        .map_err(|e| format!("Failed reading worker stdout line: {}", e))?
+    {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        if let Ok(progress) = serde_json::from_str::<crate::dtos::WorkerTrainProgress>(&line) {
+            let _ = app_handle.emit(
+                "evaluating-batch-metrics",
+                crate::entities::BatchMetrics {
+                    genome_index,
+                    epoch: progress.epoch,
+                    batch: progress.batch,
+                    total_batches: progress.total_batches,
+                    step: progress.step,
+                    total_steps: progress.total_steps,
+                    elapsed_train_ms: progress.gpu_active_ms,
+                    queue_wait_ms: progress.queue_wait_ms,
+                    gpu_active_ms: progress.gpu_active_ms,
+                    step_time_ms: progress.step_time_ms,
+                    loss: 999.0,
+                    accuracy: 0.0,
+                },
+            );
+            continue;
+        }
+
+        if let Ok(result) = serde_json::from_str::<crate::dtos::WorkerTrainResult>(&line) {
+            final_result = Some(result);
+            break;
+        }
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("Failed waiting for worker process: {}", e))?;
+    if !status.success() {
+        return Err(format!("Worker exited with non-success status: {}", status));
+    }
+
+    let result = final_result.ok_or_else(|| "Worker produced no result payload".to_string())?;
+    if let Some(err) = result.error {
+        return Err(format!("Worker job failed: {}", err));
+    }
+
+    Ok(EvaluationResult {
+        genome_id: result.genome_id,
+        loss: result.loss,
+        accuracy: result.accuracy,
+        profiler: result.profiler,
+    })
 }
 
 #[tauri::command]
@@ -462,6 +580,9 @@ async fn evaluate_population(
     genome_ids: Option<Vec<String>>,
     source_generation: Option<u32>,
     profiling: Option<crate::profiler::ProfilingConfig>,
+    max_parallel_jobs: Option<usize>,
+    execution_mode: Option<String>,
+    memory_safety_margin_mb: Option<u64>,
 ) -> Result<Vec<EvaluationResult>, String> {
     if EVALUATION_ACTIVE
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -483,13 +604,35 @@ async fn evaluate_population(
         dataset_profile
     );
 
+    let requested_parallel_jobs = max_parallel_jobs.unwrap_or(1).max(1);
+    let requested_execution_mode = execution_mode.unwrap_or_else(|| "sequential".to_string());
+    let configured_safety_margin_mb = memory_safety_margin_mb.unwrap_or(128);
+
+    eprintln!(
+        ">>> Evaluation config: backend='{}', mode='{}', requested_parallel_jobs={}, safety_margin_mb={}",
+        crate::backend::backend_name(),
+        requested_execution_mode,
+        requested_parallel_jobs,
+        configured_safety_margin_mb
+    );
+
+    let parallel_requested = requested_parallel_jobs > 1 && requested_execution_mode != "sequential";
+    if parallel_requested {
+        eprintln!(
+            ">>> Parallel evaluation requested: mode='{}', max_parallel_jobs={}, safety_margin_mb={}",
+            requested_execution_mode,
+            requested_parallel_jobs,
+            configured_safety_margin_mb
+        );
+    }
+
     // 1. Capture the current session counter IMMEDIATELY.
     // Each evaluate_population call captures a snapshot; if the current value
     // differs from the snapshot (via stop_evolution), we abort.
     let session_snapshot = EVOLUTION_SESSION.load(Ordering::SeqCst);
 
-    type Backend = Autodiff<Wgpu>;
-    let device = WgpuDevice::default();
+    type Backend = crate::backend::TrainBackend;
+    let device = crate::backend::create_device();
     println!(">>> Wgpu device initialized (default)");
     let mut results = Vec::new();
 
@@ -866,374 +1009,619 @@ async fn evaluate_population(
     };
 
     // 5. Evaluation Loop over each Genome
+    const MAX_RETRIES: usize = 3;
+    const RANDOM_CHANCE_THRESHOLD: f32 = 55.0;
+    let evaluation_started_at = std::time::Instant::now();
+    let selected_memory_mode = profiling
+        .as_ref()
+        .and_then(|cfg| cfg.memory_mode)
+        .unwrap_or(crate::profiler::MemoryMode::Hybrid);
 
-    for (i, genome_str) in genomes.iter().enumerate() {
-        let genome_id = genome_ids
-            .as_ref()
-            .and_then(|ids| ids.get(i))
-            .cloned()
-            .unwrap_or_else(|| format!("genome_{}", i));
+    let total_genomes = genomes.len();
+    let evaluate_one_genome = |i: usize, genome_str: String, genome_id: String| {
+        let app_handle = app_handle.clone();
+        let device = device.clone();
+        let dataset_profile = dataset_profile.clone();
+        let input_overrides = input_overrides.clone();
+        let output_overrides = output_overrides.clone();
+        let train_batches = train_batches.clone();
+        let val_batches = val_batches.clone();
+        let test_batches = test_batches.clone();
+        let per_genome_epochs = per_genome_epochs.clone();
+        let requested_execution_mode = requested_execution_mode.clone();
+        let requested_parallel_jobs = requested_parallel_jobs;
+        let queued_at_ms = evaluation_started_at.elapsed().as_millis() as u64;
 
-        // Check cancellation between genomes
-        if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
-            println!(">>> Evolution cancelled. Aborting remaining genomes.");
-            break;
-        }
+        async move {
+            let queue_wait_ms = evaluation_started_at
+                .elapsed()
+                .as_millis()
+                .saturating_sub(queued_at_ms as u128) as u64;
 
-        // Emit current genome index to the frontend for UI synchronization
-        app_handle.emit("evaluating-genome", i).unwrap_or_else(|e| {
-            eprintln!("Failed to emit evaluating-genome event: {}", e);
-        });
+            // Check cancellation between genomes
+            if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                return Ok((
+                    i,
+                    EvaluationResult {
+                        genome_id,
+                        loss: 999.0,
+                        accuracy: 0.0,
+                        profiler: None,
+                    },
+                ));
+            }
 
-        eprintln!(
-            "\n===========================================================\nEvaluating Genome {}/{} (ID: genome_{})\n===========================================================",
-            i + 1,
-            genomes.len(),
-            i
-        );
-
-        // Compute a cache key from genome content + all training params
-        let cache_key = {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            let epochs = *per_genome_epochs.get(i).unwrap_or(&0) as usize;
-            genome_str.hash(&mut hasher);
-            dataset_profile.hash(&mut hasher);
-            batch_size.hash(&mut hasher);
-            epochs.hash(&mut hasher);
-            dataset_percent.hash(&mut hasher);
-            train_split.hash(&mut hasher);
-            val_split.hash(&mut hasher);
-            test_split.hash(&mut hasher);
-            hasher.finish()
-        };
-
-        // Check cache for identical genome + training params
-        if let Some(&(cached_loss, cached_acc)) = GENOME_EVAL_CACHE.lock().unwrap().get(&cache_key)
-        {
-            eprintln!(
-                ">>> CACHE HIT for Genome {} (hash={:#x}): loss={}, acc={}",
-                i, cache_key, cached_loss, cached_acc
-            );
-            results.push(EvaluationResult {
-                genome_id: genome_id.clone(),
-                loss: cached_loss,
-                accuracy: cached_acc,
-                profiler: None,
+            // Emit current genome index to the frontend for UI synchronization
+            app_handle.emit("evaluating-genome", i).unwrap_or_else(|e| {
+                eprintln!("Failed to emit evaluating-genome event: {}", e);
             });
 
-            // Emit start + result events so the frontend updates progressively
-            let _ = app_handle.emit("evaluating-genome-start", i);
-            #[derive(serde::Serialize, Clone)]
-            struct CachedResult {
-                index: usize,
-                loss: f32,
-                accuracy: f32,
-            }
-            let _ = app_handle.emit(
-                "evaluating-genome-result",
-                CachedResult {
-                    index: i,
-                    loss: cached_loss,
-                    accuracy: cached_acc,
-                },
+            eprintln!(
+                "\n===========================================================\nEvaluating Genome {}/{} (ID: genome_{})\n===========================================================",
+                i + 1,
+                total_genomes,
+                i
+            );
+            eprintln!(
+                ">>> Genome {} queue wait: {} ms (mode='{}', requested_workers={})",
+                i,
+                queue_wait_ms,
+                requested_execution_mode,
+                requested_parallel_jobs
             );
 
-            autosave_hidden_archive(&genome_id, genome_str, cached_loss, cached_acc, None);
-            continue;
-        }
+            // Compute a cache key from genome content + all training params
+            let cache_key = {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                let epochs = *per_genome_epochs.get(i).unwrap_or(&0) as usize;
+                genome_str.hash(&mut hasher);
+                dataset_profile.hash(&mut hasher);
+                batch_size.hash(&mut hasher);
+                epochs.hash(&mut hasher);
+                dataset_percent.hash(&mut hasher);
+                train_split.hash(&mut hasher);
+                val_split.hash(&mut hasher);
+                test_split.hash(&mut hasher);
+                hasher.finish()
+            };
 
-        eprintln!("Genome JSON:\n{}", genome_str);
+            // Check cache for identical genome + training params
+            if let Some(&(cached_loss, cached_acc)) = GENOME_EVAL_CACHE.lock().unwrap().get(&cache_key)
+            {
+                eprintln!(
+                    ">>> CACHE HIT for Genome {} (hash={:#x}): loss={}, acc={}",
+                    i, cache_key, cached_loss, cached_acc
+                );
 
-        match std::panic::catch_unwind(|| {
-            crate::entities::GraphModel::<Backend>::build(
-                genome_str,
-                &device,
-                Some(&input_overrides),
-                Some(&output_overrides),
-            )
-        }) {
-            Ok(_initial_model) => {
-                // Retry loop: if accuracy is near random chance, rebuild with fresh weights
-                const MAX_RETRIES: usize = 3;
-                const RANDOM_CHANCE_THRESHOLD: f32 = 55.0; // Below this = likely bad init
+                let _ = app_handle.emit("evaluating-genome-start", i);
+                #[derive(serde::Serialize, Clone)]
+                struct CachedResult {
+                    index: usize,
+                    loss: f32,
+                    accuracy: f32,
+                }
+                let _ = app_handle.emit(
+                    "evaluating-genome-result",
+                    CachedResult {
+                        index: i,
+                        loss: cached_loss,
+                        accuracy: cached_acc,
+                    },
+                );
 
-                let mut best_loss = 999.0_f32;
-                let mut best_acc = 0.0_f32;
-                let mut best_profiler: Option<TrainingProfiler> = None;
-                let mut best_model: Option<GraphModel<Backend>> = None;
+                autosave_hidden_archive(&genome_id, &genome_str, cached_loss, cached_acc, None);
 
-                for attempt in 0..MAX_RETRIES {
-                    // Check cancellation
-                    if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
-                        break;
-                    }
+                return Ok((
+                    i,
+                    EvaluationResult {
+                        genome_id,
+                        loss: cached_loss,
+                        accuracy: cached_acc,
+                        profiler: None,
+                    },
+                ));
+            }
 
-                    // Rebuild model each attempt (fresh random weights)
-                    let model = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        crate::entities::GraphModel::<Backend>::build(
-                            genome_str,
-                            &device,
-                            Some(&input_overrides),
-                            Some(&output_overrides),
-                        )
-                    })) {
-                        Ok(m) => m,
-                        Err(_) => {
+            eprintln!("Genome JSON:\n{}", genome_str);
+
+            match std::panic::catch_unwind(|| {
+                crate::entities::GraphModel::<Backend>::build(
+                    &genome_str,
+                    &device,
+                    Some(&input_overrides),
+                    Some(&output_overrides),
+                )
+            }) {
+                Ok(_initial_model) => {
+                    let mut best_loss = 999.0_f32;
+                    let mut best_acc = 0.0_f32;
+                    let mut best_profiler: Option<TrainingProfiler> = None;
+                    let mut best_model: Option<GraphModel<Backend>> = None;
+
+                    for attempt in 0..MAX_RETRIES {
+                        if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                            break;
+                        }
+
+                        let model = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            crate::entities::GraphModel::<Backend>::build(
+                                &genome_str,
+                                &device,
+                                Some(&input_overrides),
+                                Some(&output_overrides),
+                            )
+                        })) {
+                            Ok(m) => m,
+                            Err(_) => {
+                                eprintln!(
+                                    ">>> Genome {} attempt {} panicked while rebuilding model. Skipping attempt.",
+                                    i,
+                                    attempt + 1
+                                );
+                                continue;
+                            }
+                        };
+
+                        let _ = app_handle.emit("evaluating-genome-start", i);
+
+                        if attempt > 0 {
                             eprintln!(
-                                ">>> Genome {} attempt {} panicked while rebuilding model. Skipping attempt.",
+                                ">>> RETRY {}/{} for Genome {} (previous acc={:.2}%, threshold={:.0}%)",
+                                attempt + 1,
+                                MAX_RETRIES,
                                 i,
-                                attempt + 1
+                                best_acc,
+                                RANDOM_CHANCE_THRESHOLD
                             );
-                            continue;
                         }
-                    };
 
-                    // Let frontend know we are starting to evaluate a genome (so it clears live charts)
-                    let _ = app_handle.emit("evaluating-genome-start", i);
+                        let epochs = *per_genome_epochs.get(i).unwrap_or(&0) as usize;
+                        let app_handle_clone = app_handle.clone();
+                        let train_batches_local = train_batches.clone();
+                        let val_batches_local = val_batches.clone();
+                        let test_batches_local = test_batches.clone();
 
-                    if attempt > 0 {
-                        eprintln!(
-                            ">>> RETRY {}/{} for Genome {} (previous acc={:.2}%, threshold={:.0}%)",
-                            attempt + 1,
-                            MAX_RETRIES,
-                            i,
-                            best_acc,
-                            RANDOM_CHANCE_THRESHOLD
-                        );
-                    }
+                        let training_task = tokio::task::spawn_blocking(move || {
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                let mut model_local = model;
+                                let mut profiler = crate::profiler::ProfilerCollector::new();
+                                profiler.set_memory_mode(selected_memory_mode);
+                                profiler.set_queue_wait_ms(queue_wait_ms);
 
-                    // Get individual epochs for this genome
-                    let epochs = *per_genome_epochs.get(i).unwrap_or(&0) as usize;
+                                if epochs > 0 {
+                                    crate::entities::run_eval_pass(
+                                        &app_handle_clone,
+                                        i,
+                                        &mut model_local,
+                                        &train_batches_local,
+                                        epochs,
+                                        0.001,
+                                        is_classification,
+                                        &EVOLUTION_SESSION,
+                                        session_snapshot,
+                                        queue_wait_ms,
+                                        Some(&mut profiler),
+                                    );
+                                } else {
+                                    println!(">>> Genome {}: Skipping training (0 epochs requested)", i);
+                                }
 
-                    let app_handle_clone = app_handle.clone();
-                    let train_batches_local = train_batches.clone();
-                    let val_batches_local = val_batches.clone();
-                    let test_batches_local = test_batches.clone();
-                    let memory_mode = profiling
-                        .as_ref()
-                        .and_then(|cfg| cfg.memory_mode)
-                        .unwrap_or(crate::profiler::MemoryMode::Hybrid);
+                                if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                                    println!(
+                                        ">>> Genome {} cancelled right after training. Skipping validation/test inside worker.",
+                                        i
+                                    );
+                                    return (999.0, 0.0, profiler.finalize(), model_local);
+                                }
 
-                    let training_task = tokio::task::spawn_blocking(move || {
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            let mut model_local = model;
-                            let mut profiler = crate::profiler::ProfilerCollector::new();
-                            profiler.set_memory_mode(memory_mode);
+                                let (val_loss, val_acc) = if !val_batches_local.is_empty() {
+                                    crate::entities::run_validation_pass(
+                                        &model_local,
+                                        &val_batches_local,
+                                        "Validation",
+                                        is_classification,
+                                        Some(&mut profiler),
+                                    )
+                                } else {
+                                    (0.0, 0.0)
+                                };
 
-                            if epochs > 0 {
-                                crate::entities::run_eval_pass(
-                                    &app_handle_clone,
-                                    &mut model_local,
-                                    &train_batches_local,
-                                    epochs,
-                                    0.001,
-                                    is_classification,
-                                    &EVOLUTION_SESSION,
-                                    session_snapshot,
-                                    Some(&mut profiler),
-                                );
-                            } else {
-                                println!(">>> Genome {}: Skipping training (0 epochs requested)", i);
+                                if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                                    println!(
+                                        ">>> Genome {} cancelled after validation. Skipping test pass inside worker.",
+                                        i
+                                    );
+                                    return (999.0, 0.0, profiler.finalize(), model_local);
+                                }
+
+                                let (loss, acc) = if !test_batches_local.is_empty() {
+                                    crate::entities::run_validation_pass(
+                                        &model_local,
+                                        &test_batches_local,
+                                        "Test",
+                                        is_classification,
+                                        Some(&mut profiler),
+                                    )
+                                } else if !val_batches_local.is_empty() {
+                                    (val_loss, val_acc)
+                                } else {
+                                    crate::entities::run_validation_pass(
+                                        &model_local,
+                                        &train_batches_local,
+                                        "Train",
+                                        is_classification,
+                                        None,
+                                    )
+                                };
+
+                                (loss, acc, profiler.finalize(), model_local)
+                            }))
+                        })
+                        .await;
+
+                        let (final_loss, final_acc, profiler_result, trained_model) = match training_task {
+                            Ok(Ok(tuple)) => tuple,
+                            Ok(Err(_)) => {
+                                return Err(format!(
+                                    "Genome {} attempt {} panicked during training/validation. Aborting evaluate_population to avoid corrupted WGPU state.",
+                                    i,
+                                    attempt + 1
+                                ));
                             }
-
-                            if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
-                                println!(
-                                    ">>> Genome {} cancelled right after training. Skipping validation/test inside worker.",
-                                    i
+                            Err(e) => {
+                                eprintln!(
+                                    ">>> Genome {} attempt {} failed to join training task: {}",
+                                    i,
+                                    attempt + 1,
+                                    e
                                 );
-                                return (999.0, 0.0, profiler.finalize(), model_local);
+                                continue;
                             }
+                        };
 
-                            let (val_loss, val_acc) = if !val_batches_local.is_empty() {
-                                crate::entities::run_validation_pass(
-                                    &model_local,
-                                    &val_batches_local,
-                                    "Validation",
-                                    is_classification,
-                                    Some(&mut profiler),
-                                )
-                            } else {
-                                (0.0, 0.0)
-                            };
-
-                            if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
-                                println!(
-                                    ">>> Genome {} cancelled after validation. Skipping test pass inside worker.",
-                                    i
-                                );
-                                return (999.0, 0.0, profiler.finalize(), model_local);
-                            }
-
-                            let (loss, acc) = if !test_batches_local.is_empty() {
-                                crate::entities::run_validation_pass(
-                                    &model_local,
-                                    &test_batches_local,
-                                    "Test",
-                                    is_classification,
-                                    Some(&mut profiler),
-                                )
-                            } else if !val_batches_local.is_empty() {
-                                (val_loss, val_acc)
-                            } else {
-                                crate::entities::run_validation_pass(
-                                    &model_local,
-                                    &train_batches_local,
-                                    "Train",
-                                    is_classification,
-                                    None,
-                                )
-                            };
-
-                            (loss, acc, profiler.finalize(), model_local)
-                        }))
-                    })
-                    .await;
-
-                    let (final_loss, final_acc, profiler_result, trained_model) = match training_task {
-                        Ok(Ok(tuple)) => tuple,
-                        Ok(Err(_)) => {
-                            return Err(format!(
-                                "Genome {} attempt {} panicked during training/validation. Aborting evaluate_population to avoid corrupted WGPU state.",
-                                i,
-                                attempt + 1
-                            ));
-                        }
-                        Err(e) => {
+                        if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
                             eprintln!(
-                                ">>> Genome {} attempt {} failed to join training task: {}",
+                                ">>> Cancelled after training for Genome {}. Skipping val/test.",
+                                i
+                            );
+                            break;
+                        }
+
+                        let attempt_is_better = attempt == 0 || final_acc > best_acc;
+                        if attempt_is_better {
+                            best_loss = final_loss;
+                            best_acc = final_acc;
+                            best_profiler = Some(profiler_result);
+                            best_model = Some(trained_model);
+                        }
+
+                        if final_acc > RANDOM_CHANCE_THRESHOLD {
+                            break;
+                        }
+
+                        if attempt < MAX_RETRIES - 1 {
+                            eprintln!(
+                                ">>> Genome {} attempt {} got acc={:.2}% (below {:.0}% threshold). Will retry with fresh weights.",
                                 i,
                                 attempt + 1,
-                                e
+                                final_acc,
+                                RANDOM_CHANCE_THRESHOLD
                             );
-                            continue;
                         }
-                    };
-
-                    // Check cancellation after training
-                    if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
-                        eprintln!(
-                            ">>> Cancelled after training for Genome {}. Skipping val/test.",
-                            i
-                        );
-                        break;
                     }
 
-                    // Keep the best attempt
-                    let attempt_is_better = attempt == 0 || final_acc > best_acc;
-                    if attempt_is_better {
-                        best_loss = final_loss;
-                        best_acc = final_acc;
-                        best_profiler = Some(profiler_result);
-                        best_model = Some(trained_model);
+                    if let Some(model) = best_model.as_ref() {
+                        let cache_dir = get_weight_cache_dir();
+                        if let Err(e) = fs::create_dir_all(&cache_dir).map_err(|err| err.to_string()) {
+                            eprintln!("[weight_io] failed to ensure cache dir: {}", e);
+                        } else if let Err(e) = crate::weight_io::save_weights(&genome_id, Some(model), &cache_dir) {
+                            eprintln!(
+                                "[weight_io] failed to checkpoint weights for genome '{}': {}",
+                                genome_id, e
+                            );
+                        }
                     }
 
-                    // If accuracy is above random chance, accept and stop retrying
-                    if final_acc > RANDOM_CHANCE_THRESHOLD {
-                        break;
+                    #[derive(serde::Serialize, Clone)]
+                    struct GenomeResult {
+                        index: usize,
+                        loss: f32,
+                        accuracy: f32,
+                    }
+                    let _ = app_handle.emit(
+                        "evaluating-genome-result",
+                        GenomeResult {
+                            index: i,
+                            loss: best_loss,
+                            accuracy: best_acc,
+                        },
+                    );
+
+                    autosave_hidden_archive(
+                        &genome_id,
+                        &genome_str,
+                        best_loss,
+                        best_acc,
+                        best_profiler.clone(),
+                    );
+
+                    if best_acc > RANDOM_CHANCE_THRESHOLD {
+                        GENOME_EVAL_CACHE
+                            .lock()
+                            .unwrap()
+                            .insert(cache_key, (best_loss, best_acc));
                     }
 
-                    if attempt < MAX_RETRIES - 1 {
-                        eprintln!(
-                            ">>> Genome {} attempt {} got acc={:.2}% (below {:.0}% threshold). Will retry with fresh weights.",
-                            i,
-                            attempt + 1,
-                            final_acc,
-                            RANDOM_CHANCE_THRESHOLD
-                        );
-                    }
+                    Ok((
+                        i,
+                        EvaluationResult {
+                            genome_id,
+                            loss: best_loss,
+                            accuracy: best_acc,
+                            profiler: best_profiler,
+                        },
+                    ))
                 }
+                Err(err) => {
+                    let msg = if let Some(s) = err.downcast_ref::<&str>() {
+                        *s
+                    } else if let Some(s) = err.downcast_ref::<String>() {
+                        s.as_str()
+                    } else {
+                        "Unknown panic"
+                    };
+                    println!(
+                        ">>> ABORTED: Genome {} failed to compile cleanly: {}",
+                        i, msg
+                    );
 
-                // Check cancellation before pushing result
+                    #[derive(serde::Serialize, Clone)]
+                    struct GenomeResult2 {
+                        index: usize,
+                        loss: f32,
+                        accuracy: f32,
+                    }
+                    let _ = app_handle.emit(
+                        "evaluating-genome-result",
+                        GenomeResult2 {
+                            index: i,
+                            loss: 999.0,
+                            accuracy: 0.0,
+                        },
+                    );
+
+                    Ok((
+                        i,
+                        EvaluationResult {
+                            genome_id,
+                            loss: 999.0,
+                            accuracy: 0.0,
+                            profiler: None,
+                        },
+                    ))
+                }
+            }
+        }
+    };
+
+    if parallel_requested {
+        let effective_parallel_jobs = requested_parallel_jobs.clamp(1, genomes.len().max(1));
+        eprintln!(
+            ">>> Running limited parallel evaluation with {} concurrent jobs (effective_gpu_workers={})",
+            effective_parallel_jobs,
+            effective_parallel_jobs
+        );
+
+        let mut indexed_results: Vec<Option<EvaluationResult>> = vec![None; genomes.len()];
+
+        let process_worker_mode = requested_execution_mode == "parallel-safe-limited";
+        let mut fallback_to_inprocess = false;
+
+        if process_worker_mode && effective_parallel_jobs > 1 {
+            eprintln!(
+                ">>> Using process worker-pool mode (K={})",
+                effective_parallel_jobs
+            );
+            eprintln!(
+                ">>> Worker progress note: per-batch progress events are emitted only when workers output WorkerTrainProgress JSON lines."
+            );
+
+            let run_id = format!(
+                "run-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0)
+            );
+
+            let mut join_set: tokio::task::JoinSet<(usize, Result<EvaluationResult, String>)> =
+                tokio::task::JoinSet::new();
+            let mut next_index = 0usize;
+            let mut in_flight = 0usize;
+            let mut worker_failures = 0usize;
+
+            let spawn_next = |idx: usize,
+                              join_set: &mut tokio::task::JoinSet<(usize, Result<EvaluationResult, String>)>| {
+                let app = app_handle.clone();
+                let genome_id = genome_ids
+                    .as_ref()
+                    .and_then(|ids| ids.get(idx))
+                    .cloned()
+                    .unwrap_or_else(|| format!("genome_{}", idx));
+                let request = crate::dtos::WorkerTrainRequest {
+                    job_id: format!("job-{}", idx),
+                    run_id: run_id.clone(),
+                    genome_id: genome_id.clone(),
+                    genome_json: genomes[idx].clone(),
+                    dataset_profile: dataset_profile.clone(),
+                    batch_size,
+                    epochs: *per_genome_epochs.get(idx).unwrap_or(&0),
+                    dataset_percent,
+                    train_split,
+                    val_split,
+                    test_split,
+                    queue_entered_ms: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
+                };
+
+                join_set.spawn(async move { (idx, run_worker_job(app, idx, request).await) });
+            };
+
+            while next_index < genomes.len() && in_flight < effective_parallel_jobs {
+                spawn_next(next_index, &mut join_set);
+                next_index += 1;
+                in_flight += 1;
+            }
+
+            while in_flight > 0 {
                 if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                    eprintln!(">>> Cancellation requested. Aborting worker pool and draining queue.");
+                    join_set.abort_all();
+                    fallback_to_inprocess = true;
                     break;
                 }
 
-                if let Some(model) = best_model.as_ref() {
-                    let cache_dir = get_weight_cache_dir();
-                    if let Err(e) = fs::create_dir_all(&cache_dir).map_err(|err| err.to_string()) {
-                        eprintln!("[weight_io] failed to ensure cache dir: {}", e);
-                    } else if let Err(e) = crate::weight_io::save_weights(&genome_id, Some(model), &cache_dir) {
-                        eprintln!(
-                            "[weight_io] failed to checkpoint weights for genome '{}': {}",
-                            genome_id, e
+                let joined = match join_set.join_next().await {
+                    Some(value) => value,
+                    None => break,
+                };
+                in_flight = in_flight.saturating_sub(1);
+
+                match joined {
+                    Ok((idx, Ok(result))) => {
+                        #[derive(serde::Serialize, Clone)]
+                        struct GenomeResult {
+                            index: usize,
+                            loss: f32,
+                            accuracy: f32,
+                        }
+                        let _ = app_handle.emit(
+                            "evaluating-genome-result",
+                            GenomeResult {
+                                index: idx,
+                                loss: result.loss,
+                                accuracy: result.accuracy,
+                            },
                         );
+                        indexed_results[idx] = Some(result);
+                    }
+                    Ok((idx, Err(err))) => {
+                        worker_failures = worker_failures.saturating_add(1);
+                        eprintln!(
+                            ">>> Worker failed for genome {} (failure {}): {}",
+                            idx, worker_failures, err
+                        );
+
+                        let genome_id = genome_ids
+                            .as_ref()
+                            .and_then(|ids| ids.get(idx))
+                            .cloned()
+                            .unwrap_or_else(|| format!("genome_{}", idx));
+
+                        let retry = evaluate_one_genome(idx, genomes[idx].clone(), genome_id).await;
+                        match retry {
+                            Ok((resolved_idx, result)) => {
+                                indexed_results[resolved_idx] = Some(result);
+                            }
+                            Err(retry_err) => {
+                                eprintln!(
+                                    ">>> In-process retry failed for genome {}: {}",
+                                    idx, retry_err
+                                );
+                                fallback_to_inprocess = true;
+                            }
+                        }
+
+                        if worker_failures >= 2 {
+                            eprintln!(
+                                ">>> Multiple worker failures detected. Switching remaining queue to in-process evaluation."
+                            );
+                            fallback_to_inprocess = true;
+                        }
+                    }
+                    Err(join_err) => {
+                        worker_failures = worker_failures.saturating_add(1);
+                        eprintln!(">>> Worker task join failed: {}", join_err);
+                        fallback_to_inprocess = true;
                     }
                 }
 
-                results.push(EvaluationResult {
-                    genome_id: genome_id.clone(),
-                    loss: best_loss,
-                    accuracy: best_acc,
-                    profiler: best_profiler.clone(),
-                });
-
-                // Notify frontend of this genome's result for progressive UI
-                #[derive(serde::Serialize, Clone)]
-                struct GenomeResult {
-                    index: usize,
-                    loss: f32,
-                    accuracy: f32,
+                if fallback_to_inprocess {
+                    join_set.abort_all();
+                    break;
                 }
-                let _ = app_handle.emit(
-                    "evaluating-genome-result",
-                    GenomeResult {
-                        index: i,
-                        loss: best_loss,
-                        accuracy: best_acc,
-                    },
-                );
 
-                autosave_hidden_archive(
-                    &genome_id,
-                    genome_str,
-                    best_loss,
-                    best_acc,
-                    best_profiler,
-                );
-
-                // Only cache results above random chance threshold
-                if best_acc > RANDOM_CHANCE_THRESHOLD {
-                    GENOME_EVAL_CACHE
-                        .lock()
-                        .unwrap()
-                        .insert(cache_key, (best_loss, best_acc));
+                while next_index < genomes.len() && in_flight < effective_parallel_jobs {
+                    spawn_next(next_index, &mut join_set);
+                    next_index += 1;
+                    in_flight += 1;
                 }
             }
-            Err(err) => {
-                let msg = if let Some(s) = err.downcast_ref::<&str>() {
-                    *s
-                } else if let Some(s) = err.downcast_ref::<String>() {
-                    s.as_str()
-                } else {
-                    "Unknown panic"
-                };
-                println!(
-                    ">>> ABORTED: Genome {} failed to compile cleanly: {}",
-                    i, msg
-                );
-                results.push(EvaluationResult {
-                    genome_id: genome_id,
-                    loss: 999.0,
-                    accuracy: 0.0,
-                    profiler: None,
-                });
+        } else {
+            fallback_to_inprocess = true;
+        }
 
-                // Notify frontend of this genome's failure result
-                #[derive(serde::Serialize, Clone)]
-                struct GenomeResult2 {
-                    index: usize,
-                    loss: f32,
-                    accuracy: f32,
+        if fallback_to_inprocess {
+            let reduced_parallel_jobs = effective_parallel_jobs.saturating_sub(1).max(1);
+            eprintln!(
+                ">>> Fallback policy active: evaluating remaining genomes in-process with parallelism {}",
+                reduced_parallel_jobs
+            );
+
+            let mut chunk_start = 0usize;
+            while chunk_start < genomes.len() {
+                if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                    println!(">>> Evolution cancelled. Aborting remaining genomes.");
+                    break;
                 }
-                let _ = app_handle.emit(
-                    "evaluating-genome-result",
-                    GenomeResult2 {
-                        index: i,
-                        loss: 999.0,
-                        accuracy: 0.0,
-                    },
-                );
+
+                let chunk_end = (chunk_start + reduced_parallel_jobs).min(genomes.len());
+                let mut futures = Vec::new();
+
+                for i in chunk_start..chunk_end {
+                    if indexed_results[i].is_some() {
+                        continue;
+                    }
+                    let genome_id = genome_ids
+                        .as_ref()
+                        .and_then(|ids| ids.get(i))
+                        .cloned()
+                        .unwrap_or_else(|| format!("genome_{}", i));
+                    futures.push(evaluate_one_genome(i, genomes[i].clone(), genome_id));
+                }
+
+                let outcomes = futures::future::join_all(futures).await;
+                for outcome in outcomes {
+                    let (idx, result) = outcome?;
+                    indexed_results[idx] = Some(result);
+                }
+
+                chunk_start = chunk_end;
             }
+        }
+
+        for result in indexed_results.into_iter().flatten() {
+            results.push(result);
+        }
+    } else {
+        eprintln!(
+            ">>> Running sequential evaluation (effective_gpu_workers=1)"
+        );
+        for i in 0..genomes.len() {
+            if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                println!(">>> Evolution cancelled. Aborting remaining genomes.");
+                break;
+            }
+
+            let genome_id = genome_ids
+                .as_ref()
+                .and_then(|ids| ids.get(i))
+                .cloned()
+                .unwrap_or_else(|| format!("genome_{}", i));
+            let (_, result) = evaluate_one_genome(i, genomes[i].clone(), genome_id).await?;
+            results.push(result);
         }
     }
 
@@ -2414,7 +2802,7 @@ async fn compute_zero_cost_score(
     let result = tokio::task::spawn_blocking(move || -> Result<ZeroCostMetrics, String> {
         let safe_run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             || -> Result<ZeroCostMetrics, String> {
-                let device = WgpuDevice::default();
+                let device = crate::backend::create_device();
                 // Parse config
                 let config: ZeroCostConfig = serde_json::from_str(&config_json)
                     .map_err(|e| format!("Failed to parse config: {}", e))?;
@@ -2715,6 +3103,9 @@ mod hidden_library_tests {
             inference_msec_per_sample: 17.0,
             batch_count: 18,
             early_stop_epoch: Some(2),
+            queue_wait_ms: 0,
+            gpu_active_ms: 21,
+            step_time_ms_ema: 1.2,
         };
 
         let saved = save_hidden_genome(
@@ -2885,7 +3276,7 @@ mod weight_export_command_tests {
 
         let cache_dir = get_weight_cache_dir();
         fs::create_dir_all(&cache_dir).expect("create cache dir");
-        let device = WgpuDevice::default();
+        let device = crate::backend::create_device();
         let genome = [
             r#"{"node":"Input","params":{"output_shape":[4]}}"#,
             r#"{"node":"Dense","params":{"units":3,"activation":"relu","use_bias":true}}"#,
@@ -2936,6 +3327,507 @@ async fn generate_stopping_preview(
     policy: String,
 ) -> Result<stopping_criteria::StoppingPreview, String> {
     stopping_criteria::generate_stopping_preview(&criteria, &policy)
+}
+
+pub fn run_train_worker() {
+    use std::io::{self, BufRead, Write};
+
+    eprintln!(
+        ">>> train-worker started (backend='{}')",
+        crate::backend::backend_name()
+    );
+
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    
+    type Backend = crate::backend::TrainBackend;
+    let device = crate::backend::create_device();
+
+    for line in stdin.lock().lines() {
+        let line = match line {
+            Ok(value) => value,
+            Err(err) => {
+                eprintln!(">>> worker stdin read failed: {}", err);
+                break;
+            }
+        };
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let started = std::time::Instant::now();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let request: crate::dtos::WorkerTrainRequest = match serde_json::from_str(&line) {
+            Ok(req) => req,
+            Err(err) => {
+                let response = crate::dtos::WorkerTrainResult {
+                    job_id: "unknown".to_string(),
+                    genome_id: "unknown".to_string(),
+                    loss: 999.0,
+                    accuracy: 0.0,
+                    profiler: None,
+                    queue_wait_ms: 0,
+                    wall_clock_ms: 0,
+                    error: Some(format!("invalid worker request: {}", err)),
+                };
+                if let Ok(payload) = serde_json::to_string(&response) {
+                    let _ = writeln!(stdout, "{}", payload);
+                    let _ = stdout.flush();
+                }
+                continue;
+            }
+        };
+
+        // Execute training pipeline
+        let result = execute_worker_training(&request, &device);
+
+        let wall_clock_ms = started.elapsed().as_millis() as u64;
+        
+        let response = crate::dtos::WorkerTrainResult {
+            job_id: request.job_id,
+            genome_id: request.genome_id,
+            loss: result.0,
+            accuracy: result.1,
+            profiler: result.2,
+            queue_wait_ms: now_ms.saturating_sub(request.queue_entered_ms),
+            wall_clock_ms,
+            error: result.3,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(payload) => {
+                if writeln!(stdout, "{}", payload).is_err() {
+                    break;
+                }
+                if stdout.flush().is_err() {
+                    break;
+                }
+            }
+            Err(err) => {
+                eprintln!(">>> worker serialize failed: {}", err);
+                break;
+            }
+        }
+    }
+}
+
+fn execute_worker_training(
+    request: &crate::dtos::WorkerTrainRequest,
+    device: &crate::backend::TrainDevice,
+) -> (f32, f32, Option<crate::dtos::TrainingProfiler>, Option<String>) {
+    use std::collections::HashMap;
+    use std::panic::AssertUnwindSafe;
+
+    eprintln!("[worker {}] Starting training for genome {}", request.job_id, request.genome_id);
+
+    type Backend = crate::backend::TrainBackend;
+
+    // 1. Load dataset profile
+    let profiles_json = match crate::data_loader::load_dataset_profiles_sync() {
+        Ok(json) => json,
+        Err(e) => {
+            eprintln!("[worker {}] Failed to load profiles: {}", request.job_id, e);
+            return (999.0, 0.0, None, Some(format!("Failed to load dataset profiles: {}", e)));
+        }
+    };
+
+    let root: crate::dtos::DatasetProfilesRoot = match serde_json::from_str(&profiles_json) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            eprintln!("[worker {}] Failed to parse profiles JSON: {}", request.job_id, e);
+            return (999.0, 0.0, None, Some(format!("Failed to parse dataset profiles: {}", e)));
+        }
+    };
+
+    let profile = match root.state.profiles.into_iter().find(|p| p.id == request.dataset_profile) {
+        Some(p) => p,
+        None => {
+            let msg = format!("Dataset profile '{}' not found", request.dataset_profile);
+            eprintln!("[worker {}] {}", request.job_id, msg);
+            return (999.0, 0.0, None, Some(msg));
+        }
+    };
+
+    let _source_path_str = match profile.source_path.clone() {
+        Some(p) => p,
+        None => {
+            let msg = format!("Profile '{}' has no sourcePath", profile.name);
+            eprintln!("[worker {}] {}", request.job_id, msg);
+            return (999.0, 0.0, None, Some(msg));
+        }
+    };
+
+    // 2. Create DataLoader
+    let loader = match crate::data_loader::DataLoader::new(profile.clone(), None) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[worker {}] DataLoader creation failed: {}", request.job_id, e);
+            return (999.0, 0.0, None, Some(format!("DataLoader creation failed: {}", e)));
+        }
+    };
+
+    // 3. Build dataset split
+    let mut valid_ids = loader.valid_sample_ids.clone();
+    if valid_ids.is_empty() {
+        let msg = format!("No valid samples found");
+        eprintln!("[worker {}] {}", request.job_id, msg);
+        return (999.0, 0.0, None, Some(msg));
+    }
+
+    {
+        use rand::seq::SliceRandom;
+        let mut rng = rand::rng();
+        valid_ids.shuffle(&mut rng);
+    }
+
+    // Apply dataset percent
+    let pct = request.dataset_percent.clamp(1, 100);
+    let use_count = (valid_ids.len() * pct) / 100;
+    let use_count = use_count.max(1);
+    valid_ids.truncate(use_count);
+
+    let total_split = (request.train_split + request.val_split + request.test_split).max(1) as f32;
+    let train_ratio = request.train_split as f32 / total_split;
+    let val_ratio = request.val_split as f32 / total_split;
+
+    let mut train_ids = Vec::new();
+    let mut val_ids = Vec::new();
+    let mut test_ids = Vec::new();
+
+    // Stratification (same as main path)
+    let strat_stream_idx = profile.streams.iter().position(|s| {
+        s.role == "Target" && matches!(s.data_type, crate::dtos::DataType::Categorical)
+    });
+
+    if let Some(s_idx) = strat_stream_idx {
+        let stream_id = &profile.streams[s_idx].id;
+        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+
+        if loader.stream_files.contains_key(stream_id) {
+            for id in &valid_ids {
+                let label = loader.get_class_label(stream_id, id).unwrap_or_else(|| "unknown".to_string());
+                groups.entry(label).or_default().push(id.clone());
+            }
+        }
+
+        for (_, mut members) in groups {
+            {
+                use rand::seq::SliceRandom;
+                members.shuffle(&mut rand::rng());
+            }
+            let n = members.len();
+            let t_count = ((n as f32) * train_ratio).round() as usize;
+            let v_count = ((n as f32) * val_ratio).round() as usize;
+
+            let t_count = t_count.min(n);
+            let v_count = v_count.min(n - t_count);
+
+            train_ids.extend(members.iter().take(t_count).cloned());
+            val_ids.extend(members.iter().skip(t_count).take(v_count).cloned());
+            test_ids.extend(members.iter().skip(t_count + v_count).cloned());
+        }
+
+        {
+            use rand::seq::SliceRandom;
+            let mut local_rng = rand::rng();
+            train_ids.shuffle(&mut local_rng);
+            val_ids.shuffle(&mut local_rng);
+            test_ids.shuffle(&mut local_rng);
+        }
+    } else {
+        let train_count = ((valid_ids.len() as f32) * train_ratio).round() as usize;
+        let val_count = ((valid_ids.len() as f32) * val_ratio).round() as usize;
+
+        let train_count = train_count.min(valid_ids.len());
+        let val_count = val_count.min(valid_ids.len() - train_count);
+
+        train_ids = valid_ids.iter().take(train_count).cloned().collect();
+        val_ids = valid_ids.iter().skip(train_count).take(val_count).cloned().collect();
+        test_ids = valid_ids.iter().skip(train_count + val_count).cloned().collect();
+    }
+
+    eprintln!("[worker {}] Split: {} train, {} val, {} test", request.job_id, train_ids.len(), val_ids.len(), test_ids.len());
+
+    // 4. Get input/output overrides
+    let input_stream_indices: Vec<usize> = profile.streams.iter().enumerate()
+        .filter(|(_, s)| s.role == "Input")
+        .map(|(i, _)| i)
+        .collect();
+    let target_stream_indices: Vec<usize> = profile.streams.iter().enumerate()
+        .filter(|(_, s)| s.role == "Target")
+        .map(|(i, _)| i)
+        .collect();
+
+    if input_stream_indices.is_empty() || target_stream_indices.is_empty() {
+        return (999.0, 0.0, None, Some("No Input/Target streams found".to_string()));
+    }
+
+    let mut input_overrides = Vec::new();
+    for &idx in &input_stream_indices {
+        let stream = &profile.streams[idx];
+        match stream.data_type {
+            crate::dtos::DataType::Image => {
+                let mut h = 64; let mut w = 64; let mut channels = 3;
+                if let Some(prep) = &stream.preprocessing {
+                    if let Some(vision) = &prep.vision {
+                        if vision.resize.len() == 2 {
+                            w = vision.resize[0] as usize;
+                            h = vision.resize[1] as usize;
+                        }
+                        if vision.grayscale { channels = 1; }
+                    }
+                }
+                let external_shape = if stream.tensor_shape.len() == 3 {
+                    stream.tensor_shape.clone()
+                } else {
+                    vec![h, w, channels]
+                };
+                input_overrides.push(normalize_image_shape_to_internal_chw(&external_shape));
+            }
+            crate::dtos::DataType::Vector => {
+                let dim = stream.tensor_shape.get(0).cloned().unwrap_or(1);
+                input_overrides.push(vec![dim]);
+            }
+            crate::dtos::DataType::TemporalSequence => {
+                input_overrides.push(stream.tensor_shape.clone());
+            }
+            _ => input_overrides.push(vec![1]),
+        }
+    }
+
+    let mut output_overrides = Vec::new();
+    let mut is_classification = false;
+    for &idx in &target_stream_indices {
+        let stream = &profile.streams[idx];
+        if let crate::dtos::DataType::Categorical = stream.data_type {
+            is_classification = true;
+            let num_classes = loader.stream_classes.get(&idx).cloned().unwrap_or(1);
+            output_overrides.push(vec![num_classes]);
+        } else {
+            let dim = stream.tensor_shape.get(0).cloned().unwrap_or(1);
+            output_overrides.push(vec![dim]);
+        }
+    }
+
+    // 5. Build batches
+    let mut assemble_batches = |ids: &[String]| -> Result<Vec<crate::entities::DynamicBatch<Backend>>, String> {
+        let mut assembled_batches: Vec<crate::entities::DynamicBatch<Backend>> = Vec::new();
+        for chunk in ids.chunks(request.batch_size) {
+            let mut batch_inputs: Vec<Vec<crate::entities::DynamicTensor<Backend>>> = 
+                vec![Vec::new(); input_stream_indices.len()];
+            let mut batch_targets: Vec<Vec<crate::entities::DynamicTensor<Backend>>> = 
+                vec![Vec::new(); target_stream_indices.len()];
+
+            for id in chunk {
+                let load_result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    loader.load_sample(id, device)
+                }));
+
+                match load_result {
+                    Ok(Ok(sample)) => {
+                        for (i, &stream_idx) in input_stream_indices.iter().enumerate() {
+                            if let Some(t) = sample.stream_tensors.get(&stream_idx) {
+                                batch_inputs[i].push(t.clone());
+                            }
+                        }
+                        for (i, &stream_idx) in target_stream_indices.iter().enumerate() {
+                            if let Some(t) = sample.stream_tensors.get(&stream_idx) {
+                                batch_targets[i].push(t.clone());
+                            }
+                        }
+                    }
+                    Ok(Err(_)) => { /* skip sample */ }
+                    Err(_) => {
+                        return Err("Sample panicked during load".to_string());
+                    }
+                }
+            }
+
+            if batch_inputs.iter().all(|list| !list.is_empty()) && 
+               batch_targets.iter().all(|list| !list.is_empty()) {
+                use crate::entities::concat_dynamic_tensors;
+                let assembled = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    let inputs: Vec<crate::entities::DynamicTensor<Backend>> = batch_inputs
+                        .into_iter()
+                        .map(|tensors| concat_dynamic_tensors::<Backend>(tensors))
+                        .collect();
+                    let targets: Vec<crate::entities::DynamicTensor<Backend>> = batch_targets
+                        .into_iter()
+                        .map(|tensors| concat_dynamic_tensors::<Backend>(tensors))
+                        .collect();
+                    (inputs, targets)
+                }));
+
+                match assembled {
+                    Ok((inputs, targets)) => {
+                        assembled_batches.push(crate::entities::DynamicBatch { inputs, targets });
+                    }
+                    Err(_) => {
+                        return Err("Batch concatenation panicked".to_string());
+                    }
+                }
+            }
+        }
+        Ok(assembled_batches)
+    };
+
+    let train_batches = match assemble_batches(&train_ids) {
+        Ok(b) => b,
+        Err(e) => {
+            return (999.0, 0.0, None, Some(format!("Batch assembly failed: {}", e)));
+        }
+    };
+
+    if train_batches.is_empty() {
+        return (999.0, 0.0, None, Some("No training batches assembled".to_string()));
+    }
+
+    let val_batches = match assemble_batches(&val_ids) {
+        Ok(b) => b,
+        Err(_) => Vec::new(),
+    };
+
+    let test_batches = match assemble_batches(&test_ids) {
+        Ok(b) => b,
+        Err(_) => Vec::new(),
+    };
+
+    // 6. Build model from genome JSON
+    let model = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+        crate::entities::GraphModel::<Backend>::build(
+            &request.genome_json,
+            device,
+            Some(&input_overrides),
+            Some(&output_overrides),
+        )
+    })) {
+        Ok(m) => m,
+        Err(_) => {
+            return (999.0, 0.0, None, Some("Genome compilation failed".to_string()));
+        }
+    };
+
+    // 7. Run evaluation (simplified worker path - no training yet)
+    let mut profiler = crate::profiler::ProfilerCollector::new();
+    let queue_wait_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+        .saturating_sub(request.queue_entered_ms);
+    profiler.set_queue_wait_ms(queue_wait_ms);
+
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let model_local = model;
+        profiler.mark_train_start();
+        profiler.mark_train_end();
+
+        // Validation phase
+        let (val_loss, val_acc) = if !val_batches.is_empty() {
+            profiler.mark_val_start();
+            let mut val_loss_sum = 0.0;
+            let mut val_correct = 0;
+            let mut val_total = 0;
+
+            for batch in &val_batches {
+                let cloned_inputs: Vec<crate::entities::DynamicTensor<Backend>> =
+                    batch.inputs.iter().map(|t| t.clone()).collect();
+                let cloned_targets: Vec<crate::entities::DynamicTensor<Backend>> =
+                    batch.targets.iter().map(|t| t.clone()).collect();
+
+                let predictions = model_local.forward_internal(&cloned_inputs, false, false);
+                let loss = model_local.compute_loss(&predictions, &cloned_targets);
+                let loss_val = loss.into_data().to_vec::<f32>().unwrap_or(vec![0.0])[0];
+                val_loss_sum += loss_val;
+
+                let (correct, count) = crate::entities::compute_accuracy(&predictions, &cloned_targets, is_classification);
+                val_correct += correct;
+                val_total += count;
+
+                profiler.record_inference_samples(count);
+            }
+            profiler.mark_val_end();
+
+            let avg_loss = if !val_batches.is_empty() { val_loss_sum / val_batches.len() as f32 } else { 0.0 };
+            let avg_acc = if val_total > 0 { val_correct as f32 / val_total as f32 } else { 0.0 };
+            (avg_loss, avg_acc)
+        } else {
+            (0.0, 0.0)
+        };
+
+        // Test phase
+        let (loss, acc) = if !test_batches.is_empty() {
+            profiler.mark_test_start();
+            let mut test_loss_sum = 0.0;
+            let mut test_correct = 0;
+            let mut test_total = 0;
+
+            for batch in &test_batches {
+                let cloned_inputs: Vec<crate::entities::DynamicTensor<Backend>> =
+                    batch.inputs.iter().map(|t| t.clone()).collect();
+                let cloned_targets: Vec<crate::entities::DynamicTensor<Backend>> =
+                    batch.targets.iter().map(|t| t.clone()).collect();
+
+                let predictions = model_local.forward_internal(&cloned_inputs, false, false);
+                let loss = model_local.compute_loss(&predictions, &cloned_targets);
+                let loss_val = loss.into_data().to_vec::<f32>().unwrap_or(vec![0.0])[0];
+                test_loss_sum += loss_val;
+
+                let (correct, count) = crate::entities::compute_accuracy(&predictions, &cloned_targets, is_classification);
+                test_correct += correct;
+                test_total += count;
+
+                profiler.record_inference_samples(count);
+            }
+            profiler.mark_test_end();
+
+            let avg_loss = if !test_batches.is_empty() { test_loss_sum / test_batches.len() as f32 } else { 0.0 };
+            let avg_acc = if test_total > 0 { test_correct as f32 / test_total as f32 } else { 0.0 };
+            (avg_loss, avg_acc)
+        } else if !val_batches.is_empty() {
+            (val_loss, val_acc)
+        } else {
+            // Fallback to train loss if no val/test
+            let mut train_loss_sum = 0.0;
+            let mut train_correct = 0;
+            let mut train_total = 0;
+
+            for batch in &train_batches {
+                let cloned_inputs: Vec<crate::entities::DynamicTensor<Backend>> =
+                    batch.inputs.iter().map(|t| t.clone()).collect();
+                let cloned_targets: Vec<crate::entities::DynamicTensor<Backend>> =
+                    batch.targets.iter().map(|t| t.clone()).collect();
+
+                let predictions = model_local.forward_internal(&cloned_inputs, false, false);
+                let loss = model_local.compute_loss(&predictions, &cloned_targets);
+                let loss_val = loss.into_data().to_vec::<f32>().unwrap_or(vec![0.0])[0];
+                train_loss_sum += loss_val;
+
+                let (correct, count) = crate::entities::compute_accuracy(&predictions, &cloned_targets, is_classification);
+                train_correct += correct;
+                train_total += count;
+            }
+
+            let avg_loss = if !train_batches.is_empty() { train_loss_sum / train_batches.len() as f32 } else { 0.0 };
+            let avg_acc = if train_total > 0 { train_correct as f32 / train_total as f32 } else { 0.0 };
+            (avg_loss, avg_acc)
+        };
+
+        (loss, acc, profiler.finalize())
+    }));
+
+    match result {
+        Ok((loss, acc, profiler_result)) => {
+            eprintln!("[worker {}] Evaluation complete: loss={:.4}, acc={:.2}%", request.job_id, loss, acc * 100.0);
+            (loss, acc, Some(profiler_result), None)
+        }
+        Err(_) => {
+            (999.0, 0.0, None, Some("Evaluation panicked".to_string()))
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

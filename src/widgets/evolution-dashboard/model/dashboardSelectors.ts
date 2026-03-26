@@ -161,28 +161,69 @@ export function buildJobs(params: {
     const source = currentSnapshot?.genomes.length ? currentSnapshot.genomes : population;
 
     const latestMetric = liveMetrics.length > 0 ? liveMetrics[liveMetrics.length - 1] : undefined;
-    const runningProgress = latestMetric ? Math.round((latestMetric.batch / Math.max(1, latestMetric.total_batches)) * 100) : 0;
+    const hasIndexedMetrics = liveMetrics.some((metric) => typeof metric.genome_index === 'number');
+    const latestByGenome = new Map<number, BatchMetrics>();
+    for (const metric of liveMetrics) {
+        const idx = metric.genome_index;
+        if (typeof idx !== 'number') {
+            continue;
+        }
+        const prev = latestByGenome.get(idx);
+        const metricStep = metric.step ?? metric.batch;
+        const prevStep = prev?.step ?? prev?.batch ?? 0;
+        if (!prev || metricStep >= prevStep) {
+            latestByGenome.set(idx, metric);
+        }
+    }
 
     return source.map((genome, index) => {
         let status: DashboardJobStatus = 'queued';
         let progressPercent = 0;
         let etaSeconds: number | undefined;
+        const metricForGenome = latestByGenome.get(index);
+        const evaluated = genome.profiler !== undefined || genome.accuracy !== undefined || genome.loss !== undefined;
 
         if (!isRunning) {
-            const evaluated = genome.profiler !== undefined || genome.accuracy !== undefined || genome.loss !== undefined;
             status = evaluated ? 'completed' : 'failed';
             progressPercent = evaluated ? 100 : 0;
+        } else if (evaluated) {
+            status = 'completed';
+            progressPercent = 100;
+        } else if (hasIndexedMetrics) {
+            if (metricForGenome) {
+                status = 'running';
+                const doneSteps = metricForGenome.step ?? metricForGenome.batch;
+                const totalSteps = metricForGenome.total_steps
+                    ?? (metricForGenome.total_batches * Math.max(1, metricForGenome.epoch));
+                progressPercent = Math.round((doneSteps / Math.max(1, totalSteps)) * 100);
+
+                const elapsedMs = metricForGenome.elapsed_train_ms ?? 0;
+                const queueWaitMs = metricForGenome.queue_wait_ms ?? 0;
+                const observedStepMs = metricForGenome.step_time_ms ?? 0;
+                if (doneSteps > 0 && (elapsedMs > 0 || observedStepMs > 0)) {
+                    const avgPerStepMs = observedStepMs > 0 ? observedStepMs : elapsedMs / doneSteps;
+                    const remainingSteps = Math.max(0, totalSteps - doneSteps);
+                    etaSeconds = Math.max(0, Math.round(((avgPerStepMs * remainingSteps) + queueWaitMs) / 1000));
+                }
+            }
         } else if (index < currentEvaluatingIndex) {
             status = 'completed';
             progressPercent = 100;
         } else if (index === currentEvaluatingIndex) {
             status = 'running';
-            progressPercent = runningProgress;
+            progressPercent = latestMetric
+                ? Math.round((latestMetric.batch / Math.max(1, latestMetric.total_batches)) * 100)
+                : 0;
 
             if (latestMetric && latestMetric.batch > 0) {
-                const avgPerBatch = (genome.profiler?.total_train_duration_ms ?? 0) / latestMetric.batch;
-                const remainingBatches = Math.max(0, latestMetric.total_batches - latestMetric.batch);
-                etaSeconds = Math.round((avgPerBatch * remainingBatches) / 1000);
+                const elapsedMs = latestMetric.elapsed_train_ms ?? 0;
+                const queueWaitMs = latestMetric.queue_wait_ms ?? 0;
+                const observedStepMs = latestMetric.step_time_ms ?? 0;
+                if (elapsedMs > 0 || observedStepMs > 0) {
+                    const avgPerBatchMs = observedStepMs > 0 ? observedStepMs : elapsedMs / latestMetric.batch;
+                    const remainingBatches = Math.max(0, latestMetric.total_batches - latestMetric.batch);
+                    etaSeconds = Math.round(((avgPerBatchMs * remainingBatches) + queueWaitMs) / 1000);
+                }
             }
         }
 
