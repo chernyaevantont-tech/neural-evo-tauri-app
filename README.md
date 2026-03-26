@@ -1,364 +1,473 @@
-# Neural Network Architecture Visual Editor
+# Neural Evo Tauri App
 
-Modern visual SVG editor for creating and editing neural network architectures within an evolutionary search system. Built with React, TypeScript, and Tauri, with a Rust backend powered by the [burn](https://burn.dev/) ML framework for model compilation and training.
+Десктопное приложение для визуального проектирования архитектур нейросетей и их эволюционного поиска (NAS).
 
-## ✨ Features
+Стек: React + TypeScript + Tauri 2 + Rust + Burn 0.20.
 
-### Modern UI Design
-- **Dark Theme**: Professional VS Code-inspired dark theme with a curated color palette
-- **Custom Title Bar**: Frameless window with custom minimize/maximize/close controls
-- **Intuitive Interface**: Collapsible side menu with Layers and Genomes tabs, info panel, and an infinite canvas
-- **Responsive Canvas**: Smooth zooming (cursor-centered), panning, and node drag-and-drop
-- **Visual Feedback**: Highlighted connections, selection states, and genome validity indicators
+## Актуальный статус (март 2026)
 
-### Node Management
-- **Full Configuration**: Each node is created with customizable parameters through a modal dialog
-- **Live Editing**: Modify node parameters; the system recreates the node instance with updated params
-- **Connection Preservation**: Compatible connections are automatically restored after editing
-- **Parameter Validation**: Input validation for all node parameters
+### Что уже работает
+- Визуальный редактор графов нейросетей (sandbox) с мутациями, кроссовером, валидацией совместимости и автоподстройкой форм тензоров.
+- Dataset Manager с профилями датасетов, сканированием, кэшированием, валидацией и предпросмотром CSV.
+- Evolution Studio с асинхронным циклом эволюции, live-метриками, журналом, остановкой по запросу и политиками остановки.
+- Multi-objective оптимизация и Pareto front (accuracy/latency/model size и др.).
+- Ограничения устройств (device profiles): feasibility-check, penalty, библиотека шаблонов устройств (CRUD + import/export).
+- Genealogy tracking (история происхождения геномов: founder/mutation/crossover).
+- Genome Library и Hidden Archive (автосохранение результатов, восстановление, удаление).
+- Экспорт генома с весами и проверка наличия кэша весов.
 
-### Node Types (Layers)
+### Что частично/экспериментально
+- Zero-cost proxies (ускоренные прокси-оценки) присутствуют на backend и частично в UI, но интеграция в основной цикл эволюции еще развивается.
+- Time-series сценарии ориентированы в первую очередь на Conv1D-подход; RNN/LSTM/GRU требуют отдельной доработки в рамках текущих ограничений Burn-экосистемы и проектного бэклога.
 
-**Layer Nodes:**
-- **Input** — Input layer with configurable shape (e.g., `28×28×3` for RGB images)
-- **Dense** — Fully connected layer with units, activation (`relu` / `leaky_relu` / `softmax`), and bias options. *Note: final softmax is auto-converted to linear for CrossEntropy compatibility.*
-- **Conv2D** — Convolutional layer with filters, kernel size, stride, padding, dilation
-- **Pooling** — Max/Average pooling with kernel size, stride, and padding
-- **Flatten** — Flattens multi-dimensional input to a 1D vector
-- **BatchNorm** — Normalizes features to improve training stability (supports both 2D and 4D)
-- **LayerNorm** — Normalizes across the feature dimension
-- **Output** — Output layer with configurable shape
+### Что еще в плане
+- Phase 4 тестирования: frontend unit tests, integration, E2E (Tauri UI), soak/stress (см. `plan/120-124_phase4_testing_templates.md`).
 
-**Regularization Nodes:**
-- **Dropout** — Randomly zeroes units during training to prevent overfitting
-- **Dropout2D** — Spatial dropout for convolutional feature maps
-- **GaussianNoise** — Adds random noise to inputs during training
+## Основные возможности
 
-**Merge Nodes:**
-- **Add** — Element-wise addition (residual / skip connections)
-- **Concat2D** — Channel-wise concatenation
+### 1) Визуальный редактор архитектур
+- Узлы: Input, Dense, Conv2D, Pooling, Flatten, BatchNorm, LayerNorm, Dropout, Dropout2D, GaussianNoise, Add, Concat2D, Output.
+- Действия: добавление, редактирование, копирование, удаление узлов; создание/удаление связей; сохранение/загрузка геномов `.evog`.
+- Проверка совместимости связей и распространение shape через граф.
 
-### Evolutionary Operations
-- **Structural Mutations**:
-  - **Add Node**: Splices a random edge and inserts a new valid layer with automatic shape adapters.
-  - **Remove Node**: Deletes a randomly selected hidden layer and patches the topological hole.
-  - **Remove Subgraph (Macro-pruning)**: Identifies and removes entire linear chains of layers to aggressively strip network bloat.
-- **Genome Breeding (Crossover)**:
-  - **Subgraph Insertion**: Extracts a random subgraph from one genome and inserts it into another.
-  - **Subgraph Replacement**: Swaps similarly-sized linear sub-paths between parents to maintain graph stability.
-  - **NEAT / Multi-point**: Supports alignment-based and multi-point disjoint crossovers.
-- **Bloat Control**:
-  - **Global Node Limits**: Enforces a hard cap on the maximum number of layers allowed during search.
-  - **Parsimony Pressure ($\alpha$)**: Penalizes the fitness score of unnecessarily complex architectures to promote efficiency.
-- **Automatic Adapters**: When tensor shapes become incompatible during structural mutations or crossover, the system automatically creates adapter layers (Dense, Conv2D, Pooling) to bridge the dimensional gap.
+### 2) Эволюционные операторы
+- Структурные мутации: `AddNode`, `RemoveNode`, `RemoveSubgraph`.
+- Кроссовер геномов с извлечением/вставкой подграфов.
+- Контроль разрастания: лимиты размера графа и парсимония (penalty за сложность).
 
-### Evolution Studio & Orchestration
-- **Evolution Loop Orchestrator**: Fully asynchronous TypeScript loop (`useEvolutionLoop`) that manages population spawning, generational evaluation via Rust, fitness assignment, elitism, and tournament selection. Supports **Stratified Dataset Splitting** for balanced evaluations.
-- **Dataset Manager**: Configure and manage custom folder-based datasets. Includes a **Class Distribution Analyzer** to detect data imbalance.
-- **Immediate Cancellation**: The evolution process can be stopped instantly, even during heavy data preprocessing or training, thanks to session-locked early-exit points.
-- **Live Dashboard**: High-performance **Chart.js** charts tracking fitness and node counts over time, system event logs, and a dynamic "Hall of Fame" showcasing the top topologies discovered.
+### 3) Эволюционная оркестрация и аналитика
+- Асинхронная пакетная оценка популяции в Rust backend.
+- Stratified split для категориальных задач (train/val/test).
+- Profiling: время, пропускная способность, разбивка памяти.
+- Pareto-анализ и визуализация компромиссов качества/ресурсов.
+- Пост-эволюционный анализ и скрытый архив результатов.
 
-### Rust Backend (burn ML framework)
-- **GraphModel** — Universal directed-acyclic-graph neural network model compiled from a genome description
-- **Topological Execution** — Forward pass follows a BFS-sorted topological order with reference-counted tensor memory management
-- **Dynamic Tensor Support** — Supports both 2D (Dense) and 4D (Conv/Pooling) tensor paths within a single graph
-- **Weight Initialization** — Kaiming Normal initialization for `Dense` layers to prevent vanishing gradients
-- **Hardware Acceleration** — Configurable `Wgpu` backend for GPU-accelerated tensor operations
-- **Loss Functions** — Automatic loss selection: `CrossEntropyLoss` for classification (Dim2), `MseLoss` for regression/image tasks (Dim4). 
-- **Logits Optimization** — Detects final `softmax` activations and automatically converts them to `linear` for `CrossEntropyLoss` to prevent gradient squashing.
-- **Training Pipelines**:
-  - Full loop via burn's `SupervisedTraining` with `Adam` optimizer, `ConstantLr` scheduler, and `LossMetric` tracking
-  - Manual lightweight loop (`train_simple`) supporting Train/Validation/Test data splits, shuffling, and per-epoch metrics (Loss & Accuracy) logging
+## Карта приложения
 
-### Interaction Features
+Роуты в приложении:
+- `/` - Home
+- `/sandbox` - редактор архитектур
+- `/dataset-manager` - менеджер датасетов
+- `/evolution-studio` - запуск и мониторинг эволюции
+- `/genome-library` - библиотека геномов
+- `/hidden-archive` - скрытый архив эволюционных результатов
 
-**Adding Nodes:**
-1. Open the side menu (☰ icon)
-2. Switch to the **Layers** tab
-3. Click the corresponding button (+ Input, + Dense, + Conv2D, etc.)
-4. Configure parameters in the modal dialog
-5. Click **Create** to place the node on the canvas
+## Подробный гайд пользователя
 
-**Editing Nodes:**
-1. Right-click on a node → select **Edit Node** from the context menu
-2. Modify parameters in the dialog
-3. Click **Update** — a new instance is created and compatible connections are restored
+### Шаг 1. Создайте или загрузите базовую архитектуру
+1. Откройте `Architecture Sandbox` (`/sandbox`).
+2. Добавьте входной и выходной узлы, затем промежуточные слои.
+3. Соединяйте узлы через `Shift + Click` (source -> target).
+4. Настройте параметры слоев через контекстное меню узла.
+5. Сохраните удачный геном в `.evog` (или в библиотеку).
 
-**Moving Nodes:**
-Click and drag nodes to reposition them on the canvas.
+### Шаг 2. Подготовьте датасет
+1. Перейдите в `Dataset Manager` (`/dataset-manager`).
+2. Создайте профиль датасета (Folder или CSV).
+3. Для каждого stream задайте роль (`Input`/`Target`) и locator.
+4. Нажмите `Scan` для проверки структуры и извлечения статистики.
+5. При необходимости выполните `Cache` (особенно для image-потоков).
+6. Нажмите `Validate` и убедитесь, что профиль готов к эволюции.
 
-**Connecting Nodes:**
-1. Hold **Shift** key
-2. Click on the source node, then click on the target node
-3. The system validates shape compatibility via `CheckCompability()`
+### Шаг 3. Запустите эволюцию
+1. Перейдите в `Evolution Studio` (`/evolution-studio`).
+2. Выберите dataset profile.
+3. Настройте population size, поколения, мутации, ограничения устройства, stopping criteria.
+4. Добавьте seed-геномы (из canvas/библиотеки) или используйте random initialization.
+5. Нажмите `Start Evolution`.
 
-**Deleting:**
-- Right-click on a node → **Delete Node**
-- Right-click on a connection → **Delete Connection**
+Во время выполнения:
+- отслеживайте live-метрики и логи,
+- смотрите динамику fitness,
+- анализируйте Pareto-множество,
+- при необходимости используйте `Pause`/`Stop`.
 
-**Copying Nodes:**
-- Right-click on a node → **Copy Node** to duplicate it
+### Шаг 4. Проанализируйте и сохраните результаты
+1. Просмотрите `Hall of Fame`, Pareto-участников и пост-анализ на дашборде.
+2. Откройте `Genome Library` для сохраненных решений.
+3. При необходимости экспортируйте геном вместе с весами.
+4. Используйте `Hidden Archive` для анализа автоматически сохраненных результатов и lineage.
 
-### Canvas Controls
+## Полный разбор настроек Evolution Manager
 
-| Action | Control |
-|--------|---------|
-| Pan | Right-click drag |
-| Zoom | Mouse wheel (cursor-centered) |
-| Select | Left-click on nodes/connections |
-| Connect | Shift + click source → target |
-| Context Menu | Right-click on nodes/connections/genomes |
+Ниже описаны все настройки, доступные в панели Evolution Settings на странице Evolution Studio.
 
-### Genome Operations
+Важно: часть параметров (например train/val/test split) берется из профиля датасета в Dataset Manager, а не из этой панели.
 
-**Loading Genomes:**
-- Switch to the **Genomes** tab → click **Load Genome**
-- Nodes are automatically laid out using a force-directed algorithm
-- File format: `.evog`
+### 1) Service actions
 
-**Saving Genomes:**
-- Click the **Save** button on a genome card in the side panel
-- Genome is serialized and saved via Tauri file dialog
+- Apply
+	- Нормализует objective weights.
+	- Валидирует конфигурацию через buildEvolutionRunConfig.
+	- Сохраняет конфиг как last used в localStorage.
+- Save preset
+	- Сохраняет текущие настройки как preset в localStorage.
+- Load last used config
+	- Загружает последний сохраненный конфиг из localStorage.
 
-**Breeding Genomes:**
-- Start breeding from one genome's context menu
-- Select a second genome to cross-breed
-- The system extracts subgenomes, finds insertion points, and creates adapters as needed
+### 2) Objectives
 
-**Genome Validation:**
-- **Valid** (green): All input nodes are `InputNode`, all output nodes are `OutputNode`, graph is connected
-- **Invalid** (red): Missing proper input/output nodes or disconnected graph
+- Optimization mode
+	- Single-Objective.
+	- Multi-Objective (Pareto).
+- Secondary objectives (для multi-objective)
+	- latency.
+	- model_size.
+	- train_time.
+- Use weighted aggregation
+	- Включает агрегацию по весам, иначе используется Pareto-логика без weighted-score.
+- Weights sliders
+	- accuracy, latency, model_size, train_time.
+	- Диапазон каждого веса: 0..1, шаг 0.05.
+- Normalize weights
+	- Приводит сумму весов к 1.0.
 
-## 🏗️ Architecture
+Значения по умолчанию:
+- mobjEnabled: false.
+- secondaryObjectives: latency + model_size.
+- objectiveWeightsEnabled: true.
+- objectiveWeights: accuracy 0.5, latency 0.2, model_size 0.2, train_time 0.1.
 
-The project follows **Feature-Sliced Design (FSD)** architecture with a **Tauri 2** backend:
+### 3) Crossover Strategies
 
-### Frontend (React + TypeScript)
+Можно включить одну или несколько стратегий одновременно:
+- subgraph-insertion.
+- subgraph-replacement.
+- neat-style.
+- multi-point.
 
-```
-src/
-├── app/                        # Application layer
-│   ├── App.tsx                 # Root component with React Router
-│   ├── App.css                 # Global styles and resets
-│   └── App.module.css          # App-level CSS modules
-│
-├── pages/                      # Page-level components
-│   ├── network-editor-page/    # Sandbox page layout (Canvas + Evolution Manager)
-│   ├── dataset-manager-page/   # Dataset configuration UI
-│   └── evolution-studio-page/  # Generational loop dashboard (Charts, Logs, Hall of Fame)
-│
-├── widgets/                    # Composite UI blocks
-│   ├── network-canvas/         # SVG canvas with node/connection rendering
-│   │   ├── NetworkCanvas.tsx   # Canvas component (zoom, pan, drag, context menus)
-│   │   ├── hooks.ts            # Canvas-specific hooks
-│   │   ├── NodeContextMenu/    # Right-click menu on nodes
-│   │   ├── ConnectionContextMenu/
-│   │   └── GenomContextMenu/
-│   ├── side-menu/              # Collapsible left toolbar (Layers/Genomes tabs)
-│   │   └── SideMenu.tsx
-│   ├── side-panel/             # Right info panel (node info, genome list)
-│   │   └── SidePanel.tsx
-│   └── title-bar/              # Custom window title bar (minimize, maximize, close)
-│       └── TitleBar.tsx
-│
-├── features/                   # Feature-specific logic (FSD features)
-│   ├── dataset-manager/        # Store and logic for dataset profiles
-│   ├── evolution-manager/      # Sandbox UI for configuring mutation rates and crossover types
-│   ├── evolution-studio/       # TS Orchestrator loop (useEvolutionLoop) and stats tracking
-│   ├── train-genome/           # API integrations for evaluating models on the rust backend
-│   ├── add-node/               # Node creation toolbar + config modal
-│   ├── edit-node/              # Node editing flow + modal
-│   ├── copy-node/              # Node duplication
-│   ├── delete-node/            # Node deletion
-│   ├── connect-nodes/          # Shift+click connection logic
-│   ├── delete-connection/      # Connection removal
-│   ├── dragging-move-node/     # Drag-and-drop node positioning
-│   ├── select-canvas-entity/   # Selection state management
-│   ├── canvas-panning/         # Pan and zoom handlers
-│   ├── resize-canvas/          # Canvas dimension tracking
-│   ├── genome-save-load/       # Save/Load via Tauri IPC + file dialogs
-│   ├── get-subgenome/          # Random subgenome extraction
-│   ├── breed-genomes/          # Evolutionary crossover
-│   └── delete-genome/          # Genome removal
-│
-├── entities/                   # Domain entities
-│   ├── canvas-genome/          # Core genome entity
-│   │   ├── model/
-│   │   │   ├── genome.ts       # Genome class (breeding, subgenome extraction, adapters)
-│   │   │   ├── store.ts        # Zustand + Immer store (nodes, connections, genomes)
-│   │   │   ├── types.ts        # VisualNode, VisualGenome, Connection types
-│   │   │   └── nodes/          # Node implementations
-│   │   │       ├── base_node.ts          # Abstract BaseNode (shape tracking, graph traversal)
-│   │   │       ├── types.ts
-│   │   │       ├── layers/
-│   │   │       │   ├── input_node.ts
-│   │   │       │   ├── dense_node.ts
-│   │   │       │   ├── conv_node.ts
-│   │   │       │   ├── pooling_node.ts
-│   │   │       │   ├── flatten_node.ts
-│   │   │       │   └── output_node.ts
-│   │   │       └── merge/
-│   │   │           ├── add_node.ts
-│   │   │           └── concatinate_2d_node.ts
-│   │   ├── lib/
-│   │   │   ├── calculateLayout.ts    # Force-directed auto-layout for loaded genomes
-│   │   │   ├── serializeGenome.ts    # Genome → string serialization
-│   │   │   └── deserializeGenome.ts  # String → Genome deserialization
-│   │   └── ui/
-│   │       ├── Node/                 # SVG node rendering
-│   │       ├── ConnectionLine/       # SVG connection rendering
-│   │       ├── NodeInfoCard/         # Node info display in side panel
-│   │       └── GenomeCard/           # Genome list item card
-│   └── canvas-state/            # Canvas UI state (selection, panning, zoom, context menus)
-│       └── model/store.ts       # Zustand + Immer store
-│
-├── shared/                     # Shared utilities
-│   ├── ui/                     # Reusable UI components
-│   │   ├── Button/
-│   │   ├── Modal/
-│   │   ├── ContextMenu/
-│   │   └── Icons/
-│   ├── lib/
-│   │   ├── theme.ts            # Design system tokens (colors, typography, spacing, shadows)
-│   │   └── nodeColors.ts       # Node type → color/label mapping
-│   └── styles/
-│       └── variables.css       # CSS custom properties (mirrors theme.ts)
-│
-├── lib/
-│   └── random.ts               # Random utility helpers
-│
-└── main.tsx                    # Application entry point (React DOM render, Immer setup)
-```
+Поведение:
+- при кроссовере выбирается случайная стратегия из включенных;
+- последнюю активную стратегию отключить нельзя.
 
-### Backend (Rust / Tauri 2)
+По умолчанию:
+- selectedCrossovers: subgraph-insertion.
 
-```
-src-tauri/
-├── src/
-│   ├── main.rs                 # Tauri application entry point
-│   ├── lib.rs                  # Tauri commands (save_genome, load_genome) + plugin setup
-│   ├── dtos.rs                 # NodeDtoJSON enum — serde-serializable node configs
-│   └── entities.rs             # burn ML model (GraphModel, training pipeline)
-├── Cargo.toml                  # Rust dependencies (burn 0.20, tauri 2, serde, rfd)
-└── tauri.conf.json             # Tauri configuration (window, bundling, CSP)
-```
+### 4) Mutation Probabilities
 
-### Key Backend Structures (`entities.rs`)
+Параметры мутаций (0..1, шаг 0.05):
+- params.
+- addNode.
+- removeNode.
+- removeSubgraph.
+- addSkipConnection.
+- changeLayerType.
 
-| Structure | Purpose |
-|-----------|---------|
-| `DynamicTensor<B>` | Enum for 2D and 4D tensors within a single execution graph |
-| `Operation` | Describes what each node does (Input, Dense, Conv2D, MaxPool, AvgPool, Flatten, BatchNorm, LayerNorm, Dropout, GaussianNoise, Add, Concat, Output) |
-| `Instruction` | Links a node ID to its operation and input node IDs |
-| `GraphModel<B>` | The main model: holds `execution_plan` + layers. Implements `TrainStep` and `InferenceStep` |
-| `DynamicBatch<B>` | Training batch: multiple input & target tensors |
-| `DynamicBatcher<B>` | burn `Batcher` implementation for `DataLoader` |
-| `train()` | Full training via burn `SupervisedTraining` + `Learner` (checkpoints, metrics, LR scheduling) |
-| `train_simple()` | Lightweight manual loop with `Adam` optimizer (no Learner overhead) |
+По умолчанию:
+- params 0.6.
+- addNode 0.2.
+- removeNode 0.1.
+- removeSubgraph 0.05.
+- addSkipConnection 0.3.
+- changeLayerType 0.1.
 
-## 🎨 Design System
+Adaptive Mutation:
+- переключатель useAdaptiveMutation.
+- параметр adaptiveTargetNodes (целевое число узлов, по умолчанию 20).
+- при включении вручную не редактируются addNode/removeNode/removeSubgraph: они вычисляются динамически от текущего размера генома.
 
-### Theme
-- **Modern Dark Theme**: VS Code-inspired color scheme
-- **Color Palette**: Curated colors for nodes, UI elements, and states
-- **Typography**: Segoe UI font family
-- **Spacing System**: Consistent scale (xs: 4px → xxl: 24px)
-- **Shadow System**: Three depth levels (sm, md, lg) + focus ring
+### 5) Bloat Control
 
-### Node Colors
+- Max Nodes Limit
+	- useMaxNodesLimit: включает жесткий лимит узлов.
+	- maxNodesLimit: значение лимита.
+- Parsimony Pressure
+	- useParsimonyPressure.
+	- parsimonyAlpha.
+	- Итоговая fitness-коррекция: adjustedFitness = baseFitness - alpha * nodeCount.
 
-| Node Type | Color | Hex |
-|-----------|-------|-----|
-| Input | Green | `#6bcf7f` |
-| Dense | Cyan | `#4fc3f7` |
-| Conv2D | Orange | `#ff9f43` |
-| Pooling | Purple | `#ab47bc` |
-| Flatten | Light Green | `#7cb342` |
-| Regularization (Dropout/Norm) | Lavender | `#bd93f9` |
-| Add | Red | `#ef5350` |
-| Concat | Pink | `#ec407a` |
-| Output | Bright Red | `#ff5252` |
+По умолчанию:
+- useMaxNodesLimit: false.
+- maxNodesLimit: 30.
+- useParsimonyPressure: false.
+- parsimonyAlpha: 0.01.
 
-## 🚀 Getting Started
+### 6) Resource Awareness
 
-### Prerequisites
-- **Node.js** 18+
-- **Rust** toolchain (rustup, stable channel)
-- **Tauri CLI** (`@tauri-apps/cli`)
+- useResourceAwareFitness.
+- resourceTargets:
+	- flash (bytes).
+	- ram (bytes).
+	- macs.
 
-### Installation
+Как влияет:
+- При превышении лимитов к fitness применяется penalty на основе относительного превышения flash/ram/macs.
+
+По умолчанию:
+- useResourceAwareFitness: false.
+- flash: 1048576 (1 MB).
+- ram: 262144 (256 KB).
+- macs: 1000000.
+
+### 7) Device Targeting
+
+Параметры доступны в секции Device Targeting:
+
+- Built-in profile
+	- embedded-mcu.
+	- edge-tiny.
+	- mobile-low-end.
+	- mobile-mid-range.
+	- laptop-cpu.
+- Custom constraints
+	- mops_budget.
+	- ram_mb.
+	- flash_mb.
+	- latency_budget_ms.
+- Show only feasible
+	- фильтрует показ решений по device feasibility.
+- Device templates
+	- save/apply/update/duplicate/delete.
+	- import/export библиотеки шаблонов.
+
+Дополнительно:
+- Секция показывает estimated parallelism на основе RAM-ограничения и memorySafetyMargin.
+- Изменение device constraints синхронизирует resourceTargets для resource-aware fitness.
+
+По умолчанию:
+- deviceProfileId: default-device (после инициализации выбирается первый built-in профиль).
+- isCustomDevice: false.
+- showOnlyFeasible: false.
+
+### 8) Random Initialization
+
+- useRandomInitialization.
+- randomInitRatio (0..100, шаг 5).
+
+Как работает:
+- Если включено и есть seed-геномы: часть популяции генерируется случайно, часть создается от seed.
+- Если seed нет: может быть полностью random initialization.
+
+По умолчанию:
+- useRandomInitialization: false.
+- randomInitRatio: 30.
+
+### 9) Training Parameters
+
+- batchSize
+	- UI диапазон: 1..512.
+	- По умолчанию: 32.
+- evalEpochs
+	- UI диапазон: 1..100.
+	- По умолчанию: 1.
+- datasetPercent
+	- UI диапазон: 1..100%.
+	- По умолчанию: 100%.
+- populationSize
+	- Ограничивается в store: 4..200.
+	- По умолчанию: 20.
+- Max Generations
+	- useMaxGenerations.
+	- maxGenerations (минимум 1).
+	- По умолчанию: выключено, maxGenerations 100.
+
+Важно:
+- train/val/test split в evaluate_population берется из выбранного dataset profile (поле split), а не из этой панели.
+
+### 10) Stopping Criteria
+
+Настраивается через отдельную панель:
+
+- Policy type
+	- any (OR): остановка, когда выполнен любой критерий.
+	- all (AND): остановка, когда выполнены все критерии.
+- Типы критериев:
+	- GenerationLimit: max_generations > 0.
+	- FitnessPlateau:
+		- monitor: best_fitness | pareto_coverage | population_avg.
+		- patience_generations > 0.
+		- improvement_threshold >= 0.
+	- TimeLimit: max_seconds > 0.
+	- TargetAccuracy: threshold от 0 до 1.
+	- ManualStop.
+
+Ограничения валидации:
+- критерий должен быть минимум один;
+- ManualStop может быть только один.
+
+По умолчанию:
+- stoppingPolicy: criteria = [ManualStop], policy_type = any.
+
+### 11) Advanced Performance
+
+Секция скрыта по умолчанию (Show advanced settings):
+
+- profilingEnabled.
+- memorySafetyMarginMb (минимум 0).
+- estimatorSafetyFactor (минимум 1).
+- memoryMode: estimate | runtime | hybrid.
+
+По умолчанию:
+- profilingEnabled: false.
+- memorySafetyMarginMb: 128.
+- estimatorSafetyFactor: 1.1.
+- memoryMode: hybrid.
+
+### 12) Zero-Cost Proxy Evaluation
+
+- useZeroCostProxies.
+- zeroCostStrategy:
+	- two-stage.
+	- early-stopping.
+- fastPassThreshold (0..1, шаг 0.05).
+- partialTrainingEpochs (1..50 в UI; в store ограничение 1..100).
+
+Как влияет на обучение:
+- Для каждого генома сначала считается zero-cost score.
+- В зависимости от score геном может:
+	- быть пропущен,
+	- обучаться частично,
+	- обучаться полностью.
+- Если zero-cost выключен, используется evalEpochs для всех геномов.
+
+По умолчанию:
+- useZeroCostProxies: false.
+- zeroCostStrategy: two-stage.
+- fastPassThreshold: 0.6.
+- partialTrainingEpochs: 20.
+
+### 13) Runtime/analysis toggles, связанные с менеджером
+
+Эти флаги хранятся в том же evolution settings store и влияют на отображение/сбор данных:
+- genealogyTrackingEnabled (по умолчанию true).
+- autoSaveToHiddenLibrary (по умолчанию false).
+- showOnlyFeasible (по умолчанию false).
+
+## Рекомендованные стартовые пресеты
+
+### Быстрый smoke-тест
+- populationSize: 8-12.
+- evalEpochs: 1.
+- datasetPercent: 10-25.
+- useZeroCostProxies: on, strategy two-stage.
+- useMaxGenerations: on, maxGenerations: 5-10.
+
+### Баланс качества/времени
+- populationSize: 20-40.
+- evalEpochs: 2-5.
+- datasetPercent: 40-70.
+- useParsimonyPressure: on, alpha 0.005-0.02.
+- multi-objective: on (latency + model_size).
+
+### Поиск под edge-device
+- mobjEnabled: true.
+- secondaryObjectives: latency + model_size (+ train_time опционально).
+- включить Device Targeting и задать реальные бюджеты MOPS/RAM/FLASH/latency.
+- showOnlyFeasible: on.
+- useResourceAwareFitness: on и синхронизировать resourceTargets с device constraints.
+
+## Управление canvas
+
+| Действие | Управление |
+|---|---|
+| Панорамирование | Правая кнопка мыши + drag |
+| Зум | Колесо мыши (с центром под курсором) |
+| Выбор | Левый клик |
+| Соединение узлов | `Shift + Click` |
+| Контекстное меню | Правая кнопка на узле/связи/геноме |
+
+## Быстрый старт для разработчика
+
+### Требования
+- Node.js 18+
+- Rust stable (через rustup)
+- Tauri CLI (`@tauri-apps/cli`, уже в devDependencies)
+
+### Установка
 
 ```bash
-# Install frontend dependencies
 npm install
+```
 
-# Run in development mode (frontend + Tauri desktop app)
+### Запуск
+
+```bash
+# Frontend (Vite)
+npm run dev
+
+# Desktop (Tauri)
 npm run tauri dev
+```
 
-# Build for production
+### Сборка
+
+```bash
+npm run build
 npm run tauri build
 ```
 
-### Development
+### Тесты
 
 ```bash
-# Run frontend only (web mode, no Tauri)
-npm run dev
+# Frontend tests (Vitest)
+npm run test
 
-# Build frontend
-npm run build
+# One-shot запуск конкретного теста
+npx vitest run src/app/App.integration.test.tsx
 
-# Check Rust backend compilation
-cd src-tauri && cargo check
+# Backend tests (из папки src-tauri)
+cd src-tauri
+cargo test --lib
 ```
 
-## 🔧 Technology Stack
+## Архитектура
 
-### Frontend
-- **React 19** — UI framework
-- **TypeScript 5.8** — Type safety
-- **Vite 7** — Build tool and dev server
-- **Zustand 5** — Lightweight state management
-- **Immer** — Immutable state updates
-- **React Router DOM 7** — Client-side routing
-- **React Icons** — Icon library (Bootstrap Icons, Heroicons, etc.)
-- **UUID** — Unique identifier generation
+Проект следует Feature-Sliced Design (FSD):
+- `pages/` - экраны и композиция,
+- `features/` - прикладная логика и feature-компоненты,
+- `entities/` - доменные сущности,
+- `widgets/` - крупные композиционные блоки,
+- `shared/` - инфраструктура и общие утилиты.
 
-### Backend
-- **Tauri 2** — Desktop application framework (Rust ↔ JS IPC)
-- **burn 0.20** — ML framework (Wgpu, ndarray, autodiff, nn, train)
-- **rand 0.10** — Random number generation for dataset shuffling
-- **serde / serde_json** — JSON serialization
-- **rfd** — Native file dialogs (save/load genomes)
+Ключевые frontend-папки:
+- `src/pages/`
+- `src/features/`
+- `src/widgets/`
+- `src/entities/canvas-genome/`
+- `src/entities/canvas-state/`
 
-### State Management
+Ключевые backend-модули:
+- `src-tauri/src/entities.rs` - компиляция/выполнение графа, train/eval
+- `src-tauri/src/data_loader.rs` - загрузка данных и батчинг
+- `src-tauri/src/profiler.rs` - профайлинг
+- `src-tauri/src/pareto.rs` - multi-objective и Pareto
+- `src-tauri/src/device_profiles.rs`, `device_library.rs`
+- `src-tauri/src/genealogy.rs`
+- `src-tauri/src/stopping_criteria.rs`
+- `src-tauri/src/weight_io.rs`
+- `src-tauri/src/orchestrator/`
 
-The application uses **two Zustand stores** with Immer middleware:
+## Tauri API (актуально)
 
-- **`useCanvasGenomeStore`** — Domain data: nodes (`Map<string, VisualNode>`), connections, genomes. Operations: add/edit/delete nodes, connect nodes, add/delete genomes.
-- **`useCanvasStateStore`** — Canvas UI state: selection, dragging, panning, zoom, context menus, canvas dimensions.
+На данный момент в `generate_handler!` зарегистрировано 42 команды, включая:
+- Genome I/O: `save_genome`, `load_genome`
+- Dataset: `scan_dataset`, `cache_dataset`, `validate_dataset_profile`, `save_dataset_profiles`, `load_dataset_profiles`, `preview_csv`, `pick_folder`
+- Evolution: `evaluate_population`, `stop_evolution`
+- Library/Archive: `list_library_genomes`, `save_to_library`, `load_library_genome`, `delete_from_library`, `list_hidden_library`, `unhide_genome`, `delete_hidden_genome`
+- Weights: `export_genome_with_weights`, `has_cached_weights`
+- Pareto/Zero-cost: `compute_pareto_front`, `compute_zero_cost_score`
+- Devices: `get_device_profiles`, `validate_genome_for_device`, `apply_device_penalty`, `list_device_templates`, `create_device_template`, `update_device_template`, `delete_device_template`, `duplicate_device_template`, `export_device_library`, `import_device_library`
+- Genealogy: `register_founder`, `register_mutation`, `register_crossover`, `get_genealogy`, `get_ancestors`, `get_descendants`
+- Stopping: `validate_stopping_criteria`, `generate_stopping_preview`
 
-## 📝 Connection Rules
+## Текущий статус тестирования
 
-### Regular Layers (Input, Dense, Conv2D, Pooling, Flatten)
-- Output shape is automatically calculated based on input shape
-- `CalculateOutputShape()` is called when creating connections
+- Backend unit tests (Task 120): 112/115 passed (97%), покрыты ключевые модули профайлера, Pareto, device constraints, genealogy, orchestrator, data loader.
+- Frontend/integration/E2E/soak тесты (Tasks 121-124): запланированы и частично в работе по roadmap.
 
-### Add Node
-- Requires identical input tensor shapes
-- Validation: `inputShape == nodeOutputShape`
+## Ограничения и known issues
 
-### Concat2D Node
-- Requires identical height and width (H, W)
-- Concatenates along channel dimension (C)
-- Validation: `inputShape[0] == nodeOutputShape[0] && inputShape[1] == nodeOutputShape[1]`
+- Автоматические shape-adapter'ы могут раздувать архитектуру; компенсируется лимитами и penalty за сложность.
+- Speciation-механизм в стиле NEAT пока не внедрен.
+- Для time-series основная рабочая стратегия сейчас - Conv1D-подобные архитектуры; RNN/LSTM/GRU требуют отдельного этапа реализации.
+- Часть продвинутых оптимизаций (например, полная интеграция zero-cost стратегий в основной runtime) находится в развитии.
 
-## 📚 Usage Tips
+## Дополнительная документация
 
-- **Shift + Click**: Connect two nodes
-- **Right Click**: Open context menu for additional options
-- **Mouse Wheel**: Zoom in/out (cursor-centered)
-- **Right Drag**: Pan the canvas
-- **Left Click**: Select nodes or connections
-- Genomes are saved in `.evog` format via native file dialogs
-- See [PARAMETER_CONFIG_GUIDE.md](./PARAMETER_CONFIG_GUIDE.md) for detailed parameter configuration documentation
+- Общая архитектура backend: `BACKEND_ARCHITECTURE_ANALYSIS.md`
+- Правила canvas/consistency: `NETWORK-CANVAS.md`
+- Справка по архитектуре нод: `NODE_ARCHITECTURE_REFERENCE.md`
+- Текущее улучшение эволюции и crossover: `EVOLUTION.MD`
+- План рефакторинга данных: `DATASET_REFACTORING_PLAN.md`
+- План работ и roadmap: `plan/00_INDEX.md`
+- Отчет по backend тестам: `TASK_120_COMPLETION_REPORT.md`
