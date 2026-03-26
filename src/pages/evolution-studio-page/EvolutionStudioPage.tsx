@@ -70,6 +70,12 @@ export const EvolutionStudioPage: React.FC = () => {
     const setParetoForGeneration = useEvolutionSettingsStore(
         (state) => state.setParetoForGeneration,
     );
+    const setGenerationProfilingStat = useEvolutionSettingsStore(
+        (state) => state.setGenerationProfilingStat,
+    );
+    const setGenealogyTree = useEvolutionSettingsStore(
+        (state) => state.setGenealogyTree,
+    );
     const {
         isRunning,
         isPaused,
@@ -120,7 +126,7 @@ export const EvolutionStudioPage: React.FC = () => {
             0,
         );
 
-        settings.setGenerationProfilingStat(evaluated.generation, {
+        setGenerationProfilingStat(evaluated.generation, {
             generation: evaluated.generation,
             totalTrainingMs: evaluated.totalTrainingMs ?? 0,
             totalInferenceMs: evaluated.totalInferenceMs ?? 0,
@@ -131,9 +137,9 @@ export const EvolutionStudioPage: React.FC = () => {
         });
 
         if (evaluated.genealogy && evaluated.genealogy.size > 0) {
-            settings.setGenealogyTree(new Map(evaluated.genealogy));
+            setGenealogyTree(new Map(evaluated.genealogy));
         }
-    }, [generationHistory, settings]);
+    }, [generationHistory, setGenerationProfilingStat, setGenealogyTree]);
 
     // Track evolution completion
     useEffect(() => {

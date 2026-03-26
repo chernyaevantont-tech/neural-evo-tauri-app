@@ -37,12 +37,12 @@ let settingsMock: any;
 
 vi.mock('../../features/evolution-manager', () => ({
     useEvolutionSettingsStore: () => settingsMock,
-    buildEvolutionRunConfig: (...args: unknown[]) => buildEvolutionRunConfigMock(...args),
-    createSettingsPreset: (...args: unknown[]) => createSettingsPresetMock(...args),
-    saveLastUsedSettingsToLocalStorage: (...args: unknown[]) => saveLastUsedSettingsToLocalStorageMock(...args),
-    saveSettingsPresetToLocalStorage: (...args: unknown[]) => saveSettingsPresetToLocalStorageMock(...args),
-    loadLastUsedSettingsFromLocalStorage: (...args: unknown[]) => loadLastUsedSettingsFromLocalStorageMock(...args),
-    applySettingsPreset: (...args: unknown[]) => applySettingsPresetMock(...args),
+    buildEvolutionRunConfig: buildEvolutionRunConfigMock,
+    createSettingsPreset: createSettingsPresetMock,
+    saveLastUsedSettingsToLocalStorage: saveLastUsedSettingsToLocalStorageMock,
+    saveSettingsPresetToLocalStorage: saveSettingsPresetToLocalStorageMock,
+    loadLastUsedSettingsFromLocalStorage: loadLastUsedSettingsFromLocalStorageMock,
+    applySettingsPreset: applySettingsPresetMock,
     ObjectivesSection: () => <div>ObjectivesSection</div>,
     DeviceTargetingSection: () => <div>DeviceTargetingSection</div>,
     StoppingCriteriaSection: () => <div>StoppingCriteriaSection</div>,

@@ -16,6 +16,22 @@ export const DatasetManagerPage: React.FC = () => {
     const [isCaching, setIsCaching] = useState(false);
     const [isValidating, setIsValidating] = useState(false);
 
+    const normalizeImageShapeToHwc = (shape: number[]): number[] => {
+        if (shape.length !== 3) {
+            return shape;
+        }
+
+        const [a, b, c] = shape;
+        const firstIsChannel = a <= 4 && b > 4 && c > 4;
+        const lastIsChannel = c <= 4 && a > 4 && b > 4;
+
+        if (firstIsChannel && !lastIsChannel) {
+            return [b, c, a];
+        }
+
+        return shape;
+    };
+
     const getIcon = (type: DatasetSourceType) => {
         switch (type) {
             case "CSV": return <BsFiletypeCsv />;
@@ -93,9 +109,12 @@ export const DatasetManagerPage: React.FC = () => {
                 const report = scanResult.streamReports.find(r => r.streamId === stream.id);
                 if (report) {
                     let calculatedShape = report.inputShape ?? stream.tensorShape;
+                    if (stream.dataType === 'Image' && calculatedShape?.length === 3) {
+                        calculatedShape = normalizeImageShapeToHwc(calculatedShape);
+                    }
                     if ((!calculatedShape || calculatedShape.length === 0) && stream.dataType === 'Image' && stream.preprocessing?.vision) {
                         const v = stream.preprocessing.vision;
-                        calculatedShape = [v.grayscale ? 1 : 3, v.resize[1], v.resize[0]];
+                        calculatedShape = [v.resize[1], v.resize[0], v.grayscale ? 1 : 3];
                     }
 
                     return {

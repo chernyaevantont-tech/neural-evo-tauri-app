@@ -21,6 +21,22 @@ import { RandomizeInteger } from "../../../lib/random";
 const randomInt = (min: number, max: number): number => RandomizeInteger(min, max);
 const randomChoice = <T,>(array: T[]): T => array[randomInt(0, array.length - 1)];
 
+const normalizeImageShapeToHwc = (shape: number[]): number[] => {
+    if (shape.length !== 3) {
+        return [...shape];
+    }
+
+    const [a, b, c] = shape;
+    const firstIsChannel = a <= 4 && b > 4 && c > 4;
+    const lastIsChannel = c <= 4 && a > 4 && b > 4;
+
+    if (firstIsChannel && !lastIsChannel) {
+        return [b, c, a];
+    }
+
+    return [...shape];
+};
+
 /**
  * Generates a random neural network architecture based on input and output shapes.
  * Uses the input shape to determine the appropriate layer types.
@@ -377,8 +393,11 @@ export const extractShapesFromDatasetProfile = (
 
     // For simplicity, use first input and target stream
     // In future: could support multi-input/output by concatenating shapes
-    const inputShape = inputStreams[0].tensorShape;
+    const rawInputShape = inputStreams[0].tensorShape;
     const inputDataType = inputStreams[0].dataType;
+    const inputShape = inputDataType === 'Image'
+        ? normalizeImageShapeToHwc(rawInputShape)
+        : rawInputShape;
     
     // Infer dataTypeHint from the input stream's dataType
     // Map DataType enum to generateRandomArchitecture's dataTypeHint

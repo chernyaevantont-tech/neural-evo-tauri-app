@@ -1301,9 +1301,13 @@ export class Genome {
                 }
 
                 // Restore all other non-involved edges
-                for (let i = 0; i < newNodes.length; i++) {
+                for (let i = 0; i < oldNodes.length; i++) {
                     const oldNode = oldNodes[i];
                     const newNode = newNodes[i];
+
+                    if (!oldNode || !newNode) {
+                        continue;
+                    }
 
                     for (const oldChild of oldNode.next) {
                         if (oldChild.id !== targetNodeOrig.id) {

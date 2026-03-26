@@ -148,6 +148,40 @@ export const defaultAugmentation: AugmentationSettings = {
     randomCrop: false
 };
 
+function normalizeImageShapeToHwc(shape: number[]): number[] {
+    if (!Array.isArray(shape) || shape.length !== 3) {
+        return shape;
+    }
+
+    const [a, b, c] = shape;
+    const firstIsChannel = a <= 4 && b > 4 && c > 4;
+    const lastIsChannel = c <= 4 && a > 4 && b > 4;
+
+    if (firstIsChannel && !lastIsChannel) {
+        return [b, c, a];
+    }
+
+    return shape;
+}
+
+function normalizeStream(stream: DataStream): DataStream {
+    if (stream.dataType !== 'Image') {
+        return stream;
+    }
+
+    return {
+        ...stream,
+        tensorShape: normalizeImageShapeToHwc(stream.tensorShape),
+    };
+}
+
+function normalizeProfile(profile: DatasetProfile): DatasetProfile {
+    return {
+        ...profile,
+        streams: profile.streams.map(normalizeStream),
+    };
+}
+
 const defaultProfiles: DatasetProfile[] = [];
 
 import { persist, StateStorage, createJSONStorage } from 'zustand/middleware';
@@ -184,12 +218,19 @@ export const useDatasetManagerStore = create<DatasetManagerState>()(
             selectedProfileId: null,
 
             addProfile: (profile) => set((state) => ({
-                profiles: [...state.profiles, profile],
+                profiles: [...state.profiles, normalizeProfile(profile)],
                 selectedProfileId: profile.id
             })),
 
             updateProfile: (id, updates) => set((state) => ({
-                profiles: state.profiles.map(p => p.id === id ? { ...p, ...updates } : p)
+                profiles: state.profiles.map(p => {
+                    if (p.id !== id) {
+                        return p;
+                    }
+
+                    const merged = { ...p, ...updates } as DatasetProfile;
+                    return normalizeProfile(merged);
+                })
             })),
 
             removeProfile: (id) => set((state) => ({
@@ -203,6 +244,17 @@ export const useDatasetManagerStore = create<DatasetManagerState>()(
             name: 'dataset-profiles-storage',
             storage: createJSONStorage(() => tauriStorage),
             partialize: (state) => ({ profiles: state.profiles }), // Only persist the profiles array
+            version: 2,
+            migrate: (persistedState: any) => {
+                if (!persistedState || !Array.isArray(persistedState.profiles)) {
+                    return persistedState;
+                }
+
+                return {
+                    ...persistedState,
+                    profiles: persistedState.profiles.map((p: DatasetProfile) => normalizeProfile(p)),
+                };
+            },
         }
     )
 );

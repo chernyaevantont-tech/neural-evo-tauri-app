@@ -4,7 +4,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use rfd::AsyncFileDialog;
 
@@ -47,6 +47,34 @@ static GENOME_EVAL_CACHE: std::sync::LazyLock<Mutex<HashMap<u64, (f32, f32)>>> =
 /// Global in-memory genealogy graph for lineage tracking across evolution operations.
 static GENEALOGY_STORE: std::sync::LazyLock<Mutex<genealogy::GenealogyStore>> =
     std::sync::LazyLock::new(|| Mutex::new(genealogy::GenealogyStore::new()));
+
+/// True while evaluate_population is running. Prevent overlapping runs that can
+/// corrupt Burn/WGPU internal stream state.
+static EVALUATION_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+// Canonical frontend image shape is HWC, while Burn internals operate on CHW/NCHW.
+// This helper accepts either HWC or CHW and normalizes to CHW.
+fn normalize_image_shape_to_internal_chw(shape: &[usize]) -> Vec<usize> {
+    if shape.len() != 3 {
+        return shape.to_vec();
+    }
+
+    let a = shape[0];
+    let b = shape[1];
+    let c = shape[2];
+
+    let first_is_channel = a <= 4 && b > 4 && c > 4;
+    let last_is_channel = c <= 4 && a > 4 && b > 4;
+
+    if first_is_channel {
+        vec![a, b, c]
+    } else if last_is_channel {
+        vec![c, a, b]
+    } else {
+        // Ambiguous case: default to HWC -> CHW for wire-level consistency.
+        vec![c, a, b]
+    }
+}
 
 #[tauri::command]
 async fn stop_evolution() -> Result<(), String> {
@@ -435,6 +463,21 @@ async fn evaluate_population(
     source_generation: Option<u32>,
     profiling: Option<crate::profiler::ProfilingConfig>,
 ) -> Result<Vec<EvaluationResult>, String> {
+    if EVALUATION_ACTIVE
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err("Another evaluation is already running. Wait for it to stop before starting a new run.".to_string());
+    }
+
+    struct EvaluationGuard;
+    impl Drop for EvaluationGuard {
+        fn drop(&mut self) {
+            EVALUATION_ACTIVE.store(false, Ordering::SeqCst);
+        }
+    }
+    let _evaluation_guard = EvaluationGuard;
+
     eprintln!(
         ">>> Entered evaluate_population. Preparing to process dataset profile '{}'...",
         dataset_profile
@@ -622,9 +665,9 @@ async fn evaluate_population(
         let stream = &profile.streams[idx];
         match stream.data_type {
             crate::dtos::DataType::Image => {
-                let mut channels = 3;
                 let mut h = 64;
                 let mut w = 64;
+                let mut channels = 3;
                 if let Some(prep) = &stream.preprocessing {
                     if let Some(vision) = &prep.vision {
                         if vision.resize.len() == 2 {
@@ -636,7 +679,14 @@ async fn evaluate_population(
                         }
                     }
                 }
-                input_overrides.push(vec![channels, h, w]);
+
+                let external_shape = if stream.tensor_shape.len() == 3 {
+                    stream.tensor_shape.clone()
+                } else {
+                    vec![h, w, channels]
+                };
+
+                input_overrides.push(normalize_image_shape_to_internal_chw(&external_shape));
             }
             crate::dtos::DataType::Vector => {
                 let dim = stream.tensor_shape.get(0).cloned().unwrap_or(1);
@@ -678,8 +728,16 @@ async fn evaluate_population(
                 let mut batch_targets: Vec<Vec<crate::entities::DynamicTensor<Backend>>> = vec![Vec::new(); target_stream_indices.len()];
 
                 for id in chunk {
-                    match $loader.load_sample(id, $dev) {
-                        Ok(sample) => {
+                    if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                        return Err("Evolution cancelled during batch assembly".to_string());
+                    }
+
+                    let load_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        $loader.load_sample(id, $dev)
+                    }));
+
+                    match load_result {
+                        Ok(Ok(sample)) => {
                             for (i, &stream_idx) in input_stream_indices.iter().enumerate() {
                                 if let Some(t) = sample.stream_tensors.get(&stream_idx) {
                                     let t_clone: crate::entities::DynamicTensor<Backend> = t.clone();
@@ -693,8 +751,15 @@ async fn evaluate_population(
                                 }
                             }
                         }
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             eprintln!("[ERROR] Sample '{}' dropped during load: {}", id, e);
+                        }
+                        Err(_) => {
+                            eprintln!("[ERROR] Sample '{}' panicked during load; dropping sample", id);
+                            return Err(format!(
+                                "Sample '{}' panicked during load (Burn/WGPU state became invalid). Aborting evaluation.",
+                                id
+                            ));
                         }
                     }
                 }
@@ -708,19 +773,29 @@ async fn evaluate_population(
 
                 if batch_inputs.iter().all(|list| !list.is_empty()) && batch_targets.iter().all(|list| !list.is_empty()) {
                     use crate::entities::concat_dynamic_tensors;
-                    let inputs: Vec<crate::entities::DynamicTensor<Backend>> = batch_inputs
-                        .into_iter()
-                        .map(|tensors| concat_dynamic_tensors::<Backend>(tensors))
-                        .collect();
-                    let targets: Vec<crate::entities::DynamicTensor<Backend>> = batch_targets
-                        .into_iter()
-                        .map(|tensors| concat_dynamic_tensors::<Backend>(tensors))
-                        .collect();
+                    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let inputs: Vec<crate::entities::DynamicTensor<Backend>> = batch_inputs
+                            .into_iter()
+                            .map(|tensors| concat_dynamic_tensors::<Backend>(tensors))
+                            .collect();
+                        let targets: Vec<crate::entities::DynamicTensor<Backend>> = batch_targets
+                            .into_iter()
+                            .map(|tensors| concat_dynamic_tensors::<Backend>(tensors))
+                            .collect();
+                        (inputs, targets)
+                    }));
 
-                    assembled_batches.push(crate::entities::DynamicBatch {
-                        inputs,
-                        targets,
-                    });
+                    match assembled {
+                        Ok((inputs, targets)) => {
+                            assembled_batches.push(crate::entities::DynamicBatch {
+                                inputs,
+                                targets,
+                            });
+                        }
+                        Err(_) => {
+                            return Err("Batch concatenation panicked (Burn/WGPU state invalid). Aborting evaluation.".to_string());
+                        }
+                    }
                 }
             }
             assembled_batches
@@ -894,12 +969,24 @@ async fn evaluate_population(
                     }
 
                     // Rebuild model each attempt (fresh random weights)
-                    let model = crate::entities::GraphModel::<Backend>::build(
-                        genome_str,
-                        &device,
-                        Some(&input_overrides),
-                        Some(&output_overrides),
-                    );
+                    let model = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        crate::entities::GraphModel::<Backend>::build(
+                            genome_str,
+                            &device,
+                            Some(&input_overrides),
+                            Some(&output_overrides),
+                        )
+                    })) {
+                        Ok(m) => m,
+                        Err(_) => {
+                            eprintln!(
+                                ">>> Genome {} attempt {} panicked while rebuilding model. Skipping attempt.",
+                                i,
+                                attempt + 1
+                            );
+                            continue;
+                        }
+                    };
 
                     // Let frontend know we are starting to evaluate a genome (so it clears live charts)
                     let _ = app_handle.emit("evaluating-genome-start", i);
@@ -927,63 +1014,100 @@ async fn evaluate_population(
                         .and_then(|cfg| cfg.memory_mode)
                         .unwrap_or(crate::profiler::MemoryMode::Hybrid);
 
-                    let (final_loss, final_acc, profiler_result, trained_model) = tokio::task::spawn_blocking(move || {
-                        let mut model_local = model;
-                        let mut profiler = crate::profiler::ProfilerCollector::new();
-                        profiler.set_memory_mode(memory_mode);
+                    let training_task = tokio::task::spawn_blocking(move || {
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let mut model_local = model;
+                            let mut profiler = crate::profiler::ProfilerCollector::new();
+                            profiler.set_memory_mode(memory_mode);
 
-                        if epochs > 0 {
-                            crate::entities::run_eval_pass(
-                                &app_handle_clone,
-                                &mut model_local,
-                                &train_batches_local,
-                                epochs,
-                                0.001,
-                                is_classification,
-                                &EVOLUTION_SESSION,
-                                session_snapshot,
-                                Some(&mut profiler),
-                            );
-                        } else {
-                            println!(">>> Genome {}: Skipping training (0 epochs requested)", i);
-                        }
+                            if epochs > 0 {
+                                crate::entities::run_eval_pass(
+                                    &app_handle_clone,
+                                    &mut model_local,
+                                    &train_batches_local,
+                                    epochs,
+                                    0.001,
+                                    is_classification,
+                                    &EVOLUTION_SESSION,
+                                    session_snapshot,
+                                    Some(&mut profiler),
+                                );
+                            } else {
+                                println!(">>> Genome {}: Skipping training (0 epochs requested)", i);
+                            }
 
-                        let (val_loss, val_acc) = if !val_batches_local.is_empty() {
-                            crate::entities::run_validation_pass(
-                                &model_local,
-                                &val_batches_local,
-                                "Validation",
-                                is_classification,
-                                Some(&mut profiler),
-                            )
-                        } else {
-                            (0.0, 0.0)
-                        };
+                            if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                                println!(
+                                    ">>> Genome {} cancelled right after training. Skipping validation/test inside worker.",
+                                    i
+                                );
+                                return (999.0, 0.0, profiler.finalize(), model_local);
+                            }
 
-                        let (loss, acc) = if !test_batches_local.is_empty() {
-                            crate::entities::run_validation_pass(
-                                &model_local,
-                                &test_batches_local,
-                                "Test",
-                                is_classification,
-                                Some(&mut profiler),
-                            )
-                        } else if !val_batches_local.is_empty() {
-                            (val_loss, val_acc)
-                        } else {
-                            crate::entities::run_validation_pass(
-                                &model_local,
-                                &train_batches_local,
-                                "Train",
-                                is_classification,
-                                None,
-                            )
-                        };
+                            let (val_loss, val_acc) = if !val_batches_local.is_empty() {
+                                crate::entities::run_validation_pass(
+                                    &model_local,
+                                    &val_batches_local,
+                                    "Validation",
+                                    is_classification,
+                                    Some(&mut profiler),
+                                )
+                            } else {
+                                (0.0, 0.0)
+                            };
 
-                        (loss, acc, profiler.finalize(), model_local)
+                            if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
+                                println!(
+                                    ">>> Genome {} cancelled after validation. Skipping test pass inside worker.",
+                                    i
+                                );
+                                return (999.0, 0.0, profiler.finalize(), model_local);
+                            }
+
+                            let (loss, acc) = if !test_batches_local.is_empty() {
+                                crate::entities::run_validation_pass(
+                                    &model_local,
+                                    &test_batches_local,
+                                    "Test",
+                                    is_classification,
+                                    Some(&mut profiler),
+                                )
+                            } else if !val_batches_local.is_empty() {
+                                (val_loss, val_acc)
+                            } else {
+                                crate::entities::run_validation_pass(
+                                    &model_local,
+                                    &train_batches_local,
+                                    "Train",
+                                    is_classification,
+                                    None,
+                                )
+                            };
+
+                            (loss, acc, profiler.finalize(), model_local)
+                        }))
                     })
-                    .await
-                    .map_err(|e| format!("Training task failed: {}", e))?;
+                    .await;
+
+                    let (final_loss, final_acc, profiler_result, trained_model) = match training_task {
+                        Ok(Ok(tuple)) => tuple,
+                        Ok(Err(_)) => {
+                            return Err(format!(
+                                "Genome {} attempt {} panicked during training/validation. Aborting evaluate_population to avoid corrupted WGPU state.",
+                                i,
+                                attempt + 1
+                            ));
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                ">>> Genome {} attempt {} failed to join training task: {}",
+                                i,
+                                attempt + 1,
+                                e
+                            );
+                            continue;
+                        }
+                    };
 
                     // Check cancellation after training
                     if EVOLUTION_SESSION.load(Ordering::SeqCst) != session_snapshot {
@@ -2288,82 +2412,144 @@ async fn compute_zero_cost_score(
 ) -> Result<ZeroCostMetrics, String> {
     println!(">>> compute_zero_cost_score: start");
     let result = tokio::task::spawn_blocking(move || -> Result<ZeroCostMetrics, String> {
-        let device = WgpuDevice::default();
-        // Parse config
-        let config: ZeroCostConfig = serde_json::from_str(&config_json)
-            .map_err(|e| format!("Failed to parse config: {}", e))?;
-        
-        if !config.enabled {
-            return Ok(ZeroCostMetrics {
-                synflow: 5.0,
-                normalized_score: 0.5,
-                strategy_decision: "full_train".to_string(),
-            });
+        let safe_run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || -> Result<ZeroCostMetrics, String> {
+                let device = WgpuDevice::default();
+                // Parse config
+                let config: ZeroCostConfig = serde_json::from_str(&config_json)
+                    .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+                if !config.enabled {
+                    return Ok(ZeroCostMetrics {
+                        synflow: 5.0,
+                        normalized_score: 0.5,
+                        strategy_decision: "full_train".to_string(),
+                    });
+                }
+
+                // Build model from genome with explicit IO overrides inferred from serialized nodes.
+                // This stabilizes shape semantics between CHW/HWC sources for zero-cost scoring.
+                let mut input_overrides: Vec<Vec<usize>> = Vec::new();
+                let mut output_overrides: Vec<Vec<usize>> = Vec::new();
+
+                let mut parsing_connections = false;
+                for line in genome_json.lines().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+                    if line == "CONNECTIONS" {
+                        parsing_connections = true;
+                        continue;
+                    }
+                    if parsing_connections {
+                        continue;
+                    }
+
+                    let parsed: crate::dtos::NodeDtoJSON = match serde_json::from_str(line) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    match parsed {
+                        crate::dtos::NodeDtoJSON::Input { output_shape } => {
+                            let shape: Vec<usize> = output_shape.iter().map(|&v| v as usize).collect();
+                            if shape.len() == 3 {
+                                input_overrides.push(normalize_image_shape_to_internal_chw(&shape));
+                            } else {
+                                input_overrides.push(shape);
+                            }
+                        }
+                        crate::dtos::NodeDtoJSON::Output { input_shape } => {
+                            output_overrides.push(input_shape.iter().map(|&v| v as usize).collect());
+                        }
+                        _ => {}
+                    }
+                }
+
+                let input_overrides_ref = if input_overrides.is_empty() {
+                    None
+                } else {
+                    Some(input_overrides.as_slice())
+                };
+                let output_overrides_ref = if output_overrides.is_empty() {
+                    None
+                } else {
+                    Some(output_overrides.as_slice())
+                };
+
+                let model = GraphModel::<Backend>::build(
+                    &genome_json,
+                    &device,
+                    input_overrides_ref,
+                    output_overrides_ref,
+                );
+
+                // Create a minimal sample batch (1 sample with dummy data)
+                let mut inputs = Vec::new();
+                for shape in &model.input_shapes {
+                    let tensor = if shape.len() == 1 {
+                        DynamicTensor::Dim2(Tensor::<Backend, 2>::random(
+                            [1, shape[0]],
+                            Distribution::Normal(0.0, 1.0),
+                            &device,
+                        ))
+                    } else if shape.len() == 2 {
+                        DynamicTensor::Dim3(Tensor::<Backend, 3>::random(
+                            [1, shape[0], shape[1]],
+                            Distribution::Normal(0.0, 1.0),
+                            &device,
+                        ))
+                    } else if shape.len() == 3 {
+                        DynamicTensor::Dim4(Tensor::<Backend, 4>::random(
+                            [1, shape[0], shape[1], shape[2]],
+                            Distribution::Normal(0.0, 1.0),
+                            &device,
+                        ))
+                    } else {
+                        return Err("Unsupported input shape for zero-cost scoring".to_string());
+                    };
+                    inputs.push(tensor);
+                }
+
+                // Create dummy targets
+                let mut targets = Vec::new();
+                for shape in &model.output_shapes {
+                    let tensor = if shape.len() == 1 {
+                        let num_classes = if shape[0] > 0 { shape[0] as f64 } else { 1.0 };
+                        let class_idx = (rand::random::<f64>() * num_classes).floor();
+                        DynamicTensor::Dim2(Tensor::<Backend, 2>::from_data([[class_idx]], &device))
+                    } else if shape.len() == 2 {
+                        DynamicTensor::Dim3(Tensor::<Backend, 3>::random(
+                            [1, shape[0], shape[1]],
+                            Distribution::Normal(0.0, 1.0),
+                            &device,
+                        ))
+                    } else if shape.len() == 3 {
+                        DynamicTensor::Dim4(Tensor::<Backend, 4>::random(
+                            [1, shape[0], shape[1], shape[2]],
+                            Distribution::Normal(0.0, 1.0),
+                            &device,
+                        ))
+                    } else {
+                        return Err("Unsupported output shape for zero-cost scoring".to_string());
+                    };
+                    targets.push(tensor);
+                }
+
+                let batch = DynamicBatch { inputs, targets };
+
+                // Compute real SynFlow score
+                let synflow_score = zero_cost_proxies::compute_synflow(&model, &batch);
+                println!(">>> compute_zero_cost_score: score = {}", synflow_score);
+
+                Ok(ZeroCostMetrics::from_synflow(synflow_score, &config))
+            },
+        ));
+
+        match safe_run {
+            Ok(res) => res,
+            Err(_) => Err("Zero-cost scoring panicked (likely invalid shape or GPU memory pressure)".to_string()),
         }
-        
-        // Build model from genome
-        let model = GraphModel::<Backend>::build(&genome_json, &device, None, None);
-        
-        // Create a minimal sample batch (1 sample with dummy data)
-        let mut inputs = Vec::new();
-        for shape in &model.input_shapes {
-            let tensor = if shape.len() == 1 {
-                DynamicTensor::Dim2(Tensor::<Backend, 2>::random(
-                    [1, shape[0]],
-                    Distribution::Normal(0.0, 1.0),
-                    &device,
-                ))
-            } else if shape.len() == 2 {
-                DynamicTensor::Dim3(Tensor::<Backend, 3>::random(
-                    [1, shape[0], shape[1]],
-                    Distribution::Normal(0.0, 1.0),
-                    &device,
-                ))
-            } else if shape.len() == 3 {
-                DynamicTensor::Dim4(Tensor::<Backend, 4>::random(
-                    [1, shape[2], shape[0], shape[1]],
-                    Distribution::Normal(0.0, 1.0),
-                    &device,
-                ))
-            } else {
-                return Err("Unsupported input shape for zero-cost scoring".to_string());
-            };
-            inputs.push(tensor);
-        }
-        
-        // Create dummy targets
-        let mut targets = Vec::new();
-        for shape in &model.output_shapes {
-            let tensor = if shape.len() == 1 {
-                let num_classes = if shape[0] > 0 { shape[0] as f64 } else { 1.0 };
-                let class_idx = (rand::random::<f64>() * num_classes).floor();
-                DynamicTensor::Dim2(Tensor::<Backend, 2>::from_data([[class_idx]], &device))
-            } else if shape.len() == 2 {
-                DynamicTensor::Dim3(Tensor::<Backend, 3>::random(
-                    [1, shape[0], shape[1]],
-                    Distribution::Normal(0.0, 1.0),
-                    &device,
-                ))
-            } else if shape.len() == 3 {
-                DynamicTensor::Dim4(Tensor::<Backend, 4>::random(
-                    [1, shape[2], shape[0], shape[1]],
-                    Distribution::Normal(0.0, 1.0),
-                    &device,
-                ))
-            } else {
-                return Err("Unsupported output shape for zero-cost scoring".to_string());
-            };
-            targets.push(tensor);
-        }
-        
-        let batch = DynamicBatch { inputs, targets };
-        
-        // Compute real SynFlow score
-        let synflow_score = zero_cost_proxies::compute_synflow(&model, &batch);
-        println!(">>> compute_zero_cost_score: score = {}", synflow_score);
-        
-        Ok(ZeroCostMetrics::from_synflow(synflow_score, &config))
-    }).await.map_err(|e| format!("Task failed to join: {}", e))??;
+    })
+    .await
+    .map_err(|e| format!("Task failed to join: {}", e))??;
     
     Ok(result)
 }

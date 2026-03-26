@@ -37,6 +37,16 @@ export type EvolutionLoopSettings = AdaptiveMutationSettings & {
         ram: number;
         macs: number;
     };
+    customDeviceParams?: {
+        mops_budget?: number;
+        ram_mb: number;
+        flash_mb?: number;
+        vram_mb?: number;
+        latency_budget_ms: number;
+        max_model_size_mb?: number;
+    };
+    memorySafetyMarginMb?: number;
+    estimatorSafetyFactor?: number;
     useMaxGenerations: boolean;
     maxGenerations: number;
     genealogyTrackingEnabled: boolean;

@@ -23,7 +23,7 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
             alias: `New Stream ${profile.streams.length + 1}`,
             role: 'Input',
             dataType: 'Image',
-            tensorShape: [3, 64, 64],
+            tensorShape: [64, 64, 3],
             locator: { type: 'GlobPattern', pattern: '**/*.jpg' },
             preprocessing: { vision: { ...defaultVisionSettings } }
         };
@@ -159,7 +159,7 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                                 let preprocessing = stream.preprocessing;
                                                 if (dataType === 'Image') {
                                                     preprocessing = { vision: { ...defaultVisionSettings } };
-                                                    updateStream(stream.id, { dataType, preprocessing, tensorShape: [3, 64, 64] });
+                                                    updateStream(stream.id, { dataType, preprocessing, tensorShape: [64, 64, 3] });
                                                 } else if (dataType === 'Vector') {
                                                     preprocessing = { tabular: { ...defaultTabularSettings } };
                                                     updateStream(stream.id, { dataType, preprocessing });
@@ -331,7 +331,7 @@ export const DataStreamsPanel: React.FC<Props> = ({ profile }) => {
                                         const newVision = { ...v, ...patch };
                                         updateStream(stream.id, { 
                                             preprocessing: { ...stream.preprocessing, vision: newVision },
-                                            tensorShape: [newVision.grayscale ? 1 : 3, newVision.resize[1], newVision.resize[0]]
+                                            tensorShape: [newVision.resize[1], newVision.resize[0], newVision.grayscale ? 1 : 3]
                                         });
                                     };
                                     return (

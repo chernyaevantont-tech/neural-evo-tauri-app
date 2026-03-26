@@ -11,6 +11,94 @@ import type {
 } from '../../../shared/lib';
 import { computeZeroCostScore, ZeroCostMetrics } from './useZeroCostEvaluation';
 
+const DEFAULT_MAX_SINGLE_TENSOR_MB = 192;
+const DEFAULT_MAX_WORKING_SET_MB = 2048;
+const TRAINING_WORKING_SET_MULTIPLIER = 4;
+const MB_TO_BYTES = 1024 * 1024;
+const MIN_WORKING_SET_BYTES = 8 * MB_TO_BYTES;
+const INIT_ATTEMPT_MULTIPLIER = 30;
+const BREED_ATTEMPT_MULTIPLIER = 30;
+const STRUCTURAL_RETRY_ATTEMPTS = 30;
+
+type MemoryValidation = {
+    ok: boolean;
+    reason?: string;
+};
+
+function validateGenomeTensorBudget(
+    genome: Genome,
+    batchSize: number,
+    maxSingleTensorBytes: number,
+    maxWorkingSetBytes: number,
+): MemoryValidation {
+    const nodes = genome.getAllNodes();
+    let maxPerSampleTensorBytes = 0;
+    let totalPerSampleActivationBytes = 0;
+
+    for (const node of nodes) {
+        const shape = node.GetOutputShape();
+
+        if (!Array.isArray(shape) || shape.length === 0) {
+            continue;
+        }
+
+        let elements = 1;
+        for (const dim of shape) {
+            if (!Number.isFinite(dim) || dim <= 0 || !Number.isInteger(dim)) {
+                return {
+                    ok: false,
+                    reason: `invalid tensor shape at ${node.GetNodeType()} (${JSON.stringify(shape)})`
+                };
+            }
+
+            elements *= dim;
+            if (!Number.isFinite(elements) || elements > Number.MAX_SAFE_INTEGER) {
+                return {
+                    ok: false,
+                    reason: `tensor elements overflow at ${node.GetNodeType()} (${JSON.stringify(shape)})`
+                };
+            }
+        }
+
+        const perSampleTensorBytes = elements * 4; // f32 activations
+        if (perSampleTensorBytes > maxPerSampleTensorBytes) {
+            maxPerSampleTensorBytes = perSampleTensorBytes;
+        }
+        totalPerSampleActivationBytes += perSampleTensorBytes;
+
+        if (!Number.isFinite(totalPerSampleActivationBytes) || totalPerSampleActivationBytes > Number.MAX_SAFE_INTEGER) {
+            return {
+                ok: false,
+                reason: 'activation memory estimate overflowed'
+            };
+        }
+    }
+
+    const effectiveBatch = Math.max(1, Math.floor(batchSize || 1));
+    const estimatedSingleTensorBatchBytes = maxPerSampleTensorBytes * effectiveBatch;
+    if (estimatedSingleTensorBatchBytes > maxSingleTensorBytes) {
+        return {
+            ok: false,
+            reason:
+                `single batched tensor too large: ${(estimatedSingleTensorBatchBytes / (1024 * 1024)).toFixed(1)}MB ` +
+                `(limit ${(maxSingleTensorBytes / (1024 * 1024)).toFixed(1)}MB)`
+        };
+    }
+
+    // Approximate training memory: activations for forward/backward plus optimizer/work buffers.
+    const estimatedWorkingSetBytes = totalPerSampleActivationBytes * effectiveBatch * TRAINING_WORKING_SET_MULTIPLIER;
+    if (estimatedWorkingSetBytes > maxWorkingSetBytes) {
+        return {
+            ok: false,
+            reason:
+                `estimated working set too large: ${(estimatedWorkingSetBytes / (1024 * 1024)).toFixed(1)}MB ` +
+                `(limit ${(maxWorkingSetBytes / (1024 * 1024)).toFixed(1)}MB)`
+        };
+    }
+
+    return { ok: true };
+}
+
 export interface EvaluationResult {
     genome_id: string;
     loss: number;
@@ -81,6 +169,7 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
     const perGenomeMetricsRef = useRef<Map<number, BatchMetrics[]>>(new Map());
     const activeGenomeIndexRef = useRef<number>(0);
     const genealogyMapRef = useRef<Map<string, GenomeGenealogy>>(new Map());
+    const generationRunInFlightRef = useRef(false);
 
     // Using refs for safe async access within loops
     const isRunningRef = useRef(false);
@@ -208,6 +297,54 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
         }
     }, [addLog, settings.genealogyTrackingEnabled]);
 
+    const getGenomeBudgetValidator = useCallback(() => {
+        // Always derive mutation-time memory checks from the active target device budget from UI.
+        const customRamBytes = Math.max(
+            0,
+            Math.floor((settings.customDeviceParams?.ram_mb ?? 0) * MB_TO_BYTES),
+        );
+        const configuredRamBytes = Math.max(0, Math.floor(settings.resourceTargets.ram));
+        const targetRamBytes = customRamBytes > 0
+            ? customRamBytes
+            : configuredRamBytes > 0
+                ? configuredRamBytes
+                : DEFAULT_MAX_WORKING_SET_MB * MB_TO_BYTES;
+        const safetyMarginBytes = Math.max(
+            0,
+            Math.floor((settings.memorySafetyMarginMb ?? 0) * MB_TO_BYTES),
+        );
+        const estimatorSafetyFactor = Math.max(1, settings.estimatorSafetyFactor ?? 1);
+
+        const availableBytes = Math.max(MIN_WORKING_SET_BYTES, targetRamBytes - safetyMarginBytes);
+        const maxWorkingSetBytes = Math.max(
+            MIN_WORKING_SET_BYTES,
+            Math.floor(availableBytes / estimatorSafetyFactor),
+        );
+
+        // Keep a per-tensor cap as a fraction of the remaining device budget.
+        const maxSingleTensorBytes = Math.max(
+            1 * MB_TO_BYTES,
+            Math.min(
+                maxWorkingSetBytes,
+                Math.floor(maxWorkingSetBytes * 0.35),
+                DEFAULT_MAX_SINGLE_TENSOR_MB * MB_TO_BYTES,
+            ),
+        );
+
+        return (genome: Genome): MemoryValidation => validateGenomeTensorBudget(
+            genome,
+            settings.batchSize || 32,
+            maxSingleTensorBytes,
+            maxWorkingSetBytes,
+        );
+    }, [
+        settings.batchSize,
+        settings.customDeviceParams?.ram_mb,
+        settings.resourceTargets.ram,
+        settings.memorySafetyMarginMb,
+        settings.estimatorSafetyFactor,
+    ]);
+
     const stopEvolution = useCallback(() => {
         setIsRunning(false);
         setIsPaused(false);
@@ -263,6 +400,7 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
     const initPopulation = useCallback(async (seedJSONs: string[]) => {
         const popSize = settings.populationSize;
         const genomes: PopulatedGenome[] = [];
+        const validateBudget = getGenomeBudgetValidator();
         try {
             // Determine how many genomes to generate randomly vs from seeds
             // Case 1: useRandomInitialization enabled with seeds → split by ratio
@@ -307,7 +445,7 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
             // First pass: generate random architectures if enabled
             if (numRandom > 0 && inputShape && outputShape) {
                 let randomAttempts = 0;
-                while (genomes.length < numRandom && randomAttempts < numRandom * 5) {
+                while (genomes.length < numRandom && randomAttempts < numRandom * 12) {
                     randomAttempts++;
                     try {
                         const randomGenome = generateRandomArchitecture(inputShape, outputShape, {
@@ -322,6 +460,12 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                             continue;
                         }
 
+                        const randomBudget = validateBudget(randomGenome);
+                        if (!randomBudget.ok) {
+                            addLog(`Random architecture rejected by memory budget: ${randomBudget.reason}`, "warn");
+                            continue;
+                        }
+
                         // Apply parameter mutations for diversity
                         const mutationOpts = new Map<string, number>();
                         mutationOpts.set('params', settings.mutationRates.params || 0.5);
@@ -331,13 +475,23 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                             }
                         });
 
+                        const finalRandomNodes = randomGenome.getAllNodes();
+                        if (!Genome.isGenomeFeasible(finalRandomNodes)) {
+                            continue;
+                        }
+
+                        const finalRandomBudget = validateBudget(randomGenome);
+                        if (!finalRandomBudget.ok) {
+                            continue;
+                        }
+
                         genomes.push({
                             id: crypto.randomUUID(),
                             genome: randomGenome,
-                            nodes: nodes
+                            nodes: finalRandomNodes
                         });
                     } catch (e) {
-                        console.warn(`[initPopulation] Random generation failed. Attempt ${randomAttempts}/${numRandom * 5}`, e);
+                        console.warn(`[initPopulation] Random generation failed. Attempt ${randomAttempts}/${numRandom * 12}`, e);
                         addLog(`Exception: ${e}`, "error");
                         continue;
                     }
@@ -355,6 +509,12 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
 
                 if (!Genome.isGenomeFeasible(nodes)) {
                     addLog(`Seed genome is architecturally invalid or excessive. Skipping.`, "warn");
+                    continue;
+                }
+
+                const seedBudget = validateBudget(genome);
+                if (!seedBudget.ok) {
+                    addLog(`Seed genome rejected by memory budget: ${seedBudget.reason}`, "warn");
                     continue;
                 }
 
@@ -381,7 +541,7 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
 
             // Fill the rest of the population up to popSize by mutating from available sources
             let initAttempts = 0;
-            while (genomes.length < popSize && initAttempts < popSize * 10) {
+            while (genomes.length < popSize && initAttempts < popSize * INIT_ATTEMPT_MULTIPLIER) {
                 initAttempts++;
                 try {
                     // Pick a random seed or random genome to mutate
@@ -394,7 +554,7 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                     // === Guaranteed diversity: force at least one structural mutation ===
                     const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
                     let mutated = false;
-                    const maxMutAttempts = 10;
+                    const maxMutAttempts = STRUCTURAL_RETRY_ATTEMPTS;
 
                     for (let attempt = 0; attempt < maxMutAttempts && !mutated; attempt++) {
                         // Pick a random structural mutation and force-apply it
@@ -409,9 +569,17 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                         const pick = structuralMutations[Math.floor(Math.random() * structuralMutations.length)];
                         const res = pick();
                         if (res) {
-                            clone = res.genome;
-                            mutated = true;
+                            const candidateBudget = validateBudget(res.genome);
+                            if (candidateBudget.ok) {
+                                clone = res.genome;
+                                mutated = true;
+                            }
                         }
+                    }
+
+                    if (!mutated) {
+                        // Structural mutation couldn't produce a valid alternative; retry from another seed/clone.
+                        continue;
                     }
 
                     // Additional probabilistic mutation rounds for extra variance
@@ -427,23 +595,38 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
 
                         if (Math.random() < dynamicRates.removeSubgraph) {
                             const res = clone.MutateRemoveSubgraph();
-                            if (res) clone = res.genome;
+                            if (res) {
+                                const candidateBudget = validateBudget(res.genome);
+                                if (candidateBudget.ok) clone = res.genome;
+                            }
                         }
                         if (Math.random() < dynamicRates.removeNode) {
                             const res = clone.MutateRemoveNode();
-                            if (res) clone = res.genome;
+                            if (res) {
+                                const candidateBudget = validateBudget(res.genome);
+                                if (candidateBudget.ok) clone = res.genome;
+                            }
                         }
                         if (Math.random() < dynamicRates.addNode) {
                             const res = clone.MutateAddNode(maxNodes);
-                            if (res) clone = res.genome;
+                            if (res) {
+                                const candidateBudget = validateBudget(res.genome);
+                                if (candidateBudget.ok) clone = res.genome;
+                            }
                         }
                         if (settings.mutationRates.addSkipConnection && Math.random() < settings.mutationRates.addSkipConnection) {
                             const res = clone.MutateAddSkipConnection(maxNodes);
-                            if (res) clone = res.genome;
+                            if (res) {
+                                const candidateBudget = validateBudget(res.genome);
+                                if (candidateBudget.ok) clone = res.genome;
+                            }
                         }
                         if (settings.mutationRates.changeLayerType && Math.random() < settings.mutationRates.changeLayerType) {
                             const res = clone.MutateChangeLayerType(maxNodes);
-                            if (res) clone = res.genome;
+                            if (res) {
+                                const candidateBudget = validateBudget(res.genome);
+                                if (candidateBudget.ok) clone = res.genome;
+                            }
                         }
                     }
 
@@ -467,14 +650,87 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                         continue;
                     }
 
+                    const finalBudget = validateBudget(clone);
+                    if (!finalBudget.ok) {
+                        if (initAttempts % 10 === 0) {
+                            addLog(`Retrying mutation (memory budget exceeded)...`, "warn");
+                        }
+                        continue;
+                    }
+
                     genomes.push({
                         id: crypto.randomUUID(),
                         genome: clone,
                         nodes: finalNodes
                     });
                 } catch (e) {
-                    console.warn(`[initPopulation] Seed mutation failed (likely shape mismatch). Attempt ${initAttempts}/${popSize * 10}`, e);
+                    console.warn(
+                        `[initPopulation] Seed mutation failed (likely shape mismatch). Attempt ${initAttempts}/${popSize * INIT_ATTEMPT_MULTIPLIER}`,
+                        e,
+                    );
                     continue;
+                }
+            }
+
+            if (genomes.length < popSize && genomes.length > 0) {
+                addLog(
+                    `Initialization recovery: population incomplete (${genomes.length}/${popSize}), retrying with additional mutation passes...`,
+                    'warn',
+                );
+
+                let recoveryAttempts = 0;
+                while (genomes.length < popSize && recoveryAttempts < popSize * INIT_ATTEMPT_MULTIPLIER) {
+                    recoveryAttempts++;
+
+                    try {
+                        const base = genomes[Math.floor(Math.random() * genomes.length)]?.genome;
+                        if (!base) {
+                            break;
+                        }
+
+                        const baseSerialized = await serializeGenome(base);
+                        const { genome: candidate } = await deserializeGenome(baseSerialized);
+                        const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
+
+                        let accepted: Genome | null = null;
+                        for (let m = 0; m < STRUCTURAL_RETRY_ATTEMPTS && !accepted; m++) {
+                            const options = [
+                                () => candidate.MutateAddNode(maxNodes),
+                                () => candidate.MutateRemoveNode(),
+                                () => candidate.MutateRemoveSubgraph(),
+                                ...(settings.mutationRates.addSkipConnection ? [() => candidate.MutateAddSkipConnection(maxNodes)] : []),
+                                ...(settings.mutationRates.changeLayerType ? [() => candidate.MutateChangeLayerType(maxNodes)] : []),
+                            ];
+
+                            const picked = options[Math.floor(Math.random() * options.length)];
+                            const result = picked();
+                            if (!result) {
+                                continue;
+                            }
+
+                            const nodes = result.genome.getAllNodes();
+                            if (!Genome.isGenomeFeasible(nodes)) {
+                                continue;
+                            }
+                            const mem = validateBudget(result.genome);
+                            if (!mem.ok) {
+                                continue;
+                            }
+                            accepted = result.genome;
+                        }
+
+                        if (!accepted) {
+                            continue;
+                        }
+
+                        genomes.push({
+                            id: crypto.randomUUID(),
+                            genome: accepted,
+                            nodes: accepted.getAllNodes(),
+                        });
+                    } catch {
+                        continue;
+                    }
                 }
             }
 
@@ -515,15 +771,21 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
         } catch (e) {
             addLog(`Failed to initialize population: ${String(e)}`, "error");
         }
-    }, [addLog, settings, datasetProfileId, registerGenealogyEvent]);
+    }, [addLog, settings, datasetProfileId, registerGenealogyEvent, getGenomeBudgetValidator]);
 
     // Main Async Loop
     const runGeneration = useCallback(async () => {
         if (!isRunningRef.current || population.length === 0 || !datasetProfileId) return;
+        if (generationRunInFlightRef.current) {
+            return;
+        }
+
+        generationRunInFlightRef.current = true;
+
+        try {
 
         addLog(`--- Starting Generation ${generation} Evaluation ---`, "info");
 
-        try {
             // 1. Serialize population for Rust
             const serializedGenomes = await Promise.all(
                 population.map(p => serializeGenome(p.genome))
@@ -539,6 +801,11 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                 addLog(`Computing zero-cost proxy scores for architecture evaluation...`);
                 
                 for (let i = 0; i < serializedGenomes.length; i++) {
+                    if (!isRunningRef.current || isPausedRef.current) {
+                        addLog('Zero-cost scoring interrupted by stop/pause request.', 'warn');
+                        break;
+                    }
+
                     try {
                         const score = await computeZeroCostScore(serializedGenomes[i], {
                             enabled: true,
@@ -566,6 +833,12 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                             "info"
                         );
                     } catch (e) {
+                        const errMsg = String(e);
+                        if (/cancel|stopp|aborted/i.test(errMsg)) {
+                            addLog('Zero-cost scoring cancelled.', 'warn');
+                            break;
+                        }
+
                         // Fallback: full training if zero-cost fails
                         zeroCostScores.push({
                             synflow: 5.0,
@@ -758,10 +1031,11 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
             };
 
             const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
+            const validateBudget = getGenomeBudgetValidator();
 
             const nextGenNum = generation + 1;
             let breedAttempts = 0;
-            while (nextGen.length < popSize && breedAttempts < popSize * 10) {
+            while (nextGen.length < popSize && breedAttempts < popSize * BREED_ATTEMPT_MULTIPLIER) {
                 breedAttempts++;
                 try {
                     const parentAEntry = tournamentSelect()!;
@@ -854,50 +1128,65 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                     if (Math.random() < dynamicRates.removeSubgraph) {
                         const res = childGenome.MutateRemoveSubgraph();
                         if (res) {
-                            childGenome = res.genome;
-                            childMutationType = { type: 'RemoveSubgraph', data: { node_ids: [] } };
-                            childMutationParams.last_structural_mutation = 'remove_subgraph';
+                            const candidateBudget = validateBudget(res.genome);
+                            if (candidateBudget.ok) {
+                                childGenome = res.genome;
+                                childMutationType = { type: 'RemoveSubgraph', data: { node_ids: [] } };
+                                childMutationParams.last_structural_mutation = 'remove_subgraph';
+                            }
                         }
                     }
                     if (Math.random() < dynamicRates.removeNode) {
                         const res = childGenome.MutateRemoveNode();
                         if (res) {
-                            childGenome = res.genome;
-                            childMutationType = { type: 'RemoveNode', data: { node_id: '' } };
-                            childMutationParams.last_structural_mutation = 'remove_node';
+                            const candidateBudget = validateBudget(res.genome);
+                            if (candidateBudget.ok) {
+                                childGenome = res.genome;
+                                childMutationType = { type: 'RemoveNode', data: { node_id: '' } };
+                                childMutationParams.last_structural_mutation = 'remove_node';
+                            }
                         }
                     }
                     if (Math.random() < dynamicRates.addNode) {
                         const res = childGenome.MutateAddNode(maxNodes);
                         if (res) {
-                            childGenome = res.genome;
-                            childMutationType = {
-                                type: 'AddNode',
-                                data: { node_type: 'unknown', source: 'unknown', target: 'unknown' },
-                            };
-                            childMutationParams.last_structural_mutation = 'add_node';
+                            const candidateBudget = validateBudget(res.genome);
+                            if (candidateBudget.ok) {
+                                childGenome = res.genome;
+                                childMutationType = {
+                                    type: 'AddNode',
+                                    data: { node_type: 'unknown', source: 'unknown', target: 'unknown' },
+                                };
+                                childMutationParams.last_structural_mutation = 'add_node';
+                            }
                         }
                     }
                     if (settings.mutationRates.addSkipConnection && Math.random() < settings.mutationRates.addSkipConnection) {
                         const res = childGenome.MutateAddSkipConnection(maxNodes);
                         if (res) {
-                            childGenome = res.genome;
-                            childMutationType = {
-                                type: 'ParameterMutation',
-                                data: { layer_id: 'graph', param_name: 'add_skip_connection' },
-                            };
-                            childMutationParams.last_structural_mutation = 'add_skip_connection';
+                            const candidateBudget = validateBudget(res.genome);
+                            if (candidateBudget.ok) {
+                                childGenome = res.genome;
+                                childMutationType = {
+                                    type: 'ParameterMutation',
+                                    data: { layer_id: 'graph', param_name: 'add_skip_connection' },
+                                };
+                                childMutationParams.last_structural_mutation = 'add_skip_connection';
+                            }
                         }
                     }
                     if (settings.mutationRates.changeLayerType && Math.random() < settings.mutationRates.changeLayerType) {
                         const res = childGenome.MutateChangeLayerType(maxNodes);
                         if (res) {
-                            childGenome = res.genome;
-                            childMutationType = {
-                                type: 'ParameterMutation',
-                                data: { layer_id: 'graph', param_name: 'change_layer_type' },
-                            };
-                            childMutationParams.last_structural_mutation = 'change_layer_type';
+                            const candidateBudget = validateBudget(res.genome);
+                            if (candidateBudget.ok) {
+                                childGenome = res.genome;
+                                childMutationType = {
+                                    type: 'ParameterMutation',
+                                    data: { layer_id: 'graph', param_name: 'change_layer_type' },
+                                };
+                                childMutationParams.last_structural_mutation = 'change_layer_type';
+                            }
                         }
                     }
 
@@ -925,6 +1214,14 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                         continue;
                     }
 
+                    const childBudget = validateBudget(childGenome);
+                    if (!childBudget.ok) {
+                        if (breedAttempts % 10 === 0) {
+                            addLog(`Rejected child by memory budget: ${childBudget.reason}. Retrying breeding...`, "warn");
+                        }
+                        continue;
+                    }
+
                     const childId = crypto.randomUUID();
                     await registerGenealogyEvent(
                         childId,
@@ -944,8 +1241,133 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
                         mutation_params: childMutationParams,
                     });
                 } catch (e) {
-                    console.warn(`[Breed] Child generation failed (likely shape mismatch). Attempt ${breedAttempts}/${popSize * 10}`, e);
+                    console.warn(
+                        `[Breed] Child generation failed (likely shape mismatch). Attempt ${breedAttempts}/${popSize * BREED_ATTEMPT_MULTIPLIER}`,
+                        e,
+                    );
                     continue;
+                }
+            }
+
+            if (nextGen.length < popSize && evaluatedPop.length > 0) {
+                addLog(
+                    `Breeding recovery: generated ${nextGen.length}/${popSize}. Retrying with forced alternative mutations...`,
+                    'warn',
+                );
+
+                let recoveryAttempts = 0;
+                while (nextGen.length < popSize && recoveryAttempts < popSize * BREED_ATTEMPT_MULTIPLIER) {
+                    recoveryAttempts++;
+                    try {
+                        const parentEntry = tournamentSelect();
+                        const parentSerialized = await serializeGenome(parentEntry.genome);
+                        const { genome: candidate } = await deserializeGenome(parentSerialized);
+
+                        let acceptedGenome: Genome | null = null;
+                        let mutationLabel = 'recovery_mutation';
+                        for (let m = 0; m < STRUCTURAL_RETRY_ATTEMPTS && !acceptedGenome; m++) {
+                            const options = [
+                                () => candidate.MutateAddNode(maxNodes),
+                                () => candidate.MutateRemoveNode(),
+                                () => candidate.MutateRemoveSubgraph(),
+                                ...(settings.mutationRates.addSkipConnection ? [() => candidate.MutateAddSkipConnection(maxNodes)] : []),
+                                ...(settings.mutationRates.changeLayerType ? [() => candidate.MutateChangeLayerType(maxNodes)] : []),
+                            ];
+
+                            const pickedIndex = Math.floor(Math.random() * options.length);
+                            const result = options[pickedIndex]();
+                            if (!result) {
+                                continue;
+                            }
+
+                            const nodes = result.genome.getAllNodes();
+                            if (!Genome.isGenomeFeasible(nodes)) {
+                                continue;
+                            }
+                            const mem = validateBudget(result.genome);
+                            if (!mem.ok) {
+                                continue;
+                            }
+
+                            acceptedGenome = result.genome;
+                            mutationLabel = ['add_node', 'remove_node', 'remove_subgraph', 'add_skip_connection', 'change_layer_type'][pickedIndex] || 'recovery_mutation';
+                        }
+
+                        if (!acceptedGenome) {
+                            continue;
+                        }
+
+                        const childId = crypto.randomUUID();
+                        const mutationType: MutationType = {
+                            type: 'ParameterMutation',
+                            data: { layer_id: 'graph', param_name: mutationLabel },
+                        };
+                        const mutationParams: Record<string, unknown> = { recovery: true, last_structural_mutation: mutationLabel };
+
+                        await registerGenealogyEvent(
+                            childId,
+                            nextGenNum,
+                            [parentEntry.id],
+                            mutationType,
+                            mutationParams,
+                        );
+
+                        nextGen.push({
+                            id: childId,
+                            genome: acceptedGenome,
+                            nodes: acceptedGenome.getAllNodes(),
+                            generation: nextGenNum,
+                            parent_ids: [parentEntry.id],
+                            mutation_type: mutationType,
+                            mutation_params: mutationParams,
+                        });
+                    } catch {
+                        continue;
+                    }
+                }
+            }
+
+            if (nextGen.length < popSize && nextGen.length > 0) {
+                addLog(
+                    `Unable to produce enough distinct valid children under current constraints (${nextGen.length}/${popSize}). Filling the remainder with elite clones.`,
+                    'warn',
+                );
+
+                let fallbackIndex = 0;
+                while (nextGen.length < popSize) {
+                    const fallbackParent = evaluatedPop[fallbackIndex % Math.max(1, eliteCount)];
+                    fallbackIndex++;
+
+                    const fallbackSerialized = await serializeGenome(fallbackParent.genome);
+                    const { genome: fallbackClone } = await deserializeGenome(fallbackSerialized);
+                    const fallbackNodes = fallbackClone.getAllNodes();
+
+                    if (!Genome.isGenomeFeasible(fallbackNodes)) {
+                        continue;
+                    }
+                    const fallbackBudget = validateBudget(fallbackClone);
+                    if (!fallbackBudget.ok) {
+                        continue;
+                    }
+
+                    const fallbackId = crypto.randomUUID();
+                    await registerGenealogyEvent(
+                        fallbackId,
+                        nextGenNum,
+                        [fallbackParent.id],
+                        { type: 'Random' },
+                        { fallback_fill: true },
+                    );
+
+                    nextGen.push({
+                        id: fallbackId,
+                        genome: fallbackClone,
+                        nodes: fallbackNodes,
+                        generation: nextGenNum,
+                        parent_ids: [fallbackParent.id],
+                        mutation_type: { type: 'Random' },
+                        mutation_params: { fallback_fill: true },
+                    });
                 }
             }
 
@@ -972,12 +1394,28 @@ export const useEvolutionLoop = ({ datasetProfileId, settings, datasetProfiles }
 
         } catch (err) {
             console.error('evaluate_population error:', err);
-            addLog(`Evaluation failed: ${String(err)}`, "error");
-            // Don't auto-stop - let user manually click Stop to investigate
-            // stopEvolution();
+            const msg = String(err);
+            addLog(`Evaluation failed: ${msg}`, "error");
+
+            if (
+                msg.includes('No training batches could be assembled') ||
+                msg.includes('ipc protocol failed') ||
+                msg.includes('Failed to fetch') ||
+                msg.includes('panicked during training/validation') ||
+                msg.includes('corrupted WGPU state') ||
+                msg.includes('Another evaluation is already running')
+            ) {
+                addLog(
+                    'Evolution stopped: backend runtime entered an invalid state. Stop and restart Tauri app before the next run.',
+                    'warn',
+                );
+                stopEvolution();
+            }
+        } finally {
+            generationRunInFlightRef.current = false;
         }
 
-    }, [datasetProfileId, generation, population, settings, addLog, stopEvolution]);
+    }, [datasetProfileId, generation, population, settings, addLog, stopEvolution, getGenomeBudgetValidator]);
 
     const startEvolution = useCallback((seedGenomes: string[]) => {
         try {

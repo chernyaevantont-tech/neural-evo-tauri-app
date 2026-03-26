@@ -2,6 +2,7 @@ import type { EvolutionSettingsState, MemoryMode, ObjectiveWeightKey, SecondaryO
 
 const PRESET_STORAGE_KEY = 'evolution-settings-preset-v1';
 const LAST_USED_STORAGE_KEY = 'evolution-settings-last-used-v1';
+const MB_TO_BYTES = 1024 * 1024;
 
 export interface EvolutionSettingsPreset {
     mobjEnabled: boolean;
@@ -60,6 +61,29 @@ export function applySettingsPreset(settings: EvolutionSettingsState, preset: Ev
     settings.setDeviceProfileId(preset.deviceProfileId);
     settings.setIsCustomDevice(preset.isCustomDevice);
     settings.setCustomDeviceParams(preset.customDeviceParams);
+
+    // Keep byte-based resource targets aligned with device constraints shown in UI.
+    if (preset.customDeviceParams) {
+        const ramMb = Math.max(0, preset.customDeviceParams.ram_mb ?? 0);
+        const flashMb = Math.max(
+            0,
+            preset.customDeviceParams.flash_mb ??
+                preset.customDeviceParams.max_model_size_mb ??
+                0,
+        );
+        const mops = Math.max(0, preset.customDeviceParams.mops_budget ?? 0);
+
+        if (ramMb > 0) {
+            settings.setResourceTarget('ram', Math.round(ramMb * MB_TO_BYTES));
+        }
+        if (flashMb > 0) {
+            settings.setResourceTarget('flash', Math.round(flashMb * MB_TO_BYTES));
+        }
+        if (mops > 0) {
+            settings.setResourceTarget('macs', Math.round(mops * 1_000_000));
+        }
+    }
+
     settings.setShowOnlyFeasible(preset.showOnlyFeasible);
     settings.setStoppingPolicy(preset.stoppingPolicy);
     settings.setProfilingEnabled(preset.profilingEnabled);

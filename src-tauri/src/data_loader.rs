@@ -1,7 +1,7 @@
 use burn::backend::Autodiff;
 use burn::backend::Wgpu;
 use burn::backend::wgpu::WgpuDevice;
-use burn::tensor::Tensor;
+use burn::tensor::{Tensor, TensorData};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -651,13 +651,18 @@ impl DataLoader {
                         }
                     };
 
-                    let tensor_1d = Tensor::<Backend, 1>::from_floats(pixels.as_slice(), device);
-                    let tensor_4d = tensor_1d.reshape([
-                        1,
-                        channels as usize,
-                        target_h as usize,
-                        target_w as usize,
-                    ]);
+                    let tensor_4d = Tensor::<Backend, 4>::from_data(
+                        TensorData::new(
+                            pixels,
+                            [
+                                1,
+                                channels as usize,
+                                target_h as usize,
+                                target_w as usize,
+                            ],
+                        ),
+                        device,
+                    );
                     tensors.insert(idx, DynamicTensor::Dim4(tensor_4d));
                 }
                 DataType::Vector => {
@@ -676,8 +681,11 @@ impl DataLoader {
                             .collect();
 
                         if !vals.is_empty() {
-                            let tensor = Tensor::<Backend, 1>::from_floats(vals.as_slice(), device);
-                            let tensor_2d = tensor.reshape([1, vals.len()]);
+                            let vals_len = vals.len();
+                            let tensor_2d = Tensor::<Backend, 2>::from_data(
+                                TensorData::new(vals, [1, vals_len]),
+                                device,
+                            );
                             tensors.insert(idx, DynamicTensor::Dim2(tensor_2d));
                         } else {
                             return Err(format!(

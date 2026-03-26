@@ -199,6 +199,29 @@ describe('randomArchitectureGenerator', () => {
             expect(result!.dataTypeHint).toBe('Image');
         });
 
+        it('should normalize legacy CHW image shapes to HWC', () => {
+            const streams = [
+                {
+                    role: 'Input' as const,
+                    tensorShape: [3, 240, 320],
+                    dataType: 'Image' as const
+                },
+                {
+                    role: 'Target' as const,
+                    tensorShape: [5],
+                    dataType: 'Categorical' as const,
+                    numClasses: 5
+                }
+            ];
+
+            const result = extractShapesFromDatasetProfile(streams);
+
+            expect(result).toBeDefined();
+            expect(result!.inputShape).toEqual([240, 320, 3]);
+            expect(result!.outputShape).toEqual([5]);
+            expect(result!.dataTypeHint).toBe('Image');
+        });
+
         it('should return null when no input stream exists', () => {
             const streams = [
                 {

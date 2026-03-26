@@ -1,10 +1,26 @@
 import { BaseNode, ResourceCriteria } from "../base_node";
 
+function normalizeImageShapeToHwc(shape: number[]): number[] {
+    if (shape.length !== 3) {
+        return [...shape];
+    }
+
+    const [a, b, c] = shape;
+    const firstIsChannel = a <= 4 && b > 4 && c > 4;
+    const lastIsChannel = c <= 4 && a > 4 && b > 4;
+
+    if (firstIsChannel && !lastIsChannel) {
+        return [b, c, a];
+    }
+
+    return [...shape];
+}
+
 export class InputNode extends BaseNode {
 
     constructor(outputShape: number[]) {
         super()
-        this.outputShape = [...outputShape]
+        this.outputShape = normalizeImageShapeToHwc(outputShape)
     }
 
     protected CalculateOutputShape(): void { }
