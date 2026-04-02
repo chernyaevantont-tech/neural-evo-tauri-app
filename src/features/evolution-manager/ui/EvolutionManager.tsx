@@ -3,6 +3,7 @@ import styles from './EvolutionManager.module.css';
 import { useEvolutionSettingsStore, CrossoverStrategy, getAdaptiveMutationRates } from '../model/store';
 import { useCanvasGenomeStore } from '../../../entities/canvas-genome';
 import { useCanvasStateStore } from '../../../entities/canvas-state';
+import { Logger } from '../../../shared/lib/logger';
 
 export const EvolutionManager: React.FC = () => {
     const settings = useEvolutionSettingsStore();
@@ -44,7 +45,7 @@ export const EvolutionManager: React.FC = () => {
         let mutatedResult = null;
 
         const nodesInGenomeCount = useCanvasGenomeStore.getState().genomeNode.get(targetGenomeEntry.id)?.length || "?";
-        console.log(`[Mutate Current] Selected genome ${targetGenomeEntry.id} with ${nodesInGenomeCount} nodes to undergo mutation.`);
+        Logger.debug('MutateCurrent', `Selected genome ${targetGenomeEntry.id} with ${nodesInGenomeCount} nodes to undergo mutation.`);
 
         const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
 
@@ -63,7 +64,7 @@ export const EvolutionManager: React.FC = () => {
             };
 
         if (rRemoveSubgraph < dynamicRates.removeSubgraph) {
-            console.log(`[Mutate Current] Rolled ${rRemoveSubgraph.toFixed(2)} < ${dynamicRates.removeSubgraph.toFixed(2)}. Firing RemoveSubgraph mutation...`);
+            Logger.debug('MutateCurrent', `Rolled ${rRemoveSubgraph.toFixed(2)} < ${dynamicRates.removeSubgraph.toFixed(2)}. Firing RemoveSubgraph mutation...`);
             try {
                 mutatedResult = targetGenome.MutateRemoveSubgraph();
             } catch (e) {
@@ -72,7 +73,7 @@ export const EvolutionManager: React.FC = () => {
         }
 
         if (!mutatedResult && rRemove < dynamicRates.removeNode) {
-            console.log(`[Mutate Current] Rolled ${rRemove.toFixed(2)} < ${dynamicRates.removeNode.toFixed(2)}. Firing RemoveNode mutation...`);
+            Logger.debug('MutateCurrent', `Rolled ${rRemove.toFixed(2)} < ${dynamicRates.removeNode.toFixed(2)}. Firing RemoveNode mutation...`);
             try {
                 mutatedResult = targetGenome.MutateRemoveNode();
             } catch (e) {
@@ -82,7 +83,7 @@ export const EvolutionManager: React.FC = () => {
 
         // If remove didn't trigger or failed, maybe add node triggers
         if (!mutatedResult && rAdd < dynamicRates.addNode) {
-            console.log(`[Mutate Current] Rolled ${rAdd.toFixed(2)} < ${dynamicRates.addNode.toFixed(2)}. Firing AddNode mutation...`);
+            Logger.debug('MutateCurrent', `Rolled ${rAdd.toFixed(2)} < ${dynamicRates.addNode.toFixed(2)}. Firing AddNode mutation...`);
             try {
                 mutatedResult = targetGenome.MutateAddNode(maxNodes);
             } catch (e) {
@@ -94,7 +95,7 @@ export const EvolutionManager: React.FC = () => {
         const rChange = Math.random();
 
         if (!mutatedResult && rSkip < settings.mutationRates.addSkipConnection) {
-            console.log(`[Mutate Current] Rolled ${rSkip.toFixed(2)} < ${settings.mutationRates.addSkipConnection}. Firing AddSkipConnection mutation...`);
+            Logger.debug('MutateCurrent', `Rolled ${rSkip.toFixed(2)} < ${settings.mutationRates.addSkipConnection}. Firing AddSkipConnection mutation...`);
             try {
                 mutatedResult = targetGenome.MutateAddSkipConnection(maxNodes);
             } catch (e) {
@@ -103,7 +104,7 @@ export const EvolutionManager: React.FC = () => {
         }
 
         if (!mutatedResult && rChange < settings.mutationRates.changeLayerType) {
-            console.log(`[Mutate Current] Rolled ${rChange.toFixed(2)} < ${settings.mutationRates.changeLayerType}. Firing ChangeLayerType mutation...`);
+            Logger.debug('MutateCurrent', `Rolled ${rChange.toFixed(2)} < ${settings.mutationRates.changeLayerType}. Firing ChangeLayerType mutation...`);
             try {
                 mutatedResult = targetGenome.MutateChangeLayerType(maxNodes);
             } catch (e) {
@@ -112,7 +113,7 @@ export const EvolutionManager: React.FC = () => {
         }
 
         if (mutatedResult) {
-            console.log(`[Mutate Current] Mutation successful. Spawning new genome descendant!`);
+            Logger.debug('MutateCurrent', 'Mutation successful. Spawning new genome descendant!');
             const store = useCanvasGenomeStore.getState();
             const canvasState = useCanvasStateStore.getState();
             store.addGenome(
@@ -162,7 +163,7 @@ export const EvolutionManager: React.FC = () => {
         }
 
         const chosenStrategy = activeStrategies[Math.floor(Math.random() * activeStrategies.length)];
-        console.log(`[Breed Current] Selected strategy: ${chosenStrategy} between ${recipientIdx} and ${donorIdx}`);
+        Logger.debug('BreedCurrent', `Selected strategy: ${chosenStrategy} between ${recipientIdx} and ${donorIdx}`);
 
         // Try breed 10 times to find valid insertion or replacement
         let result = null;

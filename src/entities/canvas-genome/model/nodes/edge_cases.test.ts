@@ -1,13 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { useCanvasGenomeStore } from './../store';
 import { DenseNode } from './layers/dense_node';
 import { InputNode } from './layers/input_node';
 import { Conv2DNode } from './layers/conv_node';
 import { OutputNode } from './layers/output_node';
-import { BaseNode } from './base_node';
+import { FlattenNode } from './layers/flatten_node';
 import { AddNode } from './merge/add_node';
 import { Concat2DNode } from './merge/concatinate_2d_node';
-import { FlattenNode } from './layers/flatten_node';
 
 describe('Graph Logic Edge Cases', () => {
 

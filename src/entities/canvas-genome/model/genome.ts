@@ -1,9 +1,10 @@
 import { BaseNode } from "./nodes/base_node"
 import { Conv2DNode } from "./nodes/layers/conv_node"
 import { DenseNode } from "./nodes/layers/dense_node"
-import { FlattenNode } from "./nodes/layers/flatten_node"
 import { PoolingNode } from "./nodes/layers/pooling_node"
 import { AddNode } from "./nodes/merge/add_node"
+import { ShapeAdapterFactory } from "../lib/shapeAdapter"
+import { Logger } from "../../../shared/lib/logger"
 
 /** Max parameter count for a single Dense layer (matches Rust guard: 50M params ~= 200MB) */
 const MAX_DENSE_PARAMS = 50_000_000;
@@ -276,7 +277,7 @@ export class Genome {
 
             if (!inputCompatible) {
                 // Пытаемся создать адаптер
-                const adapter = this.createAdapter(fromNode.GetOutputShape(), subgenomeInputNode.GetInputShape());
+                const adapter = ShapeAdapterFactory.createAdapter(fromNode.GetOutputShape(), subgenomeInputNode.GetInputShape());
                 if (adapter) {
                     inputAdapters = adapter;
                 } else {
@@ -290,7 +291,7 @@ export class Genome {
 
             if (!outputCompatible) {
                 // Пытаемся создать адаптер
-                const adapter = this.createAdapter(subgenomeOutputNode.GetOutputShape(), toNode.GetInputShape());
+                const adapter = ShapeAdapterFactory.createAdapter(subgenomeOutputNode.GetOutputShape(), toNode.GetInputShape());
                 if (adapter) {
                     outputAdapters = adapter;
                 } else {
@@ -316,109 +317,6 @@ export class Genome {
         const selectedPoint = validInsertionPoints[Math.floor(Math.random() * validInsertionPoints.length)];
 
         return selectedPoint;
-    }
-
-    // Вспомогательная функция для создания адаптеров между несовместимыми формами
-    private createAdapter(fromShape: number[], toShape: number[]): BaseNode[] | null {
-        const adapters: BaseNode[] = [];
-
-        // Случай 1: 3D -> 3D (различные пространственные размеры или каналы)
-        if (fromShape.length === 3 && toShape.length === 3) {
-            const [fromH, fromW, fromC] = fromShape;
-            const [toH, toW, toC] = toShape;
-
-            // Если нужно изменить пространственные размеры
-            if (fromH !== toH || fromW !== toW) {
-                // Определяем, нужно уменьшать или увеличивать
-                const needDownsample = fromH > toH || fromW > toW;
-
-                if (needDownsample) {
-                    // Используем pooling для уменьшения
-                    const hRatio = fromH / toH;
-                    const wRatio = fromW / toW;
-
-                    // Выбираем stride чтобы приблизиться к целевому размеру
-                    const stride = Math.max(2, Math.floor(Math.min(hRatio, wRatio)));
-                    const kernelSize = { h: stride, w: stride };
-
-                    adapters.push(new PoolingNode('max', kernelSize, stride, 0));
-
-                    // После pooling пересчитываем размер
-                    const newH = Math.floor((fromH - kernelSize.h) / stride + 1);
-                    const newW = Math.floor((fromW - kernelSize.w) / stride + 1);
-
-                    // Если всё ещё не совпадает, пробуем conv2d с подходящим stride
-                    if (newH !== toH || newW !== toW) {
-                        const remainingHRatio = newH / toH;
-                        const remainingWRatio = newW / toW;
-                        const convStride = Math.max(1, Math.floor(Math.min(remainingHRatio, remainingWRatio)));
-
-                        adapters.push(new Conv2DNode(
-                            fromC,
-                            { h: 3, w: 3 },
-                            convStride,
-                            1,
-                            1,
-                            true
-                        ));
-                    }
-                } else {
-                    // Для upsampling используем conv2d с padding
-                    // (в реальности нужна транспонированная свёртка, но упростим)
-                    return null; // Upsampling пока не поддерживается
-                }
-            }
-
-            // Если нужно изменить количество каналов
-            if (fromC !== toC) {
-                // Используем Conv2D 1x1 для изменения количества каналов
-                adapters.push(new Conv2DNode(
-                    toC,
-                    { h: 1, w: 1 },
-                    1,
-                    0,
-                    1,
-                    true
-                ));
-            }
-
-            return adapters.length > 0 ? adapters : null;
-        }
-
-        // Случай 2: 3D -> 1D (нужен Flatten)
-        if (fromShape.length === 3 && toShape.length === 1) {
-            adapters.push(new FlattenNode());
-
-            // Flatten makes the shape 1D with size H*W*C.
-            // If the target explicitly requires a different size (e.g. it's an AddNode),
-            // we must add a Dense layer to bridge the sizes.
-            const flattenedSize = fromShape[0] * fromShape[1] * fromShape[2];
-            if (flattenedSize !== toShape[0]) {
-                adapters.push(new DenseNode(toShape[0], 'relu', true));
-            }
-
-            return adapters;
-        }
-
-        // Случай 3: 1D -> 1D (различное количество нейронов или другие параметры)
-        // Для Dense слоёв количество нейронов предыдущего слоя обычно становится 
-        // input_shape следующего слоя при сборке. Но если мы вставляем AddNode, 
-        // нам нужно строгое совпадение размерности, поэтому мы генерируем линейный Dense-адаптер.
-        if (fromShape.length === 1 && toShape.length === 1) {
-            if (fromShape[0] !== toShape[0]) {
-                adapters.push(new DenseNode(toShape[0], 'relu', false));
-                return adapters;
-            }
-            return null; // Адаптер не требуется, просто соединяем напрямую
-        }
-
-        // Случай 4: 1D -> 3D (очень сложно, не поддерживается)
-        if (fromShape.length === 1 && toShape.length === 3) {
-            return null; // Reshape из 1D в 3D пока не поддерживается
-        }
-
-        // Неизвестный случай
-        return null;
     }
 
     public Breed(genome: Genome, maxNodes?: number): { genome: Genome, nodes: BaseNode[], isValid: boolean } | null {
@@ -558,7 +456,7 @@ export class Genome {
             const isCompatible = prevNodeOriginal.CheckCompability(nextNodeOriginal);
 
             if (!isCompatible) {
-                const newAdapters = this.createAdapter(prevNodeOriginal.GetOutputShape(), nextNodeOriginal.GetInputShape());
+                const newAdapters = ShapeAdapterFactory.createAdapter(prevNodeOriginal.GetOutputShape(), nextNodeOriginal.GetInputShape());
                 if (newAdapters) {
                     adapters = newAdapters;
                 } else {
@@ -731,7 +629,7 @@ export class Genome {
             const isCompatible = prevNodeOriginal.CheckCompability(nextNodeOriginal);
 
             if (!isCompatible) {
-                const newAdapters = this.createAdapter(prevNodeOriginal.GetOutputShape(), nextNodeOriginal.GetInputShape());
+                const newAdapters = ShapeAdapterFactory.createAdapter(prevNodeOriginal.GetOutputShape(), nextNodeOriginal.GetInputShape());
                 if (newAdapters) {
                     adapters = newAdapters;
                 } else {
@@ -882,7 +780,7 @@ export class Genome {
             // Connection 1: fromNodeOriginal -> [adapter1?] -> newLayer
             let inputAdapters: BaseNode[] = [];
             if (!fromNodeOriginal.CheckCompability(newLayer)) {
-                const adapters = this.createAdapter(fromNodeOriginal.GetOutputShape(), newLayer.GetInputShape());
+                const adapters = ShapeAdapterFactory.createAdapter(fromNodeOriginal.GetOutputShape(), newLayer.GetInputShape());
                 if (adapters) {
                     inputAdapters = adapters;
                 } else {
@@ -900,7 +798,7 @@ export class Genome {
             // Connection 2: newLayer -> [adapter2?] -> toNodeOriginal
             let outputAdapters: BaseNode[] = [];
             if (!newLayer.CheckCompability(toNodeOriginal)) {
-                const adapters = this.createAdapter(newLayer.GetOutputShape(), toNodeOriginal.GetInputShape());
+                const adapters = ShapeAdapterFactory.createAdapter(newLayer.GetOutputShape(), toNodeOriginal.GetInputShape());
                 if (adapters) {
                     outputAdapters = adapters;
                 } else {
@@ -908,8 +806,8 @@ export class Genome {
                 }
             }
 
-            console.log(`[MutateAddNode] Breaking edge ${fromNodeOriginal.id} -> ${toNodeOriginal.id}`);
-            console.log(`[MutateAddNode] Generated random layer: ${newLayer.GetNodeType()}`);
+            Logger.debug('MutateAddNode', `Breaking edge ${fromNodeOriginal.id} -> ${toNodeOriginal.id}`);
+            Logger.debug('MutateAddNode', `Generated random layer: ${newLayer.GetNodeType()}`);
 
             try {
                 // 5. Build the new Genome by cloning the graph and routing the selected edge through the new nodes
@@ -998,7 +896,7 @@ export class Genome {
                     return null;
                 }
 
-                console.log(`[MutateAddNode] Mutation successful. Inserted layer + ${inputAdapters.length + outputAdapters.length} adapters. New graph size: ${newNodes.length}`);
+                Logger.debug('MutateAddNode', `Mutation successful. Inserted layer + ${inputAdapters.length + outputAdapters.length} adapters. New graph size: ${newNodes.length}`);
 
                 if (!Genome.isGenomeFeasible(newNodes)) return null;
 
@@ -1068,7 +966,7 @@ export class Genome {
                 let isCompatible = true;
 
                 if (sourceShapeOrig.length !== targetShape.length || !sourceShapeOrig.every((val, i) => val === targetShape[i])) {
-                    const ad = this.createAdapter(sourceShapeOrig, targetShape);
+                    const ad = ShapeAdapterFactory.createAdapter(sourceShapeOrig, targetShape);
                     if (ad) {
                         adapters = ad;
                     } else {
@@ -1166,7 +1064,7 @@ export class Genome {
                     return null;
                 }
 
-                console.log(`[MutateAddSkipConnection] Added skip connection from ${sourceOrig.GetNodeType()} to AddNode before ${targetOrig.GetNodeType()}. Adapters: ${adapters.length}`);
+                Logger.debug('MutateAddSkipConnection', `Added skip connection from ${sourceOrig.GetNodeType()} to AddNode before ${targetOrig.GetNodeType()}. Adapters: ${adapters.length}`);
 
                 if (!Genome.isGenomeFeasible(newNodes)) return null;
 
@@ -1271,8 +1169,8 @@ export class Genome {
                     const childInputShape = oldChild.GetInputShape();
 
                     let adapters: BaseNode[] = [];
-                    if (newOutputShape.length !== childInputShape.length || !newOutputShape.every((val, i) => val === childInputShape[i])) {
-                        const ad = this.createAdapter(newOutputShape, childInputShape);
+                    if (newOutputShape.length !== childInputShape.length || !newOutputShape.every((val: number, i: number) => val === childInputShape[i])) {
+                        const ad = ShapeAdapterFactory.createAdapter(newOutputShape, childInputShape);
                         if (ad) {
                             adapters = ad;
                         } else {
@@ -1321,7 +1219,7 @@ export class Genome {
                     return null;
                 }
 
-                console.log(`[MutateChangeLayerType] Replaced ${targetNodeOrig.GetNodeType()} with ${newLayer.GetNodeType()}`);
+                Logger.debug('MutateChangeLayerType', `Replaced ${targetNodeOrig.GetNodeType()} with ${newLayer.GetNodeType()}`);
 
                 if (!Genome.isGenomeFeasible(finalNodes)) return null;
 
@@ -1347,9 +1245,6 @@ export class Genome {
                 const recipientSubgenomeOriginal = this._getRandomSubgenome();
                 if (!recipientSubgenomeOriginal || recipientSubgenomeOriginal.length === 0) continue;
 
-                const cutFromNodeId = recipientSubgenomeOriginal[0].id;
-                const cutToNodeId = recipientSubgenomeOriginal[recipientSubgenomeOriginal.length - 1].id;
-
                 // What node comes before the cut? What comes after?
                 // Notice that `_getRandomSubgenome()` guarantees nodes have exactly 1 input and 1 output.
                 const recipientPrevOriginal = recipientSubgenomeOriginal[0].previous[0];
@@ -1369,7 +1264,7 @@ export class Genome {
                 let inputAdapters: BaseNode[] = [];
                 let inputCompatible = recipientPrevOriginal.CheckCompability(donorSubgenome[0]);
                 if (!inputCompatible) {
-                    const adapter = this.createAdapter(recipientPrevOriginal.GetOutputShape(), donorInShape);
+                    const adapter = ShapeAdapterFactory.createAdapter(recipientPrevOriginal.GetOutputShape(), donorInShape);
                     if (adapter) {
                         inputAdapters = adapter;
                     } else {
@@ -1381,7 +1276,7 @@ export class Genome {
                 let outputAdapters: BaseNode[] = [];
                 let outputCompatible = donorSubgenome[donorSubgenome.length - 1].CheckCompability(recipientNextOriginal);
                 if (!outputCompatible) {
-                    const adapter = this.createAdapter(donorOutShape, recipientNextOriginal.GetInputShape());
+                    const adapter = ShapeAdapterFactory.createAdapter(donorOutShape, recipientNextOriginal.GetInputShape());
                     if (adapter) {
                         outputAdapters = adapter;
                     } else {
@@ -1498,7 +1393,7 @@ export class Genome {
                     continue; // Rollover and try a smaller replacement
                 }
 
-                console.log(`[BreedByReplacement] Replaced a ${recipientSubgenomeOriginal.length}-node subgraph with a ${donorSubgenome.length}-node subgraph from donor!`);
+                Logger.debug('BreedByReplacement', `Replaced a ${recipientSubgenomeOriginal.length}-node subgraph with a ${donorSubgenome.length}-node subgraph from donor!`);
 
                 if (!Genome.isGenomeFeasible(newNodes)) return null;
 
@@ -1625,14 +1520,14 @@ export class Genome {
 
             // Check dimensions to create adapters if necessary
             if (!anchorPrev.CheckCompability(clonedTransplant)) {
-                const adapters = this.createAdapter(anchorPrev.GetOutputShape(), clonedTransplant.GetInputShape());
+                const adapters = ShapeAdapterFactory.createAdapter(anchorPrev.GetOutputShape(), clonedTransplant.GetInputShape());
                 if (adapters) inputAdapters = adapters;
                 else return null; // Reject crossover if incompatible bounds
             }
             if (inputAdapters.length > 0) clonedTransplant.CheckCompability(inputAdapters[inputAdapters.length - 1]);
 
             if (!clonedTransplant.CheckCompability(anchorNext)) {
-                const adapters = this.createAdapter(clonedTransplant.GetOutputShape(), anchorNext.GetInputShape());
+                const adapters = ShapeAdapterFactory.createAdapter(clonedTransplant.GetOutputShape(), anchorNext.GetInputShape());
                 if (adapters) outputAdapters = adapters;
                 else return null;
             }
@@ -1701,7 +1596,7 @@ export class Genome {
                 return null;
             }
 
-            console.log(`[BreedNeatStyle] Inserted disjoint node ${clonedTransplant.GetNodeType()} between anchors!`);
+            Logger.debug('BreedNeatStyle', `Inserted disjoint node ${clonedTransplant.GetNodeType()} between anchors!`);
 
             if (!Genome.isGenomeFeasible(newNodes)) return null;
 
@@ -1834,14 +1729,14 @@ export class Genome {
                 let outAdapters: BaseNode[] = [];
 
                 if (!fromNode.CheckCompability(subIn)) {
-                    const ad = this.createAdapter(fromNode.GetOutputShape(), subIn.GetInputShape());
+                    const ad = ShapeAdapterFactory.createAdapter(fromNode.GetOutputShape(), subIn.GetInputShape());
                     if (ad) inAdapters = ad;
                     else continue; // Cannot connect
                 }
                 if (inAdapters.length > 0) subIn.CheckCompability(inAdapters[inAdapters.length - 1]);
 
                 if (!subOut.CheckCompability(toNode)) {
-                    const ad = this.createAdapter(subOut.GetOutputShape(), toNode.GetInputShape());
+                    const ad = ShapeAdapterFactory.createAdapter(subOut.GetOutputShape(), toNode.GetInputShape());
                     if (ad) outAdapters = ad;
                     else continue;
                 }

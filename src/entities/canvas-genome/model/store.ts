@@ -8,6 +8,7 @@ import { Genome } from './genome';
 import { v4 } from 'uuid';
 import { BaseNode } from './nodes/base_node';
 import { calculateLayoutForNewGraph } from '../lib/calculateLayout';
+import { Logger } from '../../../shared/lib/logger';
 
 interface CanvasGenomeState {
     nodes: Map<string, VisualNode>;
@@ -56,76 +57,71 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
                 state.genomeNode.set(newGenomeId, [newVisualNode]);
             }),
         editNode: (nodeId, node) => {
-            try {
-                set(state => {
-                    const oldVisualNode = state.nodes.get(nodeId);
-                    if (oldVisualNode) {
+            set(state => {
+                const oldVisualNode = state.nodes.get(nodeId);
+                if (!oldVisualNode) return;
 
-                        const inConnections: string[] = [];
-                        const outConnections: string[] = [];
+                const inConnections: string[] = [];
+                const outConnections: string[] = [];
 
-                        state.connections.forEach((conn) => {
-                            if (conn.toNodeId == nodeId) {
-                                inConnections.push(conn.fromNodeId);
-                                state.nodes.get(conn.fromNodeId)!.node.RemoveNext(oldVisualNode.node as BaseNode);
-                            }
-                            if (conn.fromNodeId == nodeId) {
-                                outConnections.push(conn.toNodeId);
-                                oldVisualNode.node.RemoveNext(state.nodes.get(conn.toNodeId)!.node as BaseNode);
-                            }
-                        });
-
-                        const updatedVisualNode: VisualNode = {
-                            ...oldVisualNode,
-                            node: node,
-                        };
-
-                        state.nodes.delete(nodeId);
-                        state.nodes.set(node.id, updatedVisualNode);
-
-                        const genomeId = updatedVisualNode.genomeId;
-
-                        state.genomeNode.set(
-                            genomeId,
-                            [...state.genomeNode.get(genomeId)!.filter(n => n.node.id != nodeId), updatedVisualNode]
-                        );
-
-                        const newConns = new Map<string, Connection>();
-
-                        inConnections.forEach(fromId => {
-                            const fromNode = state.nodes.get(fromId);
-                            if (fromNode && fromNode.node.CheckCompability(node as BaseNode)) {
-                                fromNode.node.AddNext(node);
-                                const connId = v4();
-                                newConns.set(connId, { id: connId, fromNodeId: fromId, toNodeId: node.id });
-                            } else {
-                                throw new Error();
-                            }
-                        });
-
-                        outConnections.forEach(toId => {
-                            const toNode = state.nodes.get(toId);
-                            if (toNode && node.CheckCompability(toNode.node as BaseNode)) {
-                                node.AddNext(toNode.node as BaseNode);
-                                const connId = v4();
-                                newConns.set(connId, { id: connId, fromNodeId: node.id, toNodeId: toId });
-                            } else {
-                                throw new Error();
-                            }
-                        });
-
-                        state.connections.forEach((conn, connId) => {
-                            if (conn.fromNodeId != nodeId && conn.toNodeId != nodeId) {
-                                newConns.set(connId, conn);
-                            }
-                        });
-
-                        state.connections = newConns;
+                state.connections.forEach((conn) => {
+                    if (conn.toNodeId == nodeId) {
+                        inConnections.push(conn.fromNodeId);
+                        state.nodes.get(conn.fromNodeId)!.node.RemoveNext(oldVisualNode.node as BaseNode);
                     }
-                })
-            } catch (e) {
-                return e
-            }
+                    if (conn.fromNodeId == nodeId) {
+                        outConnections.push(conn.toNodeId);
+                        oldVisualNode.node.RemoveNext(state.nodes.get(conn.toNodeId)!.node as BaseNode);
+                    }
+                });
+
+                const updatedVisualNode: VisualNode = {
+                    ...oldVisualNode,
+                    node: node,
+                };
+
+                state.nodes.delete(nodeId);
+                state.nodes.set(node.id, updatedVisualNode);
+
+                const genomeId = updatedVisualNode.genomeId;
+
+                state.genomeNode.set(
+                    genomeId,
+                    [...state.genomeNode.get(genomeId)!.filter(n => n.node.id != nodeId), updatedVisualNode]
+                );
+
+                const newConns = new Map<string, Connection>();
+
+                inConnections.forEach(fromId => {
+                    const fromNode = state.nodes.get(fromId);
+                    if (fromNode && fromNode.node.CheckCompability(node as BaseNode)) {
+                        fromNode.node.AddNext(node);
+                        const connId = v4();
+                        newConns.set(connId, { id: connId, fromNodeId: fromId, toNodeId: node.id });
+                    } else {
+                        throw new Error();
+                    }
+                });
+
+                outConnections.forEach(toId => {
+                    const toNode = state.nodes.get(toId);
+                    if (toNode && node.CheckCompability(toNode.node as BaseNode)) {
+                        node.AddNext(toNode.node as BaseNode);
+                        const connId = v4();
+                        newConns.set(connId, { id: connId, fromNodeId: node.id, toNodeId: toId });
+                    } else {
+                        throw new Error();
+                    }
+                });
+
+                state.connections.forEach((conn, connId) => {
+                    if (conn.fromNodeId != nodeId && conn.toNodeId != nodeId) {
+                        newConns.set(connId, conn);
+                    }
+                });
+
+                state.connections = newConns;
+            });
         },
         deleteNode: (deletingNodeId) =>
             set(state => {
@@ -218,11 +214,11 @@ export const useCanvasGenomeStore = create<CanvasGenomeState>()(
 
                 if (fromNode && toNode) {
 
-                    console.log("from node:\n", fromNode.node.GetInfo(), fromNode.node.GetInputShape());
-                    console.log("to node:\n", toNode.node.GetInfo(), toNode.node.GetInputShape());
+                    Logger.debug('ConnectNodes', `from node: ${fromNode.node.GetInfo()}`);
+                    Logger.debug('ConnectNodes', `to node: ${toNode.node.GetInfo()}`);
 
                     if (fromNode.node.CheckCompability(toNode.node as BaseNode)) {
-                        console.log("a");
+                        Logger.debug('ConnectNodes', 'Nodes are compatible, connecting');
 
                         fromNode.node.AddNext(toNode.node as BaseNode);
 

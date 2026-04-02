@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { Genome } from './genome';
 import { InputNode } from './nodes/layers/input_node';
 import { OutputNode } from './nodes/layers/output_node';
@@ -582,9 +582,8 @@ describe('Genome Compatibility Tests', () => {
 
             // Try to create a cycle
             expect(() => { output.AddNext(dense1); }).not.toThrow(); // AddNext doesn't validate cycles
-            
+
             // But genome validation should catch it
-            const genome = new Genome([input], [output]);
             // Cycles are checked during structural validation
         });
 
@@ -622,8 +621,6 @@ describe('Genome Compatibility Tests', () => {
             prevNode.AddNext(output);
 
             // Network should be feasible
-            const allNodes: BaseNode[] = [];
-            let current: BaseNode | null = prevNode;
             // This is a deep network but should still be valid
             expect(output.GetOutputShape()).toEqual([50]);
         });
@@ -896,7 +893,7 @@ describe('Genome Compatibility Tests', () => {
     describe('Serialization Compatibility', () => {
         it('should serialize and deserialize Conv1D architecture', async () => {
             const { serializeGenome } = await import('../lib/serializeGenome');
-            const { deserializeGenome } = await import('../lib/deserializeGenome');
+            await import('../lib/deserializeGenome');
 
             const input = new InputNode([100, 12]);
             const conv1d = new Conv1DNode(64, 3, 1, 0, 1, true, 'relu');

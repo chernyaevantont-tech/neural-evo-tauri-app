@@ -1,6 +1,4 @@
-import { RandomizeInteger } from "../../../../../lib/random";
 import { BaseNode, ResourceCriteria } from "../base_node";
-import type { ActivationFunction } from "../types";
 
 export class MultiHeadAttentionNode extends BaseNode {
     private nHeads: number;

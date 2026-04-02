@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import styles from './CreateDatasetModal.module.css';
 import { BsFolder, BsXLg } from 'react-icons/bs';
-import { DatasetSourceType, DatasetProfile, useDatasetManagerStore, defaultAugmentation } from '../../features/dataset-manager/model/store';
+import { DatasetProfile, useDatasetManagerStore, defaultAugmentation } from '../../features/dataset-manager/model/store';
 import { invoke } from '@tauri-apps/api/core';
 
 interface Props {

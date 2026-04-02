@@ -14,7 +14,7 @@ import {
     BatchNormNode,
     LayerNormNode
 } from "..";
-import type { KernelSize, ActivationFunction, PoolType } from "../model/nodes/types";
+import type { KernelSize } from "../model/nodes/types";
 import { RandomizeInteger } from "../../../lib/random";
 
 // Helper functions for randomness
@@ -45,7 +45,6 @@ export const generateRandomArchitecture = (
     }
 ): Genome => {
     const maxDepth = options?.maxDepth ?? 8;
-    const useAttention = options?.useAttention ?? false;
     const dataTypeHint = options?.dataTypeHint;
 
     const nodes: BaseNode[] = [];
@@ -69,7 +68,7 @@ export const generateRandomArchitecture = (
             currentNode = buildTabularPath(nodes, currentNode, depth);
         } else if (dataTypeHint === 'TemporalSequence' || !dataTypeHint) {
             // Temporal data: route to Conv1D/LSTM/GRU path
-            currentNode = buildSequentialPath(nodes, currentNode, depth, useAttention);
+            currentNode = buildSequentialPath(nodes, currentNode, depth);
         }
     } else if (inputDimensions === 1) {
         // Dense vector: [features]
@@ -155,7 +154,6 @@ const buildSequentialPath = (
     nodes: BaseNode[],
     currentNode: BaseNode,
     depth: number,
-    useAttention: boolean
 ): BaseNode => {
     let currentDepth = 0;
 

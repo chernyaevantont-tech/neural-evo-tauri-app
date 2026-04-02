@@ -1,5 +1,4 @@
 import React from 'react';
-import styles from './DatasetManagerPage.module.css';
 import { DatasetValidationReport } from '../../features/dataset-manager/model/store';
 import { BsCheckCircle, BsExclamationTriangle, BsExclamationCircle } from 'react-icons/bs';
 
@@ -17,7 +16,6 @@ export const DatasetValidationPanel: React.FC<Props> = ({ validationReport }) =>
     const isValid = validationReport?.is_valid ?? false;
 
     const hasErrors = issues.some(i => i.severity === 'ERROR');
-    const hasWarnings = issues.some(i => i.severity === 'WARNING');
 
     return (
         <div style={{

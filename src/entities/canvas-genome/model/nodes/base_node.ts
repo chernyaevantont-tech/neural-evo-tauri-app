@@ -21,7 +21,6 @@ export abstract class BaseNode {
     abstract GetInfo(): string
     abstract GetResources(dtype: number): ResourceCriteria
     protected abstract Mutate(mutation_options: Map<string, number>): void
-    protected abstract Mutate(mutation_options: Map<string, number>): void
 
     /** Returns how many dimensions this node expects its input tensor to have. */
     public abstract GetExpectedInputDimensions(): number | "any";

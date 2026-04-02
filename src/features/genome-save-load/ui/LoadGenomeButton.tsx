@@ -1,4 +1,3 @@
-import { BaseNode, Genome } from "../../../entities/canvas-genome";
 import { Button, LoadIcon } from "../../../shared"
 import { useLoadGenome } from "../model/useLoadGenome";
 

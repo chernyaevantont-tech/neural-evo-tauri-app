@@ -8,8 +8,8 @@ class DummyNode extends BaseNode {
     GetInfo(): string { return ""; }
     GetResources(): ResourceCriteria { return { flash: 0, ram: 0, macs: 0 }; }
     protected Mutate(): void { }
-    CheckCompability(node: BaseNode): boolean { return true; }
-    CheckCompabilityDisconnected(node: BaseNode): boolean { return true; }
+    CheckCompability(_node: BaseNode): boolean { return true; }
+    CheckCompabilityDisconnected(_node: BaseNode): boolean { return true; }
     public GetNodeType = () => "Dummy";
     protected _CloneImpl = (): BaseNode => new DummyNode();
     public GetIsMerging = () => false;

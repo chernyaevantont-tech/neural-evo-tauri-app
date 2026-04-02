@@ -199,7 +199,6 @@ describe("GRUNode", () => {
         // Both with same hidden_units and input_size
         // GRU flash = 3 * gates, LSTM flash = 4 * gates
         // So GRU should be ~75% of LSTM
-        const ratio = 3 / 4;
         expect(gruResources.flash).toBeLessThan(98304 * 4); // LSTM flash approximation
     });
 });

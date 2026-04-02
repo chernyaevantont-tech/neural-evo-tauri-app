@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styles from './GenomeLibraryPage.module.css';
 import { TitleBar } from '../../widgets/title-bar/TitleBar';
-import { BsCollection, BsBoxArrowUpRight, BsTrash, BsSearch, BsFileEarmarkPlus } from 'react-icons/bs';
+import { BsCollection, BsBoxArrowUpRight, BsTrash, BsFileEarmarkPlus } from 'react-icons/bs';
 import { useGenomeLibraryStore, GenomeLibraryEntry, CompatibilityStatus } from '../../features/genome-library';
 import { checkCompatibility } from '../../features/genome-library/lib/compatibility';
 import { GenomePreviewCanvas } from '../../features/genome-library/ui/GenomePreviewCanvas';

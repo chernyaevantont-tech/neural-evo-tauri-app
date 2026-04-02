@@ -14,7 +14,6 @@ describe('FlattenNode', () => {
     });
 
     it('requires 3D input to begin with', () => {
-        const input1D = new InputNode([128]);
         const input3D = new InputNode([28, 28, 3]);
         const flatten = new FlattenNode();
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { BsBoxArrowInDown } from 'react-icons/bs';
 import { useCanvasStateStore } from '../../../entities/canvas-state';
 import { useCanvasGenomeStore } from '../../../entities/canvas-genome/model/store';

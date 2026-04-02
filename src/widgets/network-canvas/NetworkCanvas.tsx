@@ -1,15 +1,9 @@
-import React, { CSSProperties, RefObject, useEffect, useRef } from 'react';
+import React, { CSSProperties, useEffect, useRef } from 'react';
 import { Node, useCanvasGenomeStore } from '../../entities/canvas-genome';
 import { ConnectionLine } from '../../entities/canvas-genome';
 import { theme } from '../../shared/lib';
 import { MenuType } from '../side-menu/SideMenu';
 import { useCanvasStateStore } from '../../entities/canvas-state';
-import { ContextMenu } from '../../shared/ui/ContextMenu/ContextMenu';
-import { CopyNodeContextMenuItem } from '../../features/copy-node';
-import { EditNodeContextMenuItem } from '../../features/edit-node';
-import { DeleteNodeContextMenuItem } from '../../features/delete-node';
-import { DeleteGenomeContextMenuItem } from '../../features/delete-genome';
-import { DeleteConnectionContextMenuItem } from '../../features/delete-connection';
 import { useContinueMovingNode, useEndDraggingNode, useStartDraggingNode } from '../../features/dragging-move-node';
 import { useContinueCanvasPanning, useEndCanvasPanning, useStartCanvasPanning } from '../../features/canvas-panning';
 import { useResizeCanvas } from '../../features/resize-canvas';
@@ -90,7 +84,7 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     );
   }
 
-  const onMouseUp = (e: React.MouseEvent) => {
+  const onMouseUp = (_e: React.MouseEvent) => {
     canvasEndMovingNodeHandle();
     canvasEndPaddingHandle();
   }

@@ -91,7 +91,7 @@ export const getRecommendedEpochs = (
 export const calculateHybridFitness = (
   zeroCostScore: number,
   accuracy: number | null,
-  config: ZeroCostConfig
+  _config: ZeroCostConfig
 ): number => {
   if (accuracy !== null) {
     // Architecture was trained, use actual accuracy
@@ -113,7 +113,6 @@ export const estimateTimeSavings = (
   config: ZeroCostConfig
 ): { savedTime: number; speedup: number } => {
   // Estimate: (1 - avgProxyScore) * populationSize will be skipped/quick-trained
-  const quickTrainRatio = Math.max(0, 1 - avgProxyScore * 0.7); // 70% of high-scorers get full training
   const avgQuickTrainingTime = (fullTrainingTime * config.partialTrainingEpochs) / 100; // Rough estimate
 
   const timeWithProxy =

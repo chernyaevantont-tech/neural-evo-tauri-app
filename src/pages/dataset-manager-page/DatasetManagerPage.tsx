@@ -14,7 +14,7 @@ export const DatasetManagerPage: React.FC = () => {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isScanning, setIsScanning] = useState(false);
     const [isCaching, setIsCaching] = useState(false);
-    const [isValidating, setIsValidating] = useState(false);
+    const [_isValidating, setIsValidating] = useState(false);
 
     const getIcon = (type: DatasetSourceType) => {
         switch (type) {

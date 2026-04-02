@@ -57,7 +57,6 @@ describe('Concat2DNode', () => {
 
     it('compatibility check validates H and W matches', () => {
         const input1 = new InputNode([28, 28, 16]);
-        const input2 = new InputNode([14, 14, 32]);
         const concat = new Concat2DNode();
 
         input1.AddNext(concat);

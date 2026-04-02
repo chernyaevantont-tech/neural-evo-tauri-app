@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { TitleBar } from '../../widgets/title-bar/TitleBar';
 import styles from './EvolutionStudioPage.module.css';
-import { useNavigate } from 'react-router-dom';
-import { BsArrowLeft, BsPlay, BsStop, BsPlus, BsX } from 'react-icons/bs';
+import { BsPlay, BsStop, BsPlus, BsX } from 'react-icons/bs';
 import { useEvolutionLoop } from '../../features/evolution-studio/model/useEvolutionLoop';
 import { useEvolutionSettingsStore } from '../../features/evolution-manager/model/store';
 import { useDatasetManagerStore } from '../../features/dataset-manager/model/store';
@@ -40,7 +39,6 @@ ChartJS.register(
 );
 
 export const EvolutionStudioPage: React.FC = () => {
-    const navigate = useNavigate();
     const datasetProfileId = useDatasetManagerStore(state => state.selectedProfileId);
     const {
         isRunning,
@@ -51,7 +49,6 @@ export const EvolutionStudioPage: React.FC = () => {
         hallOfFame,
         stats,
         logs,
-        runGeneration,
         currentEvaluatingIndex,
         liveMetrics,
         generationHistory

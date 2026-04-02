@@ -155,9 +155,8 @@ import { invoke } from '@tauri-apps/api/core';
 
 // Custom storage engine for Zustand persist using our Tauri commands
 const tauriStorage: StateStorage = {
-    getItem: async (name: string): Promise<string | null> => {
+    getItem: async (_name: string): Promise<string | null> => {
         try {
-            // we only have one file, so we ignore 'name' but we could use it if needed
             const data = await invoke<string>('load_dataset_profiles');
             return data || null;
         } catch (err) {
@@ -165,14 +164,14 @@ const tauriStorage: StateStorage = {
             return null;
         }
     },
-    setItem: async (name: string, value: string): Promise<void> => {
+    setItem: async (_name: string, value: string): Promise<void> => {
         try {
             await invoke('save_dataset_profiles', { profilesJson: value });
         } catch (err) {
             console.error('Failed to save dataset profiles:', err);
         }
     },
-    removeItem: async (name: string): Promise<void> => {
+    removeItem: async (_name: string): Promise<void> => {
         // Not implemented / needed for this use case
     },
 };

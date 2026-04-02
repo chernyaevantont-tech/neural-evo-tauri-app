@@ -28,8 +28,6 @@ describe('useCanvasGenomeStore', () => {
 
     it('connects two compat node properly and merges genomes', () => {
         const store = useCanvasGenomeStore.getState();
-        const input = new InputNode([28, 28, 3]);
-        const flatten = new DenseNode(128, "relu", true); // Dense logic accepts 1D, but wait - input is 3D so it'll fail.
 
         // We use properly matched pairs
         const dense1 = new DenseNode(10, "softmax", true);

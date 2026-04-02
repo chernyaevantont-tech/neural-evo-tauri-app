@@ -856,6 +856,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
         }
     }, [datasetProfileId, addLog, initPopulation, settings]);
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         if (isRunning && population.length > 0) {
             // Need a slight delay to allow React rendering/logging to flush
@@ -864,6 +865,7 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             }, 100);
             return () => clearTimeout(timer);
         }
+        return;
     }, [isRunning, population, runGeneration]);
 
     return {

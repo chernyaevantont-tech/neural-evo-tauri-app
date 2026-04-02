@@ -1,4 +1,4 @@
-import { Genome, VisualGenome } from "../../../entities/canvas-genome"
+import { Genome } from "../../../entities/canvas-genome"
 import { Button, SaveIcon } from "../../../shared"
 import { useSaveGenome } from "../model/useSaveGenome"
 

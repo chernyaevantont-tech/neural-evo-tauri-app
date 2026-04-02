@@ -41,7 +41,7 @@ export class BatchNormNode extends BaseNode {
         };
     }
 
-    protected Mutate(mutation_options: Map<string, number>): void {
+    protected Mutate(_mutation_options: Map<string, number>): void {
         // Mutations for BatchNorm parameters could be added here if needed
     }
 

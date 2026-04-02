@@ -16,10 +16,10 @@ export class FlattenNode extends BaseNode {
             params: {}
         })
     }
-    GetResources(dtype: number): ResourceCriteria {
+    GetResources(_dtype: number): ResourceCriteria {
         return { flash: 0, ram: 0, macs: 0 }
     }
-    protected Mutate(mutation_options: Map<string, number>): void { }
+    protected Mutate(_mutation_options: Map<string, number>): void { }
 
     public GetExpectedInputDimensions(): number | "any" {
         return "any";
