@@ -76,6 +76,33 @@ export interface EvolutionSettingsState {
     setFastPassThreshold: (val: number) => void;
     partialTrainingEpochs: number;
     setPartialTrainingEpochs: (val: number) => void;
+
+    // === Multi-Objective Optimization (Pareto Front) ===
+    useMultiObjective: boolean;
+    setUseMultiObjective: (val: boolean) => void;
+
+    // Stopping Criteria for multi-objective mode
+    stoppingCriteria: {
+        useHypervolumeConvergence: boolean;
+        hypervolumeThreshold: number;
+        convergencePatience: number;
+        useTargetQuality: boolean;
+        targetQuality: number;
+    };
+    setStoppingCriteria: (criteria: Partial<EvolutionSettingsState['stoppingCriteria']>) => void;
+
+    // Resource Constraints (hard constraints for feasibility)
+    resourceConstraints: {
+        useHardConstraints: boolean;
+        maxFlashKB?: number;
+        maxRamKB?: number;
+        maxMacs?: number;
+    };
+    setResourceConstraints: (constraints: Partial<EvolutionSettingsState['resourceConstraints']>) => void;
+
+    // Pareto Archive settings
+    paretoFrontSize: number;
+    setParetoFrontSize: (val: number) => void;
 }
 
 export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) => ({
@@ -155,6 +182,34 @@ export const useEvolutionSettingsStore = create<EvolutionSettingsState>((set) =>
     setFastPassThreshold: (val) => set({ fastPassThreshold: Math.max(0, Math.min(1, val)) }),
     partialTrainingEpochs: 20,
     setPartialTrainingEpochs: (val) => set({ partialTrainingEpochs: Math.max(1, Math.min(100, val)) }),
+
+    // === Multi-Objective Optimization ===
+    useMultiObjective: false,  // Default: single-objective mode (backward compatible)
+    setUseMultiObjective: (val) => set({ useMultiObjective: val }),
+
+    stoppingCriteria: {
+        useHypervolumeConvergence: false,
+        hypervolumeThreshold: 0.001,
+        convergencePatience: 10,
+        useTargetQuality: false,
+        targetQuality: 90
+    },
+    setStoppingCriteria: (criteria) => set((state) => ({
+        stoppingCriteria: { ...state.stoppingCriteria, ...criteria }
+    })),
+
+    resourceConstraints: {
+        useHardConstraints: false,
+        maxFlashKB: undefined,
+        maxRamKB: undefined,
+        maxMacs: undefined
+    },
+    setResourceConstraints: (constraints) => set((state) => ({
+        resourceConstraints: { ...state.resourceConstraints, ...constraints }
+    })),
+
+    paretoFrontSize: 20,
+    setParetoFrontSize: (val) => set({ paretoFrontSize: Math.max(5, Math.min(100, val)) }),
 }));
 
 export function getAdaptiveMutationRates(currentNodes: number) {

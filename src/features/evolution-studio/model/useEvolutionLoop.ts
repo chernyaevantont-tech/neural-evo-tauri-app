@@ -4,6 +4,9 @@ import { useEvolutionSettingsStore, getAdaptiveMutationRates } from '../../evolu
 import { useDatasetManagerStore } from '../../../features/dataset-manager/model/store';
 import { Genome, BaseNode, serializeGenome, deserializeGenome, generateRandomArchitecture, extractShapesFromDatasetProfile } from '../../../entities/canvas-genome';
 import { computeZeroCostScore, ZeroCostMetrics } from './useZeroCostEvaluation';
+import { createObjectiveVector, checkConstraints, ObjectiveVector } from './multiObjectiveFitness';
+import { nonDominatedSorting } from './paretoSorting';
+import { ConvergenceChecker } from './convergenceChecker';
 
 export interface EvaluationResult {
     genome_id: string;
@@ -21,6 +24,11 @@ export interface PopulatedGenome {
     trainingMetrics?: BatchMetrics[];
     resources?: { totalFlash: number; totalRam: number; totalMacs: number; totalNodes: number };
     zeroCostMetric?: ZeroCostMetrics;
+    // Multi-objective fields
+    objectives?: ObjectiveVector;
+    paretoRank?: number;
+    crowdingDistance?: number;
+    isFeasible?: boolean;
 }
 
 export interface LogEntry {
@@ -71,10 +79,16 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
     const [currentEvaluatingIndex, setCurrentEvaluatingIndex] = useState<number>(0);
     const [liveMetrics, setLiveMetrics] = useState<BatchMetrics[]>([]);
     const [generationHistory, setGenerationHistory] = useState<GenerationSnapshot[]>([]);
+    
+    // Pareto Archive for multi-objective mode
+    const [paretoArchive, setParetoArchive] = useState<PopulatedGenome[]>([]);
 
     // Per-genome metrics accumulator (ref to avoid re-renders on every batch)
     const perGenomeMetricsRef = useRef<Map<number, BatchMetrics[]>>(new Map());
     const activeGenomeIndexRef = useRef<number>(0);
+    
+    // Convergence checker for multi-objective mode
+    const convergenceCheckerRef = useRef<ConvergenceChecker | null>(null);
 
     // Using refs for safe async access within loops
     const isRunningRef = useRef(false);
@@ -529,6 +543,50 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                     }
                 }
 
+                // === MULTI-OBJECTIVE MODE ===
+                if (settings.useMultiObjective) {
+                    // Create objective vector
+                    const wasSkipped = zeroCostMetric?.strategy_decision === 'skip';
+                    const objectives = createObjectiveVector(
+                        res.accuracy,
+                        zeroCostMetric?.normalized_score,
+                        resources,
+                        wasSkipped || false
+                    );
+
+                    // Check resource constraints
+                    const constraintCheck = checkConstraints(objectives, {
+                        maxFlashKB: settings.resourceConstraints.useHardConstraints 
+                            ? settings.resourceConstraints.maxFlashKB 
+                            : undefined,
+                        maxRamKB: settings.resourceConstraints.useHardConstraints 
+                            ? settings.resourceConstraints.maxRamKB 
+                            : undefined,
+                        maxMacs: settings.resourceConstraints.useHardConstraints 
+                            ? settings.resourceConstraints.maxMacs 
+                            : undefined
+                    });
+                    
+                    // Attach per-genome training metrics
+                    const genomeMetrics = perGenomeMetricsRef.current.get(index) || [];
+
+                    return {
+                        ...p,
+                        loss: res.loss,
+                        accuracy: res.accuracy,
+                        objectives,
+                        paretoRank: 0,  // Will be calculated after sorting
+                        crowdingDistance: 0,
+                        isFeasible: constraintCheck.isFeasible,
+                        adjustedFitness: baseFitness,  // Keep for backward compat
+                        trainingMetrics: genomeMetrics,
+                        resources,
+                        zeroCostMetric,
+                    } as PopulatedGenome;
+                }
+
+                // === SINGLE-OBJECTIVE MODE (existing logic) ===
+                
                 // Resource-Aware Fitness penalty
                 if (settings.useResourceAwareFitness) {
                     const flashPenalty = Math.max(0, resources.totalFlash - settings.resourceTargets.flash) / settings.resourceTargets.flash;
@@ -552,19 +610,75 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                 } as PopulatedGenome;
             });
 
-            // 4. Sort by Adjusted Fitness (descending)
-            evaluatedPop.sort((a, b) => (b.adjustedFitness || 0) - (a.adjustedFitness || 0));
-
+            // === SORTING ===
+            if (settings.useMultiObjective) {
+                // Multi-objective: Pareto sorting
+                const paretoItems = evaluatedPop.map(p => ({ id: p.id, vector: p.objectives! }));
+                const rankings = nonDominatedSorting(paretoItems);
+                
+                // Apply rankings to population
+                for (const p of evaluatedPop) {
+                    const ranking = rankings.get(p.id)!;
+                    p.paretoRank = ranking.rank;
+                    p.crowdingDistance = ranking.crowdingDistance;
+                }
+                
+                // Sort by Pareto rank then crowding distance
+                evaluatedPop.sort((a, b) => {
+                    const rankDiff = (a.paretoRank || 0) - (b.paretoRank || 0);
+                    if (rankDiff !== 0) return rankDiff;
+                    return (b.crowdingDistance || 0) - (a.crowdingDistance || 0);
+                });
+                
+                const frontSize = evaluatedPop.filter(p => p.paretoRank === 0).length;
+                addLog(`Generation ${generation} complete. Pareto front: ${frontSize} solutions.`, "success");
+            } else {
+                // Single-objective: Sort by adjusted fitness (descending)
+                evaluatedPop.sort((a, b) => (b.adjustedFitness || 0) - (a.adjustedFitness || 0));
+            }
+            
+            // Get best genome for stats (single-objective mode)
             const best = evaluatedPop[0];
-            addLog(`Generation ${generation} complete. Best Fitness: ${best.adjustedFitness?.toFixed(4)} (Nodes: ${best.nodes.length})`, "success");
+            
+            if (!settings.useMultiObjective) {
+                addLog(`Generation ${generation} complete. Best Fitness: ${best.adjustedFitness?.toFixed(4)} (Nodes: ${best.nodes.length})`, "success");
+            } else {
+                const frontSize = evaluatedPop.filter(p => p.paretoRank === 0).length;
+                addLog(`Generation ${generation} complete. Pareto front: ${frontSize} solutions.`, "success");
+            }
 
-            // Update Hall of Fame (keep top 5 overall)
-            setHallOfFame(prev => {
-                const combined = [...prev, best].sort((a, b) => (b.adjustedFitness || 0) - (a.adjustedFitness || 0));
-                // Ensure uniqueness by ID or hash
-                const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
-                return unique.slice(0, 5);
-            });
+            // Update Hall of Fame (keep top 5 overall) - SINGLE-OBJECTIVE MODE
+            if (!settings.useMultiObjective) {
+                setHallOfFame(prev => {
+                    const combined = [...prev, best].sort((a, b) => (b.adjustedFitness || 0) - (a.adjustedFitness || 0));
+                    const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+                    return unique.slice(0, 5);
+                });
+            }
+            
+            // === PARETO ARCHIVE (Multi-Objective Mode) ===
+            if (settings.useMultiObjective) {
+                setParetoArchive(prev => {
+                    // Combine with current evaluated population
+                    const combined = [...prev, ...evaluatedPop];
+                    
+                    // Sort by Pareto ranking
+                    const paretoItems = combined.map(p => ({ id: p.id, vector: p.objectives! }));
+                    const rankings = nonDominatedSorting(paretoItems);
+                    
+                    // Get front 0 (non-dominated solutions)
+                    const front0 = combined.filter(p => rankings.get(p.id)!.rank === 0);
+                    
+                    // Sort by crowding distance (diverse first)
+                    front0.sort((a, b) => 
+                        (rankings.get(b.id)!.crowdingDistance || 0) - 
+                        (rankings.get(a.id)!.crowdingDistance || 0)
+                    );
+                    
+                    // Limit archive size
+                    return front0.slice(0, settings.paretoFrontSize);
+                });
+            }
 
             // Update stats history
             const avgNodes = Math.round(evaluatedPop.reduce((acc, p) => acc + p.nodes.length, 0) / evaluatedPop.length);
@@ -595,7 +709,38 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             // 5. Check if we should stop
             if (!isRunningRef.current) return;
 
-            // Max generations auto-stop
+            // === MULTI-OBJECTIVE: Convergence-based stopping ===
+            if (settings.useMultiObjective && settings.stoppingCriteria.useHypervolumeConvergence) {
+                // Initialize checker if needed
+                if (!convergenceCheckerRef.current) {
+                    convergenceCheckerRef.current = new ConvergenceChecker(settings.stoppingCriteria);
+                }
+                
+                // Get Pareto front (rank 0)
+                const paretoFront = evaluatedPop
+                    .filter(p => p.paretoRank === 0)
+                    .map(p => ({ id: p.id, vector: p.objectives! }));
+                
+                // Check convergence
+                const report = convergenceCheckerRef.current.checkConvergence(paretoFront);
+                
+                if (report.shouldStop && report.reason) {
+                    addLog(
+                        `Evolution converged: ${report.reason}. ` +
+                        `Hypervolume: ${report.metrics.hypervolume.toFixed(4)}, ` +
+                        `Improvement: ${report.metrics.hypervolumeImprovement.toFixed(6)}, ` +
+                        `Generations without improvement: ${report.metrics.generationsWithoutImprovement}, ` +
+                        `Pareto front size: ${report.metrics.frontSize}`,
+                        "success"
+                    );
+                    setIsRunning(false);
+                    isRunningRef.current = false;
+                    invoke('stop_evolution').catch(() => { });
+                    return;
+                }
+            }
+
+            // Max generations auto-stop (existing logic)
             if (settings.useMaxGenerations && generation + 1 >= settings.maxGenerations) {
                 addLog(`Reached max generations limit (${settings.maxGenerations}). Stopping evolution.`, "warn");
                 setIsRunning(false);
@@ -615,11 +760,34 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
                 nextGen.push(evaluatedPop[i]);
             }
 
-            // Simple Tournament Selection
+            // === SELECTION ===
+            // Simple Tournament Selection (single-objective)
             const tournamentSelect = () => {
                 const i1 = Math.floor(Math.random() * popSize);
                 const i2 = Math.floor(Math.random() * popSize);
                 return (evaluatedPop[i1].adjustedFitness || 0) > (evaluatedPop[i2].adjustedFitness || 0) ? evaluatedPop[i1] : evaluatedPop[i2];
+            };
+            
+            // Pareto Tournament Selection (multi-objective)
+            const tournamentSelectPareto = () => {
+                const i1 = Math.floor(Math.random() * popSize);
+                const i2 = Math.floor(Math.random() * popSize);
+                const p1 = evaluatedPop[i1];
+                const p2 = evaluatedPop[i2];
+                
+                // Compare by Pareto rank first (lower is better)
+                const rank1 = p1.paretoRank || 0;
+                const rank2 = p2.paretoRank || 0;
+                
+                if (rank1 !== rank2) {
+                    return rank1 < rank2 ? p1 : p2;
+                }
+                
+                // Same rank: compare by crowding distance (higher is better for diversity)
+                const dist1 = p1.crowdingDistance || 0;
+                const dist2 = p2.crowdingDistance || 0;
+                
+                return dist1 > dist2 ? p1 : p2;
             };
 
             const maxNodes = settings.useMaxNodesLimit ? settings.maxNodesLimit : undefined;
@@ -628,8 +796,10 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
             while (nextGen.length < popSize && breedAttempts < popSize * 10) {
                 breedAttempts++;
                 try {
-                    const parentA = tournamentSelect()!.genome;
-                    const parentB = tournamentSelect()!.genome;
+                    // Select parents based on mode
+                    const selectParent = settings.useMultiObjective ? tournamentSelectPareto : tournamentSelect;
+                    const parentA = selectParent()!.genome;
+                    const parentB = selectParent()!.genome;
 
                     // Crossover
                     let childGenome: Genome | null = null;
@@ -875,9 +1045,10 @@ export const useEvolutionLoop = (datasetProfileId: string | null) => {
         generation,
         population,
         hallOfFame,
+        paretoArchive,  // New: Pareto Archive for multi-objective mode
         logs,
         stats,
-        runGeneration, // Exposed to be called manually or via useEffect
+        runGeneration,
         currentEvaluatingIndex,
         liveMetrics,
         generationHistory

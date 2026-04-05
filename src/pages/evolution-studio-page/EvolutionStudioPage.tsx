@@ -12,6 +12,7 @@ import { EvolutionSettingsPanel } from './EvolutionSettingsPanel';
 import { PopulatedGenome, GenerationSnapshot } from '../../features/evolution-studio/model/useEvolutionLoop';
 import { GenomeSvgPreview } from '../../entities/canvas-genome/ui/GenomeSvgPreview/GenomeSvgPreview';
 import { InspectGenomeModal } from './InspectGenomeModal';
+import { ParetoFrontChart } from '../../features/evolution-studio/ui/ParetoFrontChart';
 import {
     Chart as ChartJS,
     CategoryScale,
@@ -47,6 +48,7 @@ export const EvolutionStudioPage: React.FC = () => {
         generation,
         population,
         hallOfFame,
+        paretoArchive,  // New: Pareto Archive for multi-objective mode
         stats,
         logs,
         currentEvaluatingIndex,
@@ -64,7 +66,7 @@ export const EvolutionStudioPage: React.FC = () => {
     const [inspectingGenome, setInspectingGenome] = useState<PopulatedGenome | null>(null);
 
     // Bottom panel state
-    const [bottomTab, setBottomTab] = useState<'generations' | 'log'>('generations');
+    const [bottomTab, setBottomTab] = useState<'generations' | 'pareto' | 'log'>('generations');
     const [viewingGenIndex, setViewingGenIndex] = useState(0);
     const [autoFollow, setAutoFollow] = useState(true);
     type SortKey = 'evalOrder' | 'accuracy' | 'fitness' | 'nodes';
@@ -455,7 +457,7 @@ export const EvolutionStudioPage: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Bottom Tabbed Panel: Generations / Event Log */}
+                    {/* Bottom Tabbed Panel: Generations / Pareto Front / Event Log */}
                     <div className={styles.logArea}>
                         <div className={styles.tabBar}>
                             <button
@@ -463,6 +465,14 @@ export const EvolutionStudioPage: React.FC = () => {
                                 onClick={() => setBottomTab('generations')}
                             >
                                 Generations {generationHistory.length > 0 ? `(${generationHistory.length})` : ''}
+                            </button>
+                            <button
+                                className={`${styles.tabBtn} ${bottomTab === 'pareto' ? styles.tabBtnActive : ''}`}
+                                onClick={() => setBottomTab('pareto')}
+                                disabled={!settings.useMultiObjective}
+                                title={!settings.useMultiObjective ? 'Enable Multi-Objective Mode in settings' : 'View Pareto Front'}
+                            >
+                                Pareto Front {paretoArchive.length > 0 ? `(${paretoArchive.length})` : ''}
                             </button>
                             <button
                                 className={`${styles.tabBtn} ${bottomTab === 'log' ? styles.tabBtnActive : ''}`}
@@ -587,36 +597,82 @@ export const EvolutionStudioPage: React.FC = () => {
                                 )}
                             </div>
                         )}
+                        
+                        {bottomTab === 'pareto' && (
+                            <div className={styles.paretoPanel}>
+                                <ParetoFrontChart
+                                    paretoFront={paretoArchive}
+                                    onGenomeSelect={setInspectingGenome}
+                                    selectedGenomeId={inspectingGenome?.id}
+                                />
+                            </div>
+                        )}
                     </div>
 
                 </div>
 
-                {/* Right Panel: Hall of Fame */}
+                {/* Right Panel: Hall of Fame / Pareto Archive */}
                 <div className={styles.sidePanel}>
-                    <h3 className={styles.sectionTitle}>Hall of Fame</h3>
-                    <p className={styles.panelSubtitle}>Top architectures discovered across all generations.</p>
+                    <h3 className={styles.sectionTitle}>
+                        {settings.useMultiObjective ? 'Pareto Archive' : 'Hall of Fame'}
+                    </h3>
+                    <p className={styles.panelSubtitle}>
+                        {settings.useMultiObjective 
+                            ? 'Non-dominated solutions discovered during evolution.'
+                            : 'Top architectures discovered across all generations.'}
+                    </p>
 
                     <div className={styles.fameList}>
-                        {hallOfFame.length === 0 ? (
-                            <div className={styles.emptyFame}>
-                                No champions discovered yet.
-                            </div>
-                        ) : (
-                            hallOfFame.map((champ, idx) => (
-                                <div key={champ.id} className={styles.fameCard}>
-                                    <div className={styles.fameRank}>#{idx + 1}</div>
-                                    <div className={styles.fameDetails}>
-                                        <div className={styles.fameScore}>Fitness: {champ.adjustedFitness?.toFixed(4)}</div>
-                                        <div className={styles.fameNodes}>Nodes: {champ.nodes.length}</div>
-                                    </div>
-                                    <button
-                                        className={styles.inspectBtn}
-                                        onClick={() => setInspectingGenome(champ)}
-                                    >
-                                        Inspect
-                                    </button>
+                        {settings.useMultiObjective ? (
+                            // Show Pareto Archive
+                            paretoArchive.length === 0 ? (
+                                <div className={styles.emptyFame}>
+                                    No Pareto-optimal solutions yet. Enable Multi-Objective Mode and start evolution.
                                 </div>
-                            ))
+                            ) : (
+                                paretoArchive.map((champ, idx) => (
+                                    <div key={champ.id} className={styles.fameCard}>
+                                        <div className={styles.fameRank}>#{idx + 1}</div>
+                                        <div className={styles.fameDetails}>
+                                            <div className={styles.fameScore}>
+                                                Quality: {(champ.objectives?.quality || 0) * 100 | 0}
+                                            </div>
+                                            <div className={styles.fameNodes}>
+                                                Flash: {champ.objectives?.flashKB.toFixed(0)}KB | RAM: {champ.objectives?.ramKB.toFixed(0)}KB
+                                            </div>
+                                        </div>
+                                        <button
+                                            className={styles.inspectBtn}
+                                            onClick={() => setInspectingGenome(champ)}
+                                        >
+                                            Inspect
+                                        </button>
+                                    </div>
+                                ))
+                            )
+                        ) : (
+                            // Show Hall of Fame (existing logic)
+                            hallOfFame.length === 0 ? (
+                                <div className={styles.emptyFame}>
+                                    No champions discovered yet.
+                                </div>
+                            ) : (
+                                hallOfFame.map((champ, idx) => (
+                                    <div key={champ.id} className={styles.fameCard}>
+                                        <div className={styles.fameRank}>#{idx + 1}</div>
+                                        <div className={styles.fameDetails}>
+                                            <div className={styles.fameScore}>Fitness: {champ.adjustedFitness?.toFixed(4)}</div>
+                                            <div className={styles.fameNodes}>Nodes: {champ.nodes.length}</div>
+                                        </div>
+                                        <button
+                                            className={styles.inspectBtn}
+                                            onClick={() => setInspectingGenome(champ)}
+                                        >
+                                            Inspect
+                                        </button>
+                                    </div>
+                                ))
+                            )
                         )}
                     </div>
                 </div>

@@ -211,6 +211,146 @@ export const EvolutionSettingsPanel: React.FC<EvolutionSettingsPanelProps> = ({ 
                 )}
             </div>
 
+            {/* === Multi-Objective Optimization === */}
+            <div className={styles.section}>
+                <h4 className={styles.sectionTitle}>Multi-Objective Optimization</h4>
+                <p className={styles.sectionDescription}>
+                    Optimize for multiple criteria simultaneously (accuracy, resources, performance).
+                    Uses Pareto front instead of single best model.
+                </p>
+
+                <label className={styles.checkboxLabel}>
+                    <input
+                        type="checkbox"
+                        checked={settings.useMultiObjective}
+                        onChange={e => settings.setUseMultiObjective(e.target.checked)}
+                        disabled={disabled}
+                    />
+                    <span>Enable Multi-Objective Mode</span>
+                </label>
+
+                {settings.useMultiObjective && (
+                    <>
+                        <label className={styles.checkboxLabel}>
+                            <input
+                                type="checkbox"
+                                checked={settings.stoppingCriteria.useHypervolumeConvergence}
+                                onChange={e => settings.setStoppingCriteria({ useHypervolumeConvergence: e.target.checked })}
+                                disabled={disabled}
+                            />
+                            <span>Auto-Stop on Convergence</span>
+                        </label>
+
+                        {settings.stoppingCriteria.useHypervolumeConvergence && (
+                            <>
+                                <div className={styles.subSetting}>
+                                    <span className={styles.subLabel}>Hypervolume Threshold</span>
+                                    <input
+                                        type="number"
+                                        step="0.0001"
+                                        className={styles.numberInput}
+                                        value={settings.stoppingCriteria.hypervolumeThreshold}
+                                        onChange={e => settings.setStoppingCriteria({ hypervolumeThreshold: parseFloat(e.target.value) || 0.001 })}
+                                        disabled={disabled}
+                                    />
+                                </div>
+                                <div className={styles.subSetting}>
+                                    <span className={styles.subLabel}>Patience (generations)</span>
+                                    <input
+                                        type="number"
+                                        className={styles.numberInput}
+                                        value={settings.stoppingCriteria.convergencePatience}
+                                        onChange={e => settings.setStoppingCriteria({ convergencePatience: parseInt(e.target.value) || 10 })}
+                                        disabled={disabled}
+                                    />
+                                </div>
+                            </>
+                        )}
+
+                        <label className={styles.checkboxLabel}>
+                            <input
+                                type="checkbox"
+                                checked={settings.stoppingCriteria.useTargetQuality}
+                                onChange={e => settings.setStoppingCriteria({ useTargetQuality: e.target.checked })}
+                                disabled={disabled}
+                            />
+                            <span>Stop at Target Quality</span>
+                        </label>
+
+                        {settings.stoppingCriteria.useTargetQuality && (
+                            <div className={styles.subSetting}>
+                                <span className={styles.subLabel}>Target Quality (%)</span>
+                                <input
+                                    type="number"
+                                    min="0" max="100"
+                                    className={styles.numberInput}
+                                    value={settings.stoppingCriteria.targetQuality}
+                                    onChange={e => settings.setStoppingCriteria({ targetQuality: parseInt(e.target.value) || 90 })}
+                                    disabled={disabled}
+                                />
+                            </div>
+                        )}
+
+                        <label className={styles.checkboxLabel}>
+                            <input
+                                type="checkbox"
+                                checked={settings.resourceConstraints.useHardConstraints}
+                                onChange={e => settings.setResourceConstraints({ useHardConstraints: e.target.checked })}
+                                disabled={disabled}
+                            />
+                            <span>Hard Resource Constraints</span>
+                        </label>
+
+                        {settings.resourceConstraints.useHardConstraints && (
+                            <div className={styles.resourceGroup}>
+                                <div className={styles.subSetting}>
+                                    <span className={styles.subLabel}>Max Flash (KB)</span>
+                                    <input
+                                        type="number"
+                                        className={styles.numberInput}
+                                        value={settings.resourceConstraints.maxFlashKB || 1024}
+                                        onChange={e => settings.setResourceConstraints({ maxFlashKB: parseInt(e.target.value) || undefined })}
+                                        disabled={disabled}
+                                    />
+                                </div>
+                                <div className={styles.subSetting}>
+                                    <span className={styles.subLabel}>Max RAM (KB)</span>
+                                    <input
+                                        type="number"
+                                        className={styles.numberInput}
+                                        value={settings.resourceConstraints.maxRamKB || 512}
+                                        onChange={e => settings.setResourceConstraints({ maxRamKB: parseInt(e.target.value) || undefined })}
+                                        disabled={disabled}
+                                    />
+                                </div>
+                                <div className={styles.subSetting}>
+                                    <span className={styles.subLabel}>Max MACs (M)</span>
+                                    <input
+                                        type="number"
+                                        className={styles.numberInput}
+                                        value={(settings.resourceConstraints.maxMacs || 100) / 1_000_000}
+                                        onChange={e => settings.setResourceConstraints({ maxMacs: (parseInt(e.target.value) || 100) * 1_000_000 })}
+                                        disabled={disabled}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        <div className={styles.subSetting}>
+                            <span className={styles.subLabel}>Pareto Archive Size</span>
+                            <input
+                                type="number"
+                                min="5" max="100"
+                                className={styles.numberInput}
+                                value={settings.paretoFrontSize}
+                                onChange={e => settings.setParetoFrontSize(parseInt(e.target.value) || 20)}
+                                disabled={disabled}
+                            />
+                        </div>
+                    </>
+                )}
+            </div>
+
             {/* Random Initialization */}
             <div className={styles.section}>
                 <h4 className={styles.sectionTitle}>Random Initialization</h4>
